@@ -72,6 +72,12 @@ transform_type = 'affine';
 % --- Shift-sensitivity analysis parameters --------------------------------
 shift_range   = -5:1:5;
 
+% --- Outlier removal ------------------------------------------------------
+% Pixels where an element value exceeds this percentile are excluded from
+% that element's scatter plot and Pearson r. Does not affect the grain mask
+% or registered CL image. Set to 100 to disable.
+outlier_pct = 99;
+
 % =========================================================================
 %% SECTION 2: SETUP
 % =========================================================================
@@ -160,6 +166,11 @@ if length(shift_range) > 1
             min(shift_range), max(shift_range), shift_range(2)-shift_range(1));
 else
     lprintf('  Shift test range:    %d px\n', shift_range(1));
+end
+if outlier_pct < 100
+    lprintf('  Outlier removal:     above %g-th percentile per element excluded from plots/r\n', outlier_pct);
+else
+    lprintf('  Outlier removal:     disabled (outlier_pct = 100)\n');
 end
 lprintf(SEC);
 
@@ -487,27 +498,42 @@ n_rows = ceil(n_elements / n_cols);
 figure('Name', 'CL vs. element maps', ...
        'Position', [100, 100, 400*n_cols, 350*n_rows]);
 
-r_vals = zeros(1, n_elements);
-pfit   = zeros(n_elements, 2);   % linear fit [slope, intercept] for each element
+r_vals     = zeros(1, n_elements);
+pfit       = zeros(n_elements, 2);   % linear fit [slope, intercept] for each element
+n_outliers = zeros(1, n_elements);
 
 for e = 1:n_elements
+    % Per-element outlier removal on the element axis only
+    if outlier_pct < 100
+        thresh_out = prctile(epma_px(:,e), outlier_pct);
+        keep = epma_px(:,e) <= thresh_out;
+    else
+        keep = true(size(cl_px));
+    end
+    n_outliers(e) = sum(~keep);
+    x_e = epma_px(keep, e);
+    y_e = cl_px(keep);
+
     subplot(n_rows, n_cols, e);
-    scatter(epma_px(:,e), cl_px, 2, 'filled', ...
+    scatter(x_e, y_e, 2, 'filled', ...
             'MarkerFaceAlpha', 0.08, 'MarkerFaceColor', [0.2 0.2 0.2]);
     xlabel([epma_labels{e}, ' (norm.)'], 'FontSize', 10);
     ylabel('CL intensity (norm.)', 'FontSize', 10);
-    pfit(e,:) = polyfit(epma_px(:,e), cl_px, 1);
-    xfit = linspace(min(epma_px(:,e)), max(epma_px(:,e)), 200);
+    pfit(e,:) = polyfit(x_e, y_e, 1);
+    xfit = linspace(min(x_e), max(x_e), 200);
     hold on;
     plot(xfit, polyval(pfit(e,:), xfit), 'k-', 'LineWidth', 1.5);
-    r_vals(e) = corr(epma_px(:,e), cl_px);
+    r_vals(e) = corr(x_e, y_e);
     text(0.05, 0.92, sprintf('r = %.3f', r_vals(e)), ...
          'Units', 'normalized', 'FontSize', 9, 'Color', 'k');
-    text(0.05, 0.82, sprintf('n = %d', n_grain_px), ...
+    text(0.05, 0.82, sprintf('n = %d', numel(x_e)), ...
          'Units', 'normalized', 'FontSize', 8, 'Color', [0.4 0.4 0.4]);
+    if n_outliers(e) > 0
+        text(0.05, 0.72, sprintf('%d outliers removed (>%gth pct)', n_outliers(e), outlier_pct), ...
+             'Units', 'normalized', 'FontSize', 7, 'Color', [0.7 0.2 0.2]);
+    end
     title(sprintf('CL vs. %s', epma_labels{e}));
-    xlim([0 1]); ylim([0 1]);
-    grid on; box on;
+    ylim([0 1]); grid on; box on;
 end
 
 sgtitle(sprintf('%s — CL vs. element maps (RMSE: %.2f px = %.2f µm)', ...
@@ -523,14 +549,23 @@ end
 
 % ---- Log correlations and linear fits ------------------------------------
 lprintf('\n--- PEARSON CORRELATIONS  (CL vs. element, per pixel) ---\n');
-lprintf('  n = %d pixels  |  RMSE = %.4f px = %.4f µm\n\n', n_grain_px, RMSE_px, RMSE_um);
-lprintf('  %-10s  %-12s  %-14s  %-14s\n', 'Element', 'r', 'Slope', 'Intercept');
-lprintf('  %-10s  %-12s  %-14s  %-14s\n', '----------', '------------', '--------------', '--------------');
-for e = 1:n_elements
-    lprintf('  %-10s  %-12.6f  %-14.6f  %-14.6f\n', ...
-            epma_labels{e}, r_vals(e), pfit(e,1), pfit(e,2));
+lprintf('  n_grain = %d pixels  |  RMSE = %.4f px = %.4f µm\n', n_grain_px, RMSE_px, RMSE_um);
+if outlier_pct < 100
+    lprintf('  Outlier removal: >%g-th percentile excluded per element (applied before r and fit)\n', outlier_pct);
+else
+    lprintf('  Outlier removal: disabled\n');
 end
-lprintf('  (Linear fit: CL = slope * element + intercept, both axes normalised 0-1)\n');
+lprintf('\n');
+lprintf('  %-10s  %-12s  %-14s  %-14s  %-12s  %-10s\n', ...
+        'Element', 'r', 'Slope', 'Intercept', 'n_used', 'n_removed');
+lprintf('  %-10s  %-12s  %-14s  %-14s  %-12s  %-10s\n', ...
+        '----------', '------------', '--------------', '--------------', '------------', '----------');
+for e = 1:n_elements
+    n_used = n_grain_px - n_outliers(e);
+    lprintf('  %-10s  %-12.6f  %-14.6f  %-14.6f  %-12d  %-10d\n', ...
+            epma_labels{e}, r_vals(e), pfit(e,1), pfit(e,2), n_used, n_outliers(e));
+end
+lprintf('  (Linear fit: CL = slope * element + intercept, element axis normalised 0-1)\n');
 lprintf(SEC);
 
 % =========================================================================
