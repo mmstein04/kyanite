@@ -2,7 +2,7 @@
 % CL_EPMA_REGISTRATION.m
 %
 % PURPOSE:
-%   Register a cathodoluminescence (CL) image to one or more EPMA element
+%   register a cathodoluminescence (CL) image to one or more EPMA element
 %   maps of the same grain, create a grain mask from the registered CL
 %   image, extract per-pixel chemistry and CL intensity data, and produce
 %   exploratory scatter plots of CL vs. element concentrations.
