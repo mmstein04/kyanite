@@ -479,10 +479,10 @@ for e = 1:n_elements
     pfit(e,:) = polyfit(epma_px(:,e), cl_px, 1);
     xfit = linspace(min(epma_px(:,e)), max(epma_px(:,e)), 200);
     hold on;
-    plot(xfit, polyval(pfit(e,:), xfit), 'r-', 'LineWidth', 1.5);
+    plot(xfit, polyval(pfit(e,:), xfit), 'k-', 'LineWidth', 1.5);
     r_vals(e) = corr(epma_px(:,e), cl_px);
     text(0.05, 0.92, sprintf('r = %.3f', r_vals(e)), ...
-         'Units', 'normalized', 'FontSize', 9, 'Color', 'r');
+         'Units', 'normalized', 'FontSize', 9, 'Color', 'k');
     text(0.05, 0.82, sprintf('n = %d', n_grain_px), ...
          'Units', 'normalized', 'FontSize', 8, 'Color', [0.4 0.4 0.4]);
     title(sprintf('CL vs. %s', epma_labels{e}));
