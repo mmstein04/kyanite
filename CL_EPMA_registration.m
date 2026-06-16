@@ -44,18 +44,18 @@ clear; clc; close all;
 % =========================================================================
 
 % --- File paths -----------------------------------------------------------
-input_dir  = '/Users/mstein/Library/CloudStorage/OneDrive-BowdoinCollege/Desktop/claude_test';
+input_dir  = '/Users/mstein/bin/kyanite';
 
 cl_filename = 'CL.png';
 
 % EPMA element map filenames and their labels.
 % The FIRST map in this list is used as the FIXED reference for control
 % point selection. Choose your highest-quality, highest-contrast map.
-epma_files  = {'Mn.tif', 'sumP.tif'};
-epma_labels = {'Mn', 'sumP'};
+epma_files  = { 'Fe.tif', 'Mg.tif', 'Mn.tif', 'sumZr.tif', 'sumP.tif', 'Y.tif'};
+epma_labels = { 'Fe', 'Mg', 'Mn', 'Zr', 'P', 'Y'};
 
 output_dir  = '/Users/mstein/Library/CloudStorage/OneDrive-BowdoinCollege/Desktop/claude_test';
-grain_id    = 'NA-CM-G12B8-06';
+grain_id    = 'NA-CM-G12B4-02';
 
 % --- Spatial calibration --------------------------------------------------
 epma_pixel_um = 2.0;            % µm per pixel
@@ -193,11 +193,31 @@ for e = 1:n_elements
 end
 
 % Sanity check: all EPMA maps must be the same size
-epma_sizes = cellfun(@(x) size(x,1)*1000 + size(x,2), epma_raw);
-if numel(unique(epma_sizes)) > 1
-    fclose(log_fid);
-    error(['EPMA maps are not all the same size. ' ...
-           'Check your input files before proceeding.']);
+% If maps differ in size (e.g. colorbar widths vary), crop all to the
+% smallest dimensions by trimming the right and/or bottom edges.
+epma_nrows = cellfun(@(x) size(x,1), epma_raw);
+epma_ncols = cellfun(@(x) size(x,2), epma_raw);
+min_rows = min(epma_nrows);
+min_cols = min(epma_ncols);
+
+if numel(unique(epma_nrows)) > 1 || numel(unique(epma_ncols)) > 1
+    fprintf('  EPMA maps are not all the same size — auto-cropping to %d x %d px.\n', ...
+            min_rows, min_cols);
+    lprintf('\n  NOTE: EPMA maps had inconsistent sizes (likely colorbar width variation).\n');
+    lprintf('  Auto-cropped all maps to smallest dimensions: %d rows x %d cols.\n', ...
+            min_rows, min_cols);
+    lprintf('  Per-map original sizes:\n');
+    for e = 1:n_elements
+        lprintf('    [%d] %-20s  %d x %d px', e, epma_files{e}, epma_nrows(e), epma_ncols(e));
+        if epma_nrows(e) ~= min_rows || epma_ncols(e) ~= min_cols
+            lprintf('  --> cropped %d col(s), %d row(s) from right/bottom', ...
+                    epma_ncols(e)-min_cols, epma_nrows(e)-min_rows);
+        end
+        lprintf('\n');
+    end
+    for e = 1:n_elements
+        epma_raw{e} = epma_raw{e}(1:min_rows, 1:min_cols);
+    end
 end
 
 epma_ref = epma_raw{1};
