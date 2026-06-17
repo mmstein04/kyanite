@@ -531,15 +531,37 @@ for e = 1:n_elements
     hold on;
     plot(xfit, polyval(pfit(e,:), xfit), 'k-', 'LineWidth', 1.5);
     r_vals(e) = corr(x_e, y_e);
-    text(0.05, 0.92, sprintf('r = %.3f', r_vals(e)), ...
-         'Units', 'normalized', 'FontSize', 9, 'Color', 'k');
-    text(0.05, 0.82, sprintf('n = %d  |  %d levels', numel(x_e), n_levels(e)), ...
-         'Units', 'normalized', 'FontSize', 8, 'Color', [0.4 0.4 0.4]);
+
+    % Place annotations in the emptiest corner of the scatter plot.
+    % Check point density in each of the four corners (30% of x-range,
+    % 30% of y-range), then anchor all text lines there.
+    xl     = xlim;
+    xspan  = xl(2) - xl(1);
+    cdense = [
+        sum(x_e < xl(1)+0.3*xspan & y_e > 0.7),   % top-left
+        sum(x_e > xl(2)-0.3*xspan & y_e > 0.7),   % top-right
+        sum(x_e < xl(1)+0.3*xspan & y_e < 0.3),   % bottom-left
+        sum(x_e > xl(2)-0.3*xspan & y_e < 0.3)    % bottom-right
+    ];
+    [~, bc] = min(cdense);
+    tx = [0.05 0.95 0.05 0.95];
+    ty = [0.95 0.95 0.12 0.12];
+    ha = {'left','right','left','right'};
+    va = {'top','top','bottom','bottom'};
+    dy = [-0.10 -0.10 0.10 0.10];
+
+    text(tx(bc), ty(bc), sprintf('r = %.3f', r_vals(e)), ...
+         'Units', 'normalized', 'FontSize', 9, 'Color', 'k', ...
+         'HorizontalAlignment', ha{bc}, 'VerticalAlignment', va{bc});
+    text(tx(bc), ty(bc)+dy(bc), sprintf('n = %d', numel(x_e)), ...
+         'Units', 'normalized', 'FontSize', 8, 'Color', [0.4 0.4 0.4], ...
+         'HorizontalAlignment', ha{bc}, 'VerticalAlignment', va{bc});
     if n_outliers(e) > 0
         pct_lo = (100 - inner_pct) / 2;
         pct_hi = 100 - pct_lo;
-        text(0.05, 0.72, sprintf('%d px outside %g–%gth pct', n_outliers(e), pct_lo, pct_hi), ...
-             'Units', 'normalized', 'FontSize', 7, 'Color', [0.7 0.2 0.2]);
+        text(tx(bc), ty(bc)+2*dy(bc), sprintf('%d px outside %g–%gth pct', n_outliers(e), pct_lo, pct_hi), ...
+             'Units', 'normalized', 'FontSize', 7, 'Color', [0.7 0.2 0.2], ...
+             'HorizontalAlignment', ha{bc}, 'VerticalAlignment', va{bc});
     end
     title(sprintf('CL vs. %s', epma_labels{e}));
     ylim([0 1]); grid on; box on;
