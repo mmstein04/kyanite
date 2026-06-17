@@ -46,25 +46,25 @@ clear; clc; close all;
 % --- File paths -----------------------------------------------------------
 input_dir  = '/Users/mstein/bin/kyanite';
 
-cl_filename = 'CL.png';
+cl_filename = 'RH-XA-57081X-13_CL_color.png';
 
 % EPMA element map filenames and their labels.
 % The FIRST map in this list is used as the FIXED reference for control
 % point selection. Choose your highest-quality, highest-contrast map.
-epma_files  = { 'Fe.tif', 'Mg.tif', 'Mn.tif', 'sumZr.tif', 'sumP.tif', 'Y.tif'};
-epma_labels = { 'Fe', 'Mg', 'Mn', 'Zr', 'P', 'Y'};
+epma_files  = {'RH-XA-57081X-13_Fe_Ka_8bit.tif', 'RH-XA-57081X-13_Mg_Ka_8bit.tif', 'RH-XA-57081X-13_sumP_8bit.tif'};
+epma_labels = {'Fe', 'Mg', 'sumP'};
 
-output_dir  = '/Users/mstein/Library/CloudStorage/OneDrive-BowdoinCollege/Desktop/claude_test';
-grain_id    = 'NA-CM-G12B4-02';
+output_dir  = '/Users/mstein/bin/kyanite';
+grain_id    = 'RH-XA-57081X-13';
 
 % --- Spatial calibration --------------------------------------------------
 epma_pixel_um = 2.0;            % µm per pixel
 
 % --- Mask parameters ------------------------------------------------------
-mask_method   = 'otsu';
-thresh_manual = 0.15;           % used only if mask_method = 'manual'
+mask_method   = 'manual';
+thresh_manual = 0.18;           % used only if mask_method = 'manual'
 min_object_px = 500;
-fill_holes    = true;
+fill_holes    = false;
 
 % --- Registration parameters ----------------------------------------------
 transform_type = 'affine';
@@ -73,10 +73,10 @@ transform_type = 'affine';
 shift_range   = -5:1:5;
 
 % --- Outlier removal ------------------------------------------------------
-% Pixels where an element value exceeds this percentile are excluded from
-% that element's scatter plot and Pearson r. Does not affect the grain mask
-% or registered CL image. Set to 100 to disable.
-outlier_pct = 99;
+% Only the middle inner_pct % of each element's distribution is shown in
+% scatter plots and used for Pearson r. Excludes the tails symmetrically:
+% e.g. 80 keeps the 10th–90th percentile. Set to 100 to disable.
+inner_pct = 80;
 
 % =========================================================================
 %% SECTION 2: SETUP
@@ -167,10 +167,12 @@ if length(shift_range) > 1
 else
     lprintf('  Shift test range:    %d px\n', shift_range(1));
 end
-if outlier_pct < 100
-    lprintf('  Outlier removal:     above %g-th percentile per element excluded from plots/r\n', outlier_pct);
+if inner_pct < 100
+    pct_lo = (100 - inner_pct) / 2;
+    pct_hi = 100 - pct_lo;
+    lprintf('  Outlier removal:     middle %g%% per element (%.4g–%.4gth pct) used in plots/r\n', inner_pct, pct_lo, pct_hi);
 else
-    lprintf('  Outlier removal:     disabled (outlier_pct = 100)\n');
+    lprintf('  Outlier removal:     disabled (inner_pct = 100)\n');
 end
 lprintf(SEC);
 
@@ -503,10 +505,13 @@ pfit       = zeros(n_elements, 2);   % linear fit [slope, intercept] for each el
 n_outliers = zeros(1, n_elements);
 
 for e = 1:n_elements
-    % Per-element outlier removal on the element axis only
-    if outlier_pct < 100
-        thresh_out = prctile(epma_px(:,e), outlier_pct);
-        keep = epma_px(:,e) <= thresh_out;
+    % Per-element outlier removal: keep middle inner_pct % on element axis
+    if inner_pct < 100
+        pct_lo = (100 - inner_pct) / 2;
+        pct_hi = 100 - pct_lo;
+        lo = prctile(epma_px(:,e), pct_lo);
+        hi = prctile(epma_px(:,e), pct_hi);
+        keep = epma_px(:,e) >= lo & epma_px(:,e) <= hi;
     else
         keep = true(size(cl_px));
     end
@@ -515,7 +520,7 @@ for e = 1:n_elements
     y_e = cl_px(keep);
 
     subplot(n_rows, n_cols, e);
-    scatter(x_e, y_e, 2, 'filled', ...
+    scatter(x_e, y_e, 8, 'filled', ...
             'MarkerFaceAlpha', 0.08, 'MarkerFaceColor', [0.2 0.2 0.2]);
     xlabel([epma_labels{e}, ' (norm.)'], 'FontSize', 10);
     ylabel('CL intensity (norm.)', 'FontSize', 10);
@@ -529,7 +534,9 @@ for e = 1:n_elements
     text(0.05, 0.82, sprintf('n = %d', numel(x_e)), ...
          'Units', 'normalized', 'FontSize', 8, 'Color', [0.4 0.4 0.4]);
     if n_outliers(e) > 0
-        text(0.05, 0.72, sprintf('%d outliers removed (>%gth pct)', n_outliers(e), outlier_pct), ...
+        pct_lo = (100 - inner_pct) / 2;
+        pct_hi = 100 - pct_lo;
+        text(0.05, 0.72, sprintf('%d px outside %g–%gth pct', n_outliers(e), pct_lo, pct_hi), ...
              'Units', 'normalized', 'FontSize', 7, 'Color', [0.7 0.2 0.2]);
     end
     title(sprintf('CL vs. %s', epma_labels{e}));
@@ -550,8 +557,10 @@ end
 % ---- Log correlations and linear fits ------------------------------------
 lprintf('\n--- PEARSON CORRELATIONS  (CL vs. element, per pixel) ---\n');
 lprintf('  n_grain = %d pixels  |  RMSE = %.4f px = %.4f µm\n', n_grain_px, RMSE_px, RMSE_um);
-if outlier_pct < 100
-    lprintf('  Outlier removal: >%g-th percentile excluded per element (applied before r and fit)\n', outlier_pct);
+if inner_pct < 100
+    pct_lo = (100 - inner_pct) / 2;
+    pct_hi = 100 - pct_lo;
+    lprintf('  Outlier removal: middle %g%% used (%.4g–%.4gth pct per element, applied before r and fit)\n', inner_pct, pct_lo, pct_hi);
 else
     lprintf('  Outlier removal: disabled\n');
 end
