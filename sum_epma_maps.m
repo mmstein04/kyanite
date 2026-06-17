@@ -32,8 +32,11 @@ output_dir = '/Users/mstein/bin/kyanite';
 
 % List all map filenames to be summed.
 input_files = {
+    'NA-CM-G12B4-02_Zr_La_it2.tif', ...
+    'NA-CM-G12B4-02_Zr_La_it3.tif', ...
+    'NA-CM-G12B4-02_Zr_La_it4.tif', ...
+    'NA-CM-G12B4-02_Zr_La_it6.tif', ...
     'NA-CM-G12B4-02_Zr_La_it7.tif', ...
-    'NA-CM-G12B4-02_Zr_Lb_it3.tif'
 };
 
 % Output filename (saved to output_dir).
@@ -114,7 +117,18 @@ fprintf('  Mean: %.2f\n', mean(sum_img(:)));
 % =========================================================================
 
 out_path = fullfile(output_dir, output_file);
-imwrite(single(sum_img), out_path);
+
+t = Tiff(out_path, 'w');
+tagstruct.ImageLength        = min_rows;
+tagstruct.ImageWidth         = min_cols;
+tagstruct.Photometric        = Tiff.Photometric.MinIsBlack;
+tagstruct.BitsPerSample      = 32;
+tagstruct.SampleFormat       = Tiff.SampleFormat.IEEEFP;
+tagstruct.SamplesPerPixel    = 1;
+tagstruct.PlanarConfiguration = Tiff.PlanarConfiguration.Chunky;
+t.setTag(tagstruct);
+t.write(single(sum_img));
+t.close();
 
 info_out = imfinfo(out_path);
 fprintf('\nSaved: %s\n', out_path);
