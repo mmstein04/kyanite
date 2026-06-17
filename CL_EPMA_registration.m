@@ -62,7 +62,7 @@ epma_pixel_um = 2.0;            % µm per pixel
 
 % --- Mask parameters ------------------------------------------------------
 mask_method   = 'manual';
-thresh_manual = 0.18;           % used only if mask_method = 'manual'
+thresh_manual = 0.10;           % used only if mask_method = 'manual'
 min_object_px = 500;
 fill_holes    = false;
 
@@ -76,7 +76,7 @@ shift_range   = -5:1:5;
 % Only the middle inner_pct % of each element's distribution is shown in
 % scatter plots and used for Pearson r. Excludes the tails symmetrically:
 % e.g. 80 keeps the 10th–90th percentile. Set to 100 to disable.
-inner_pct = 80;
+inner_pct = 90;
 
 % =========================================================================
 %% SECTION 2: SETUP
@@ -503,6 +503,7 @@ figure('Name', 'CL vs. element maps', ...
 r_vals     = zeros(1, n_elements);
 pfit       = zeros(n_elements, 2);   % linear fit [slope, intercept] for each element
 n_outliers = zeros(1, n_elements);
+n_levels   = zeros(1, n_elements);   % unique quantization levels per element (native precision)
 
 for e = 1:n_elements
     % Per-element outlier removal: keep middle inner_pct % on element axis
@@ -518,6 +519,7 @@ for e = 1:n_elements
     n_outliers(e) = sum(~keep);
     x_e = epma_px(keep, e);
     y_e = cl_px(keep);
+    n_levels(e) = numel(unique(epma_px(:,e)));   % count on full (unclipped) column
 
     subplot(n_rows, n_cols, e);
     scatter(x_e, y_e, 8, 'filled', ...
@@ -531,7 +533,7 @@ for e = 1:n_elements
     r_vals(e) = corr(x_e, y_e);
     text(0.05, 0.92, sprintf('r = %.3f', r_vals(e)), ...
          'Units', 'normalized', 'FontSize', 9, 'Color', 'k');
-    text(0.05, 0.82, sprintf('n = %d', numel(x_e)), ...
+    text(0.05, 0.82, sprintf('n = %d  |  %d levels', numel(x_e), n_levels(e)), ...
          'Units', 'normalized', 'FontSize', 8, 'Color', [0.4 0.4 0.4]);
     if n_outliers(e) > 0
         pct_lo = (100 - inner_pct) / 2;
@@ -565,14 +567,14 @@ else
     lprintf('  Outlier removal: disabled\n');
 end
 lprintf('\n');
-lprintf('  %-10s  %-12s  %-14s  %-14s  %-12s  %-10s\n', ...
-        'Element', 'r', 'Slope', 'Intercept', 'n_used', 'n_removed');
-lprintf('  %-10s  %-12s  %-14s  %-14s  %-12s  %-10s\n', ...
-        '----------', '------------', '--------------', '--------------', '------------', '----------');
+lprintf('  %-10s  %-12s  %-14s  %-14s  %-12s  %-10s  %-10s\n', ...
+        'Element', 'r', 'Slope', 'Intercept', 'n_used', 'n_removed', 'x_levels');
+lprintf('  %-10s  %-12s  %-14s  %-14s  %-12s  %-10s  %-10s\n', ...
+        '----------', '------------', '--------------', '--------------', '------------', '----------', '----------');
 for e = 1:n_elements
     n_used = n_grain_px - n_outliers(e);
-    lprintf('  %-10s  %-12.6f  %-14.6f  %-14.6f  %-12d  %-10d\n', ...
-            epma_labels{e}, r_vals(e), pfit(e,1), pfit(e,2), n_used, n_outliers(e));
+    lprintf('  %-10s  %-12.6f  %-14.6f  %-14.6f  %-12d  %-10d  %-10d\n', ...
+            epma_labels{e}, r_vals(e), pfit(e,1), pfit(e,2), n_used, n_outliers(e), n_levels(e));
 end
 lprintf('  (Linear fit: CL = slope * element + intercept, element axis normalised 0-1)\n');
 lprintf(SEC);
