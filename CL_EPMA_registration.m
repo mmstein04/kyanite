@@ -46,23 +46,25 @@ clear; clc; close all;
 % --- File paths -----------------------------------------------------------
 input_dir  = '/Users/mstein/bin/kyanite';
 
-cl_filename = 'RH-XA-57081X-13_CL_color.png';
+cl_filename = 'NA-CM-G12B4-02_CL_color.tif';
 
 % EPMA element map filenames and their labels.
 % The FIRST map in this list is used as the FIXED reference for control
 % point selection. Choose your highest-quality, highest-contrast map.
-epma_files  = {'RH-XA-57081X-13_Fe_Ka_8bit.tif', 'RH-XA-57081X-13_Mg_Ka_8bit.tif', 'RH-XA-57081X-13_sumP_8bit.tif'};
-epma_labels = {'Fe', 'Mg', 'sumP'};
+epma_files  = {'NA-CM-G12B4-02_Fe_Ka_it5.tif','NA-CM-G12B4-02_Mg_Ka_it1.tif',...
+    'NA-CM-G12B4-02_Mn_Ka_it5.tif','NA-CM-G12B4-02_Y_La_it1.tif',...
+    'NA-CM-G12B4-02_Zr_La_it7.tif', 'NA-CM-G12B4-02_P_Ka_it7.tif'};
+epma_labels = {'Fe', 'Mg', 'Mn', 'Y', 'Zr', 'P'};
 
 output_dir  = '/Users/mstein/bin/kyanite';
-grain_id    = 'RH-XA-57081X-13';
+grain_id    = 'NA-CM-G12B4-02';
 
 % --- Spatial calibration --------------------------------------------------
 epma_pixel_um = 2.0;            % µm per pixel
 
 % --- Mask parameters ------------------------------------------------------
-mask_method   = 'manual';
-thresh_manual = 0.10;           % used only if mask_method = 'manual'
+mask_method   = 'manual';         % otsu or manual
+thresh_manual = 0.05;           % used only if mask_method = 'manual'
 min_object_px = 500;
 fill_holes    = false;
 
@@ -456,10 +458,18 @@ cl_px = cl_reg(mask);
 
 epma_px = zeros(n_grain_px, n_elements);
 for e = 1:n_elements
-    epma_px(:, e) = epma_raw{e}(mask);
+    v = double(epma_raw{e}(mask));
+    vmin = min(v);
+    vmax = max(v);
+    if vmax > vmin
+        epma_px(:, e) = (v - vmin) / (vmax - vmin);
+    else
+        epma_px(:, e) = zeros(n_grain_px, 1);
+    end
 end
 
 fprintf('  Pixels extracted per map: %d\n', n_grain_px);
+fprintf('  EPMA pixel vectors re-normalised to [0 1] using in-mask range.\n');
 
 col_names   = [{'CL'}, epma_labels];
 data_matrix = [cl_px, epma_px];
@@ -479,6 +489,8 @@ lprintf('\n--- PIXEL DATA EXTRACTION ---\n');
 lprintf('  Pixels per map:   %d\n', n_grain_px);
 lprintf('  Columns:          %s\n', strjoin(col_names, ', '));
 lprintf('  Matrix size:      %d rows x %d columns\n', size(data_matrix,1), size(data_matrix,2));
+lprintf('  CL normalisation:   full image min/max (includes background)\n');
+lprintf('  EPMA normalisation: in-mask min/max (grain interior only)\n');
 lprintf('\n  Per-channel statistics (within mask, normalised 0-1):\n');
 lprintf('  %-10s  %-8s  %-8s  %-8s  %-8s\n', 'Channel', 'Min', 'Max', 'Mean', 'Std');
 lprintf('  %-10s  %-8s  %-8s  %-8s  %-8s\n', '----------', '--------', '--------', '--------', '--------');
