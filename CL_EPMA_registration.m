@@ -52,7 +52,7 @@ set(0, 'DefaultLegendInterpreter',      'none');
 % --- File paths -----------------------------------------------------------
 input_dir  = '/Users/mstein/bin/kyanite';
 
-cl_filename = 'NA-CM-G12B7-02_CL_color.bmp';
+cl_filename = 'RH-XA-57081P-07_CL_color.png';
 
 % Folder containing EPMA element map TIFFs.
 % All *.tif files in this folder are auto-discovered as element maps.
@@ -65,10 +65,10 @@ epma_dir = '/Users/mstein/bin/kyanite/maps';
 % This map is the FIXED reference for control point selection —
 % choose your highest-quality, highest-contrast map.
 % Leave empty to use the first file found alphabetically.
-epma_ref_file = 'NA-CM-G12B7-02_Fe_Ka.tif';   % e.g., 'NA-CM-G12B4-02_Fe_Ka_it5.tif'
+epma_ref_file = 'RH-XA-57081P-07_Fe_Ka.tif';   % e.g., 'NA-CM-G12B4-02_Fe_Ka_it5.tif'
 
 output_dir  = '/Users/mstein/bin/kyanite';
-grain_id    = 'NA-CM-G12B7-02';
+grain_id    = 'RH-XA-57081P-07';
 
 % --- Spatial calibration --------------------------------------------------
 epma_pixel_um = 2.0;            % µm per pixel
@@ -86,16 +86,16 @@ transform_type = 'affine';
 % Does not affect registration, scatter plot data, or any outputs — display only.
 % Tighten (e.g. [5, 95]) for maps with many low-signal pixels; widen for
 % already-uniform images.  Set to [0, 100] to disable stretching.
-display_pct = [0, 97];
+display_pct = [0, 90];
 
 % --- Shift-sensitivity analysis parameters --------------------------------
-shift_range   = -5:1:5;
+shift_range   = -20:1:20;
 
 % --- Outlier removal ------------------------------------------------------
-% Only the middle inner_pct % of each element's distribution is shown in
-% scatter plots and used for Pearson r. Excludes the tails symmetrically:
-% e.g. 80 keeps the 10th–90th percentile. Set to 100 to disable.
-inner_pct = 90;
+% Percentile cutoffs applied per-element on the x-axis in scatter plots and
+% for Pearson r. Set pct_lo_cut = 0 and pct_hi_cut = 100 to disable.
+pct_lo_cut =  5;   % lower cutoff: exclude bottom pct_lo_cut % of element values
+pct_hi_cut = 95;   % upper cutoff: exclude top (100 - pct_hi_cut) % of element values
 
 % =========================================================================
 %% SECTION 2: SETUP
@@ -239,12 +239,10 @@ if length(shift_range) > 1
 else
     lprintf('  Shift test range:    %d px\n', shift_range(1));
 end
-if inner_pct < 100
-    pct_lo = (100 - inner_pct) / 2;
-    pct_hi = 100 - pct_lo;
-    lprintf('  Outlier removal:     middle %g%% per element (%.4g–%.4gth pct) used in plots/r\n', inner_pct, pct_lo, pct_hi);
+if pct_lo_cut > 0 || pct_hi_cut < 100
+    lprintf('  Outlier removal:     %.4g–%.4gth pct per element used in plots/r\n', pct_lo_cut, pct_hi_cut);
 else
-    lprintf('  Outlier removal:     disabled (inner_pct = 100)\n');
+    lprintf('  Outlier removal:     disabled (pct_lo_cut = 0, pct_hi_cut = 100)\n');
 end
 lprintf(SEC);
 
@@ -589,12 +587,10 @@ n_outliers = zeros(1, n_elements);
 n_levels   = zeros(1, n_elements);   % unique quantization levels per element (native precision)
 
 for e = 1:n_elements
-    % Per-element outlier removal: keep middle inner_pct % on element axis
-    if inner_pct < 100
-        pct_lo = (100 - inner_pct) / 2;
-        pct_hi = 100 - pct_lo;
-        lo = prctile(epma_px(:,e), pct_lo);
-        hi = prctile(epma_px(:,e), pct_hi);
+    % Per-element outlier removal: keep pct_lo_cut–pct_hi_cut percentile range on element axis
+    if pct_lo_cut > 0 || pct_hi_cut < 100
+        lo = prctile(epma_px(:,e), pct_lo_cut);
+        hi = prctile(epma_px(:,e), pct_hi_cut);
         keep = epma_px(:,e) >= lo & epma_px(:,e) <= hi;
     else
         keep = true(size(cl_px));
@@ -640,9 +636,7 @@ for e = 1:n_elements
          'Units', 'normalized', 'FontSize', 8, 'Color', [0.4 0.4 0.4], ...
          'HorizontalAlignment', ha{bc}, 'VerticalAlignment', va{bc});
     if n_outliers(e) > 0
-        pct_lo = (100 - inner_pct) / 2;
-        pct_hi = 100 - pct_lo;
-        text(tx(bc), ty(bc)+2*dy(bc), sprintf('%d px outside %g–%gth pct', n_outliers(e), pct_lo, pct_hi), ...
+        text(tx(bc), ty(bc)+2*dy(bc), sprintf('%d px outside %g–%gth pct', n_outliers(e), pct_lo_cut, pct_hi_cut), ...
              'Units', 'normalized', 'FontSize', 7, 'Color', [0.7 0.2 0.2], ...
              'HorizontalAlignment', ha{bc}, 'VerticalAlignment', va{bc});
     end
@@ -664,12 +658,10 @@ end
 % ---- Log correlations and linear fits ------------------------------------
 lprintf('\n--- PEARSON CORRELATIONS  (CL vs. element, per pixel) ---\n');
 lprintf('  n_grain = %d pixels  |  RMSE = %.4f px = %.4f µm\n', n_grain_px, RMSE_px, RMSE_um);
-if inner_pct < 100
-    pct_lo = (100 - inner_pct) / 2;
-    pct_hi = 100 - pct_lo;
-    lprintf('  Outlier removal: middle %g%% used (%.4g–%.4gth pct per element, applied before r and fit)\n', inner_pct, pct_lo, pct_hi);
+if pct_lo_cut > 0 || pct_hi_cut < 100
+    lprintf('  Outlier removal: %.4g–%.4gth pct per element (applied before r and fit)\n', pct_lo_cut, pct_hi_cut);
 else
-    lprintf('  Outlier removal: disabled\n');
+    lprintf('  Outlier removal: disabled (pct_lo_cut = 0, pct_hi_cut = 100)\n');
 end
 lprintf('\n');
 lprintf('  %-10s  %-12s  %-14s  %-14s  %-12s  %-10s  %-10s\n', ...

@@ -19,11 +19,11 @@ from pathlib import Path
 # PARAMETERS — edit this section for each use
 # =============================================================================
 
-H5_FILE   = '/Users/mstein/bin/kyanite/NA-CM-G12B7-02_xafs.h5'
+H5_FILE   = '/Users/mstein/bin/kyanite/RH-XA-57081P-07_xafs.h5'
 OUTPUT_DIR = '/Users/mstein/bin/kyanite'
 
 # Sample name prefix used in output filenames.
-SAMPLE = 'NA-CM-G12B7-02'
+SAMPLE = 'RH-XA-57081P-07'
 
 # Elements to export.  Use exact names as stored in the HDF5 file (see the
 # "Available ROIs" list printed at startup).  Set to None to export all ROIs.
