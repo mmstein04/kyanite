@@ -18,8 +18,8 @@
 %   8. Write comprehensive analysis log throughout
 %
 % INPUTS (set in PARAMETERS section below):
-%   - CL image (.tif or .png, any bit depth)
-%   - One or more EPMA element map images (.tif, any bit depth)
+%   - CL image (.tif, .png, .bmp, or any format supported by imread)
+%   - Folder of EPMA element map TIFFs (auto-discovered; labels from filenames)
 %   - Pixel size of EPMA map in microns (for spatial error reporting)
 %
 % OUTPUTS:
@@ -39,6 +39,12 @@
 
 clear; clc; close all;
 
+% Disable TeX interpreter globally so underscores in labels (e.g. Fe_Ka)
+% are displayed literally rather than as subscript markup.
+set(0, 'DefaultTextInterpreter',        'none');
+set(0, 'DefaultAxesTickLabelInterpreter','none');
+set(0, 'DefaultLegendInterpreter',      'none');
+
 % =========================================================================
 %% SECTION 1: PARAMETERS  — edit this section for each new grain
 % =========================================================================
@@ -46,30 +52,41 @@ clear; clc; close all;
 % --- File paths -----------------------------------------------------------
 input_dir  = '/Users/mstein/bin/kyanite';
 
-cl_filename = 'NA-CM-G12B4-02_CL_color.tif';
+cl_filename = 'NA-CM-G12B7-02_CL_color.bmp';
 
-% EPMA element map filenames and their labels.
-% The FIRST map in this list is used as the FIXED reference for control
-% point selection. Choose your highest-quality, highest-contrast map.
-epma_files  = {'NA-CM-G12B4-02_Fe_Ka_it5.tif','NA-CM-G12B4-02_Mg_Ka_it1.tif',...
-    'NA-CM-G12B4-02_Mn_Ka_it5.tif','NA-CM-G12B4-02_Y_La_it1.tif',...
-    'NA-CM-G12B4-02_Zr_La_it7.tif', 'NA-CM-G12B4-02_P_Ka_it7.tif'};
-epma_labels = {'Fe', 'Mg', 'Mn', 'Y', 'Zr', 'P'};
+% Folder containing EPMA element map TIFFs.
+% All *.tif files in this folder are auto-discovered as element maps.
+% The CL file and any script-generated outputs are excluded automatically.
+% Labels are extracted from filenames by stripping the grain_id prefix
+% and any trailing _itN iteration suffix (e.g. _Fe_Ka_it5 -> Fe_Ka).
+epma_dir = '/Users/mstein/bin/kyanite/maps';
+
+% Reference map filename (filename only, no path).
+% This map is the FIXED reference for control point selection —
+% choose your highest-quality, highest-contrast map.
+% Leave empty to use the first file found alphabetically.
+epma_ref_file = 'NA-CM-G12B7-02_Fe_Ka.tif';   % e.g., 'NA-CM-G12B4-02_Fe_Ka_it5.tif'
 
 output_dir  = '/Users/mstein/bin/kyanite';
-grain_id    = 'NA-CM-G12B4-02';
+grain_id    = 'NA-CM-G12B7-02';
 
 % --- Spatial calibration --------------------------------------------------
 epma_pixel_um = 2.0;            % µm per pixel
 
 % --- Mask parameters ------------------------------------------------------
 mask_method   = 'manual';         % otsu or manual
-thresh_manual = 0.05;           % used only if mask_method = 'manual'
+thresh_manual = 0.09;           % used only if mask_method = 'manual'
 min_object_px = 500;
 fill_holes    = false;
 
 % --- Registration parameters ----------------------------------------------
 transform_type = 'affine';
+
+% Percentile range used to contrast-stretch element maps in all figures.
+% Does not affect registration, scatter plot data, or any outputs — display only.
+% Tighten (e.g. [5, 95]) for maps with many low-signal pixels; widen for
+% already-uniform images.  Set to [0, 100] to disable stretching.
+display_pct = [0, 97];
 
 % --- Shift-sensitivity analysis parameters --------------------------------
 shift_range   = -5:1:5;
@@ -86,8 +103,59 @@ inner_pct = 90;
 
 if ~exist(output_dir, 'dir'), mkdir(output_dir); end
 
-% Compute n_elements here so it is available for the log header below
-n_elements = length(epma_files);
+% --- Auto-discover EPMA maps from epma_dir --------------------------------
+tif_listing = dir(fullfile(epma_dir, '*.tif'));
+if isempty(tif_listing)
+    error('No *.tif files found in epma_dir: %s', epma_dir);
+end
+tif_names = {tif_listing.name};
+
+% Exclude the CL image and any script-generated output TIFFs
+output_suffixes = {'_CL_registered.tif', '_mask.tif'};
+keep_flags = true(1, numel(tif_names));
+for k = 1:numel(tif_names)
+    fname = tif_names{k};
+    if strcmp(fname, cl_filename)
+        keep_flags(k) = false;
+        continue;
+    end
+    for p = 1:numel(output_suffixes)
+        if endsWith(fname, output_suffixes{p})
+            keep_flags(k) = false;
+        end
+    end
+end
+epma_files = sort(tif_names(keep_flags));
+
+if isempty(epma_files)
+    error('No EPMA map TIFFs remain after filtering in: %s', epma_dir);
+end
+
+% Move the reference file to front if specified
+if ~isempty(epma_ref_file)
+    ref_idx = find(strcmp(epma_files, epma_ref_file), 1);
+    if isempty(ref_idx)
+        warning('epma_ref_file ''%s'' not found; using first file alphabetically.', epma_ref_file);
+    else
+        epma_files = [epma_files(ref_idx), epma_files([1:ref_idx-1, ref_idx+1:end])];
+    end
+end
+
+% Extract labels: strip grain_id prefix and trailing _itN iteration suffix
+epma_labels = cell(1, numel(epma_files));
+for k = 1:numel(epma_files)
+    [~, base] = fileparts(epma_files{k});
+    label = base;
+    prefix = [grain_id, '_'];
+    if startsWith(label, prefix)
+        label = label(numel(prefix)+1:end);
+    end
+    label = regexprep(label, '_it\d+$', '');
+    epma_labels{k} = label;
+end
+
+n_elements = numel(epma_files);
+fprintf('Auto-discovered %d EPMA maps in: %s\n', n_elements, epma_dir);
 
 fprintf('=== CL-EPMA Registration: %s ===\n\n', grain_id);
 
@@ -132,7 +200,8 @@ lprintf('  Script:    CL_EPMA_registration.m  v1.1\n');
 % ---- Parameters ----------------------------------------------------------
 lprintf('\n--- PARAMETERS ---\n');
 lprintf('  Grain ID:            %s\n', grain_id);
-lprintf('  Input directory:     %s\n', input_dir);
+lprintf('  CL directory:        %s\n', input_dir);
+lprintf('  EPMA directory:      %s\n', epma_dir);
 lprintf('  Output directory:    %s\n', output_dir);
 lprintf('\n  CL image (moving):   %s\n', cl_filename);
 lprintf('  EPMA maps (%d total):\n', n_elements);
@@ -147,6 +216,7 @@ for e = 1:n_elements
 end
 lprintf('\n  Registration:\n');
 lprintf('    Transform type:    %s\n', transform_type);
+lprintf('    Display stretch:   %g–%g pct (all element map figures)\n', display_pct(1), display_pct(2));
 switch transform_type
     case 'affine';     lprintf('    Min control pts:   6\n');
     case 'similarity'; lprintf('    Min control pts:   4\n');
@@ -197,10 +267,10 @@ lprintf('    Normalized stats:  min=%.4f  max=%.4f  mean=%.4f  std=%.4f\n', ...
 % EPMA maps
 epma_raw = cell(1, n_elements);
 for e = 1:n_elements
-    epma_raw{e} = load_normalize(epma_files{e});
+    epma_raw{e} = normalize_image(imread(fullfile(epma_dir, epma_files{e})));
     fprintf('  %s map loaded:  %d x %d pixels\n', ...
             epma_labels{e}, size(epma_raw{e},1), size(epma_raw{e},2));
-    log_file_info(log_fid, fullfile(input_dir, epma_files{e}), ...
+    log_file_info(log_fid, fullfile(epma_dir, epma_files{e}), ...
                   sprintf('%s map', epma_labels{e}));
     lprintf('    Normalized stats:  min=%.4f  max=%.4f  mean=%.4f  std=%.4f\n', ...
             min(epma_raw{e}(:)), max(epma_raw{e}(:)), ...
@@ -272,7 +342,8 @@ else
 end
 
 if ~skip_cpselect
-    [moving_pts, fixed_pts] = cpselect(cl_raw, epma_ref, 'Wait', true);
+    epma_ref_disp = pct_stretch(epma_ref, display_pct(1), display_pct(2));
+    [moving_pts, fixed_pts] = cpselect(cl_raw, epma_ref_disp, 'Wait', true);
     if size(moving_pts, 1) < 3
         fclose(log_fid);
         error('You need at least 3 control point pairs. Please rerun.');
@@ -374,14 +445,14 @@ fprintf('Registered CL saved to: %s\n\n', cl_reg_file);
 
 % ---- Visualize registration quality --------------------------------------
 figure('Name', 'Registration check', 'Position', [100 100 1200 400]);
-subplot(1,3,1); imshow(cl_raw);    title('CL: original');
-subplot(1,3,2); imshow(epma_ref);  title([epma_labels{1}, ' EPMA (reference)']);
-subplot(1,3,3); imshow(cl_reg);    title('CL: registered to EPMA grid');
+subplot(1,3,1); imshow(cl_raw);                                                   title('CL: original');
+subplot(1,3,2); imshow(pct_stretch(epma_ref, display_pct(1), display_pct(2)));    title([epma_labels{1}, ' EPMA (reference)']);
+subplot(1,3,3); imshow(cl_reg);                                                   title('CL: registered to EPMA grid');
 sgtitle(sprintf('%s — Registration RMSE: %.2f px (%.2f µm)', ...
         grain_id, RMSE_px, RMSE_um));
 
 figure('Name', 'Overlay check');
-overlay = cat(3, epma_ref, cl_reg, zeros(size(epma_ref)));
+overlay = cat(3, pct_stretch(epma_ref, display_pct(1), display_pct(2)), cl_reg, zeros(size(epma_ref)));
 imshow(overlay);
 title({'Overlay check: red = EPMA ref, green = registered CL', ...
        'Edges should align at grain boundary'});
@@ -718,7 +789,12 @@ all_labels = [{'CL (registered)'}, epma_labels];
 
 for m = 1:n_maps
     subplot(n_rows2, n_cols2, m);
-    imshow(all_maps{m}); hold on;
+    if m == 1
+        imshow(all_maps{m});   % CL — no stretch
+    else
+        imshow(pct_stretch(all_maps{m}, display_pct(1), display_pct(2)));
+    end
+    hold on;
     visboundaries(mask, 'Color', 'r', 'LineWidth', 0.8);
     title(all_labels{m}, 'FontSize', 9);
 end
@@ -799,6 +875,18 @@ function img_norm = normalize_image(img_raw)
         img_norm = zeros(size(img_d));
     else
         img_norm = (img_d - img_min) / (img_max - img_min);
+    end
+end
+
+function img_out = pct_stretch(img, lo_pct, hi_pct)
+% Clip and rescale a [0,1] image to the given percentile range for display.
+    lo = prctile(img(:), lo_pct);
+    hi = prctile(img(:), hi_pct);
+    if hi > lo
+        img_out = (img - lo) / (hi - lo);
+        img_out = max(0, min(1, img_out));
+    else
+        img_out = img;
     end
 end
 
