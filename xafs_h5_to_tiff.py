@@ -72,6 +72,7 @@ def main():
             idx = names.index(roi)
             data = sum_cor[:, :, idx]   # read just this slice; stays float32
             data = np.array(data, dtype=np.float32)
+            data = np.flipud(data)      # HDF5 rows run bottom-to-top; flip to match image convention
 
             out_name = roi_name_to_filename(SAMPLE, roi)
             out_path = out_dir / out_name
