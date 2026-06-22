@@ -37,9 +37,13 @@ ELEMENTS = [
     'Ti Ka',
     'V Ka',
     'Mn Ka',
-
 ]
 
+# Normalize fluorescence counts by the per-pixel clock (dwell time).
+# Produces counts per clock tick, which removes dwell-time variation and
+# makes maps from different scans directly comparable across grains.
+# Clock map is read from xrmmap/scalars/Clock.
+NORMALIZE_BY_CLOCK = False
 
 # =============================================================================
 
@@ -61,6 +65,12 @@ def main():
             print(f"  [{i:2d}] {n}")
         print()
 
+        if NORMALIZE_BY_CLOCK:
+            clock = np.array(f['xrmmap/scalars/Clock'], dtype=np.float32)
+            clock = np.flipud(clock)
+            clock[clock == 0] = np.nan   # avoid divide-by-zero; zero-dwell pixels become NaN
+            print(f"Clock map loaded: min={np.nanmin(clock):.2f}  max={np.nanmax(clock):.2f}")
+
         targets = ELEMENTS if ELEMENTS is not None else names
 
         for roi in targets:
@@ -69,16 +79,18 @@ def main():
                 continue
 
             idx = names.index(roi)
-            data = sum_cor[:, :, idx]   # read just this slice; stays float32
-            data = np.array(data, dtype=np.float32)
+            data = np.array(sum_cor[:, :, idx], dtype=np.float32)
             data = np.flipud(data)      # HDF5 rows run bottom-to-top; flip to match image convention
+
+            if NORMALIZE_BY_CLOCK:
+                data = data / clock
 
             out_name = roi_name_to_filename(SAMPLE, roi)
             out_path = out_dir / out_name
             tifffile.imwrite(str(out_path), data, photometric='minisblack')
 
             print(f"  {roi:12s}  shape={data.shape}  "
-                  f"min={data.min():.4f}  max={data.max():.4f}  ->  {out_name}")
+                  f"min={np.nanmin(data):.4f}  max={np.nanmax(data):.4f}  ->  {out_name}")
 
     print(f"\nDone. {len(targets)} maps written to {out_dir}/")
 
