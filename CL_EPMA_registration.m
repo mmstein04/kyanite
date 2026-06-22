@@ -52,7 +52,7 @@ set(0, 'DefaultLegendInterpreter',      'none');
 % --- File paths -----------------------------------------------------------
 input_dir  = '/Users/mstein/bin/kyanite';
 
-grain_id    = 'NA-CM-G12B7-02';
+grain_id    = 'NA-GS-P84-06';
 
 cl_filename = [grain_id, '_CL_color.png'];
 
@@ -75,10 +75,15 @@ output_dir  = '/Users/mstein/bin/kyanite/figs';
 epma_pixel_um = 2.0;            % µm per pixel
 
 % --- Mask parameters ------------------------------------------------------
-mask_method   = 'interactive';         % otsu, manual, or interactive
-thresh_manual = 0.08;           % used for manual; fallback if interactive receives no clicks
+mask_method   = 'manual';         % otsu | manual | interactive | polygon | activecontour
+thresh_manual = 0.12;             % used for manual; fallback if interactive receives no clicks
 min_object_px = 500;
 fill_holes    = false;
+
+% Active contour parameters (used only when mask_method = 'activecontour')
+ac_niter        = 200;      % number of Chan-Vese iterations
+ac_smoothfactor = 1.0;      % contour smoothness (higher = smoother boundary)
+ac_init_method  = 'otsu';   % initial mask source: 'otsu' | 'manual' | 'polygon'
 
 % --- Registration parameters ----------------------------------------------
 transform_type = 'affine';
@@ -233,12 +238,21 @@ switch transform_type
 end
 lprintf('\n  Mask:\n');
 lprintf('    Method:            %s\n', mask_method);
-if strcmp(mask_method, 'manual')
-    lprintf('    Manual threshold:  %.4f  [active]\n', thresh_manual);
-elseif strcmp(mask_method, 'interactive')
-    lprintf('    Manual threshold:  %.4f  [fallback if no clicks received]\n', thresh_manual);
-else
-    lprintf('    Manual threshold:  %.4f  [inactive — otsu used]\n', thresh_manual);
+switch mask_method
+    case 'manual'
+        lprintf('    Manual threshold:  %.4f  [active]\n', thresh_manual);
+    case 'interactive'
+        lprintf('    Manual threshold:  %.4f  [fallback if no clicks received]\n', thresh_manual);
+    case 'otsu'
+        lprintf('    Manual threshold:  %.4f  [inactive — otsu used]\n', thresh_manual);
+    case 'activecontour'
+        lprintf('    AC iterations:     %d\n', ac_niter);
+        lprintf('    AC smooth factor:  %.4f\n', ac_smoothfactor);
+        lprintf('    AC init method:    %s\n', ac_init_method);
+        if strcmp(ac_init_method, 'manual')
+            lprintf('    AC init threshold: %.4f\n', thresh_manual);
+        end
+    % polygon: no threshold parameters
 end
 lprintf('    Min object size:   %d px\n', min_object_px);
 lprintf('    Fill holes:        %s\n', mat2str(fill_holes));
@@ -477,19 +491,27 @@ saveas(gcf, fullfile(output_dir, [grain_id '_registration_overlay.png']));
 
 fprintf('\n--- BUILDING GRAIN MASK ---\n');
 
+cl_disp  = pct_stretch(cl_reg, display_pct(1), display_pct(2));
+thresh   = NaN;    % set for threshold-based methods; NaN otherwise
+poly_pos = [];     % set for polygon-based methods
+
 switch mask_method
+
     case 'otsu'
         thresh = graythresh(cl_reg);
         fprintf('  Otsu threshold: %.4f\n', thresh);
+        mask = cl_reg > thresh;
+
     case 'manual'
         thresh = thresh_manual;
         fprintf('  Manual threshold: %.4f\n', thresh);
+        mask = cl_reg > thresh;
+
     case 'interactive'
         all_bg_x    = [];
         all_bg_y    = [];
         all_bg_vals = [];
         thresh      = thresh_manual;   % fallback if no points are selected
-        cl_disp     = pct_stretch(cl_reg, display_pct(1), display_pct(2));
 
         fprintf('  Interactive mask mode.\n');
         fprintf('  Click on BACKGROUND pixels (non-grain areas) in the figure.\n');
@@ -570,12 +592,132 @@ switch mask_method
             close(fig_prev);
         end
         fprintf('  Interactive threshold accepted: %.4f\n', thresh);
+        mask = cl_reg > thresh;
+
+    case 'polygon'
+        % User traces the grain outline directly — no brightness threshold.
+        % Robust to any CL intensity variation inside or outside the grain.
+        fprintf('  Polygon mask mode.\n');
+        fprintf('  Click to place vertices around the grain boundary.\n');
+        fprintf('  Double-click the last vertex (or first) to close the polygon.\n\n');
+
+        done = false;
+        while ~done
+            fig_poly = figure('Name', 'Draw grain boundary — double-click to close', ...
+                              'Position', [50 50 900 700]);
+            imshow(cl_disp);
+            title({'Click to place vertices around the grain boundary.', ...
+                   'Double-click the last vertex to close and accept.'}, 'FontSize', 11);
+
+            h_poly = drawpolygon();
+            wait(h_poly);
+
+            if isempty(h_poly.Position)
+                close(fig_poly);
+                fclose(log_fid);
+                error('No polygon drawn. Please rerun and place at least 3 vertices.');
+            end
+            poly_pos = h_poly.Position;   % Nx2: [x (col), y (row)]
+            close(fig_poly);
+
+            mask_preview = poly2mask(poly_pos(:,1), poly_pos(:,2), nrows_epma, ncols_epma);
+            if min_object_px > 0
+                mask_preview = bwareaopen(mask_preview, min_object_px);
+            end
+            if fill_holes
+                mask_preview = imfill(mask_preview, 'holes');
+            end
+
+            fig_prev = figure('Name', 'Polygon mask preview', 'Position', [100 100 1000 420]);
+            subplot(1,2,1);
+            imshow(cl_disp); hold on;
+            plot([poly_pos(:,1); poly_pos(1,1)], [poly_pos(:,2); poly_pos(1,2)], ...
+                 'b-o', 'LineWidth', 1.5, 'MarkerSize', 5, 'MarkerFaceColor', 'b');
+            title(sprintf('Polygon (%d vertices)', size(poly_pos,1)));
+            subplot(1,2,2);
+            imshow(cl_disp); hold on;
+            visboundaries(mask_preview, 'Color', 'r', 'LineWidth', 1.5);
+            title(sprintf('Mask preview  |  %d px in grain', sum(mask_preview(:))));
+            sgtitle(sprintf('%s — polygon mask', grain_id));
+            drawnow;
+
+            resp = input('  Accept polygon? (y = yes, n = redraw): ', 's');
+            close(fig_prev);
+
+            if strcmpi(strtrim(resp), 'y')
+                done = true;
+            end
+        end
+
+        mask = poly2mask(poly_pos(:,1), poly_pos(:,2), nrows_epma, ncols_epma);
+        fprintf('  Polygon accepted: %d vertices, %d px enclosed.\n', ...
+                size(poly_pos,1), sum(mask(:)));
+
+    case 'activecontour'
+        % Chan-Vese active contours: evolves a contour to fit the grain boundary
+        % using image statistics rather than a fixed threshold. Robust to
+        % heterogeneous CL brightness and bright inclusions/holes inside the grain.
+        fprintf('  Active contour mask mode  (Chan-Vese, %d iter, smoothfactor=%.2f).\n', ...
+                ac_niter, ac_smoothfactor);
+        fprintf('  Initializing contour from: %s\n\n', ac_init_method);
+
+        switch ac_init_method
+            case 'otsu'
+                init_thresh = graythresh(cl_reg);
+                init_mask   = cl_reg > init_thresh;
+                init_mask   = bwareaopen(init_mask, min_object_px);
+                fprintf('  Otsu seed threshold: %.4f  (%d px)\n', init_thresh, sum(init_mask(:)));
+            case 'manual'
+                init_thresh = thresh_manual;
+                init_mask   = cl_reg > init_thresh;
+                init_mask   = bwareaopen(init_mask, min_object_px);
+                fprintf('  Manual seed threshold: %.4f  (%d px)\n', init_thresh, sum(init_mask(:)));
+            case 'polygon'
+                fprintf('  Draw a rough polygon to seed the active contour.\n');
+                fprintf('  Precision is not required — just enclose the grain.\n\n');
+                fig_ac_init = figure('Name', 'Draw seed region for active contours', ...
+                                     'Position', [50 50 900 700]);
+                imshow(cl_disp);
+                title({'Draw a rough polygon enclosing the grain (seed for active contours).', ...
+                       'It does not need to be precise — double-click to close.'}, 'FontSize', 11);
+                h_init = drawpolygon();
+                wait(h_init);
+                if isempty(h_init.Position)
+                    close(fig_ac_init);
+                    fclose(log_fid);
+                    error('No seed polygon drawn. Please rerun.');
+                end
+                pos_init  = h_init.Position;
+                close(fig_ac_init);
+                init_mask = poly2mask(pos_init(:,1), pos_init(:,2), nrows_epma, ncols_epma);
+                fprintf('  Polygon seed: %d vertices, %d px.\n', size(pos_init,1), sum(init_mask(:)));
+            otherwise
+                fclose(log_fid);
+                error('ac_init_method must be ''otsu'', ''manual'', or ''polygon''.');
+        end
+
+        fprintf('  Running active contours...\n');
+        mask = activecontour(cl_reg, init_mask, ac_niter, 'method', 'Chan-Vese', ...
+                             'SmoothFactor', ac_smoothfactor);
+        fprintf('  Converged: %d px in grain.\n', sum(mask(:)));
+
+        fig_ac_result = figure('Name', 'Active contour result', 'Position', [100 100 1000 420]);
+        subplot(1,2,1);
+        imshow(cl_disp); hold on;
+        visboundaries(init_mask, 'Color', 'b', 'LineWidth', 1.5);
+        title('Seed mask (blue)');
+        subplot(1,2,2);
+        imshow(cl_disp); hold on;
+        visboundaries(mask, 'Color', 'r', 'LineWidth', 1.5);
+        title(sprintf('Active contour result  |  %d px', sum(mask(:))));
+        sgtitle(sprintf('%s — active contour mask (%d iter)', grain_id, ac_niter));
+        drawnow;
+
     otherwise
         fclose(log_fid);
-        error('mask_method must be ''otsu'', ''manual'', or ''interactive''.');
+        error('mask_method must be ''otsu'', ''manual'', ''interactive'', ''polygon'', or ''activecontour''.');
 end
 
-mask = cl_reg > thresh;
 n_px_raw = sum(mask(:));
 
 if min_object_px > 0
@@ -596,8 +738,12 @@ fprintf('  Mask saved to: %s\n', mask_file);
 % ---- Log mask info -------------------------------------------------------
 lprintf('\n--- GRAIN MASK ---\n');
 lprintf('  Method:               %s\n', mask_method);
-lprintf('  Threshold applied:    %.6f\n', thresh);
-lprintf('  Pixels above thresh:  %d  (before morphological cleanup)\n', n_px_raw);
+if ~isnan(thresh)
+    lprintf('  Threshold applied:    %.6f\n', thresh);
+else
+    lprintf('  Threshold applied:    N/A (method: %s)\n', mask_method);
+end
+lprintf('  Pixels before cleanup:%d\n', n_px_raw);
 lprintf('  Min object size:      %d px  (bwareaopen applied)\n', min_object_px);
 lprintf('  Fill holes:           %s  (imfill applied)\n', mat2str(fill_holes));
 lprintf('  Final grain pixels:   %d  (%.2f%% of %d x %d image)\n', ...
@@ -616,6 +762,17 @@ if strcmp(mask_method, 'interactive')
                     k, all_bg_x(k), all_bg_y(k), all_bg_vals(k));
         end
     end
+elseif strcmp(mask_method, 'polygon')
+    lprintf('  Polygon vertices:     %d\n', size(poly_pos,1));
+    lprintf('  Vertex coords (col, row):\n');
+    for k = 1:size(poly_pos,1)
+        lprintf('    pt%-3d  col=%8.2f  row=%8.2f\n', k, poly_pos(k,1), poly_pos(k,2));
+    end
+elseif strcmp(mask_method, 'activecontour')
+    lprintf('  AC method:            Chan-Vese\n');
+    lprintf('  AC iterations:        %d\n', ac_niter);
+    lprintf('  AC smooth factor:     %.4f\n', ac_smoothfactor);
+    lprintf('  AC init method:       %s\n', ac_init_method);
 end
 lprintf(SEC);
 
