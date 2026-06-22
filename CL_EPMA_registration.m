@@ -52,7 +52,7 @@ set(0, 'DefaultLegendInterpreter',      'none');
 % --- File paths -----------------------------------------------------------
 input_dir  = '/Users/mstein/bin/kyanite';
 
-cl_filename = 'RH-XA-57081P-07_CL_color.png';
+cl_filename = 'NA-CM-G12B7-02_CL_color.bmp';
 
 % Folder containing EPMA element map TIFFs.
 % All *.tif files in this folder are auto-discovered as element maps.
@@ -65,17 +65,17 @@ epma_dir = '/Users/mstein/bin/kyanite/maps';
 % This map is the FIXED reference for control point selection —
 % choose your highest-quality, highest-contrast map.
 % Leave empty to use the first file found alphabetically.
-epma_ref_file = 'RH-XA-57081P-07_Fe_Ka.tif';   % e.g., 'NA-CM-G12B4-02_Fe_Ka_it5.tif'
+epma_ref_file = 'NA-CM-G12B7-02_Cr_Ka.tif';   % e.g., 'NA-CM-G12B4-02_Fe_Ka_it5.tif'
 
 output_dir  = '/Users/mstein/bin/kyanite';
-grain_id    = 'RH-XA-57081P-07';
+grain_id    = 'NA-CM-G12B7-02';
 
 % --- Spatial calibration --------------------------------------------------
 epma_pixel_um = 2.0;            % µm per pixel
 
 % --- Mask parameters ------------------------------------------------------
 mask_method   = 'manual';         % otsu or manual
-thresh_manual = 0.09;           % used only if mask_method = 'manual'
+thresh_manual = 0.08;           % used only if mask_method = 'manual'
 min_object_px = 500;
 fill_holes    = false;
 
@@ -86,16 +86,23 @@ transform_type = 'affine';
 % Does not affect registration, scatter plot data, or any outputs — display only.
 % Tighten (e.g. [5, 95]) for maps with many low-signal pixels; widen for
 % already-uniform images.  Set to [0, 100] to disable stretching.
-display_pct = [0, 90];
+display_pct = [0, 97];
 
 % --- Shift-sensitivity analysis parameters --------------------------------
-shift_range   = -20:1:20;
+shift_range   = -30:1:30;
 
 % --- Outlier removal ------------------------------------------------------
 % Percentile cutoffs applied per-element on the x-axis in scatter plots and
 % for Pearson r. Set pct_lo_cut = 0 and pct_hi_cut = 100 to disable.
-pct_lo_cut =  5;   % lower cutoff: exclude bottom pct_lo_cut % of element values
-pct_hi_cut = 95;   % upper cutoff: exclude top (100 - pct_hi_cut) % of element values
+pct_lo_cut =  0;   % lower cutoff: exclude bottom pct_lo_cut % of element values
+pct_hi_cut = 99;   % upper cutoff: exclude top (100 - pct_hi_cut) % of element values
+
+% --- Element map normalization --------------------------------------------
+% true  (default): normalize each EPMA/XRF map to [0 1] using its in-mask
+%         min/max — good for EPMA maps where absolute counts are arbitrary.
+% false: keep raw pixel values (counts/intensity units from the TIFF) —
+%         use for XAFS/XRF maps whose intensities are comparable across grains.
+normalize_epma = false;
 
 % =========================================================================
 %% SECTION 2: SETUP
@@ -264,8 +271,13 @@ lprintf('    Normalized stats:  min=%.4f  max=%.4f  mean=%.4f  std=%.4f\n', ...
 
 % EPMA maps
 epma_raw = cell(1, n_elements);
+if ~normalize_epma; epma_raw_abs = cell(1, n_elements); end
 for e = 1:n_elements
-    epma_raw{e} = normalize_image(imread(fullfile(epma_dir, epma_files{e})));
+    raw_img = imread(fullfile(epma_dir, epma_files{e}));
+    if ~normalize_epma
+        epma_raw_abs{e} = double(raw_img);
+    end
+    epma_raw{e} = normalize_image(raw_img);
     fprintf('  %s map loaded:  %d x %d pixels\n', ...
             epma_labels{e}, size(epma_raw{e},1), size(epma_raw{e},2));
     log_file_info(log_fid, fullfile(epma_dir, epma_files{e}), ...
@@ -527,18 +539,26 @@ cl_px = cl_reg(mask);
 
 epma_px = zeros(n_grain_px, n_elements);
 for e = 1:n_elements
-    v = double(epma_raw{e}(mask));
-    vmin = min(v);
-    vmax = max(v);
-    if vmax > vmin
-        epma_px(:, e) = (v - vmin) / (vmax - vmin);
+    if normalize_epma
+        v = double(epma_raw{e}(mask));
+        vmin = min(v);
+        vmax = max(v);
+        if vmax > vmin
+            epma_px(:, e) = (v - vmin) / (vmax - vmin);
+        else
+            epma_px(:, e) = zeros(n_grain_px, 1);
+        end
     else
-        epma_px(:, e) = zeros(n_grain_px, 1);
+        epma_px(:, e) = epma_raw_abs{e}(mask);
     end
 end
 
 fprintf('  Pixels extracted per map: %d\n', n_grain_px);
-fprintf('  EPMA pixel vectors re-normalised to [0 1] using in-mask range.\n');
+if normalize_epma
+    fprintf('  EPMA pixel vectors re-normalised to [0 1] using in-mask range.\n');
+else
+    fprintf('  EPMA pixel vectors kept as raw counts (normalize_epma = false).\n');
+end
 
 col_names   = [{'CL'}, epma_labels];
 data_matrix = [cl_px, epma_px];
@@ -559,7 +579,11 @@ lprintf('  Pixels per map:   %d\n', n_grain_px);
 lprintf('  Columns:          %s\n', strjoin(col_names, ', '));
 lprintf('  Matrix size:      %d rows x %d columns\n', size(data_matrix,1), size(data_matrix,2));
 lprintf('  CL normalisation:   full image min/max (includes background)\n');
-lprintf('  EPMA normalisation: in-mask min/max (grain interior only)\n');
+if normalize_epma
+    lprintf('  EPMA normalisation: in-mask min/max (grain interior only)\n');
+else
+    lprintf('  EPMA normalisation: none — raw pixel counts preserved (normalize_epma = false)\n');
+end
 lprintf('\n  Per-channel statistics (within mask, normalised 0-1):\n');
 lprintf('  %-10s  %-8s  %-8s  %-8s  %-8s\n', 'Channel', 'Min', 'Max', 'Mean', 'Std');
 lprintf('  %-10s  %-8s  %-8s  %-8s  %-8s\n', '----------', '--------', '--------', '--------', '--------');
@@ -603,7 +627,11 @@ for e = 1:n_elements
     subplot(n_rows, n_cols, e);
     scatter(x_e, y_e, 8, 'filled', ...
             'MarkerFaceAlpha', 0.08, 'MarkerFaceColor', [0.2 0.2 0.2]);
-    xlabel([epma_labels{e}, ' (norm.)'], 'FontSize', 10);
+    if normalize_epma
+        xlabel([epma_labels{e}, ' (norm.)'], 'FontSize', 10);
+    else
+        xlabel(epma_labels{e}, 'FontSize', 10);
+    end
     ylabel('CL intensity (norm.)', 'FontSize', 10);
     pfit(e,:) = polyfit(x_e, y_e, 1);
     xfit = linspace(min(x_e), max(x_e), 200);
@@ -698,14 +726,14 @@ end
 
 figure('Name', 'Shift sensitivity', 'Position', [100 100 900 400]);
 subplot(1,2,1);
-plot(shift_range, r_shift_x, '-o', 'MarkerSize', 4, 'LineWidth', 1.2);
+plot(shift_range, r_shift_x, '-', 'MarkerSize', 4, 'LineWidth', 1.5);
 xline(0, 'k--', 'LineWidth', 1);
 xlabel('X shift (pixels)'); ylabel('Pearson r');
 legend(epma_labels, 'Location', 'best', 'FontSize', 8);
 title('Sensitivity to X-shift'); grid on;
 
 subplot(1,2,2);
-plot(shift_range, r_shift_y, '-o', 'MarkerSize', 4, 'LineWidth', 1.2);
+plot(shift_range, r_shift_y, '-', 'MarkerSize', 4, 'LineWidth', 1.5);
 xline(0, 'k--', 'LineWidth', 1);
 xlabel('Y shift (pixels)'); ylabel('Pearson r');
 legend(epma_labels, 'Location', 'best', 'FontSize', 8);
