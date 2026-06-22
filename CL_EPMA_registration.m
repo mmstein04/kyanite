@@ -52,30 +52,31 @@ set(0, 'DefaultLegendInterpreter',      'none');
 % --- File paths -----------------------------------------------------------
 input_dir  = '/Users/mstein/bin/kyanite';
 
-cl_filename = 'NA-CM-G12B7-02_CL_color.bmp';
+grain_id    = 'NA-CM-G12B7-02';
+
+cl_filename = [grain_id, '_CL_color.png'];
 
 % Folder containing EPMA element map TIFFs.
 % All *.tif files in this folder are auto-discovered as element maps.
 % The CL file and any script-generated outputs are excluded automatically.
 % Labels are extracted from filenames by stripping the grain_id prefix
 % and any trailing _itN iteration suffix (e.g. _Fe_Ka_it5 -> Fe_Ka).
-epma_dir = '/Users/mstein/bin/kyanite/maps';
+epma_dir = ['/Users/mstein/bin/kyanite/maps/', grain_id];
 
 % Reference map filename (filename only, no path).
 % This map is the FIXED reference for control point selection —
 % choose your highest-quality, highest-contrast map.
 % Leave empty to use the first file found alphabetically.
-epma_ref_file = 'NA-CM-G12B7-02_Cr_Ka.tif';   % e.g., 'NA-CM-G12B4-02_Fe_Ka_it5.tif'
+epma_ref_file = [grain_id, '_Cr_Ka.tif'];   % e.g., 'NA-CM-G12B4-02_Fe_Ka_it5.tif'
 
-output_dir  = '/Users/mstein/bin/kyanite';
-grain_id    = 'NA-CM-G12B7-02';
+output_dir  = '/Users/mstein/bin/kyanite/figs';
 
 % --- Spatial calibration --------------------------------------------------
 epma_pixel_um = 2.0;            % µm per pixel
 
 % --- Mask parameters ------------------------------------------------------
-mask_method   = 'manual';         % otsu or manual
-thresh_manual = 0.08;           % used only if mask_method = 'manual'
+mask_method   = 'interactive';         % otsu, manual, or interactive
+thresh_manual = 0.08;           % used for manual; fallback if interactive receives no clicks
 min_object_px = 500;
 fill_holes    = false;
 
@@ -234,6 +235,8 @@ lprintf('\n  Mask:\n');
 lprintf('    Method:            %s\n', mask_method);
 if strcmp(mask_method, 'manual')
     lprintf('    Manual threshold:  %.4f  [active]\n', thresh_manual);
+elseif strcmp(mask_method, 'interactive')
+    lprintf('    Manual threshold:  %.4f  [fallback if no clicks received]\n', thresh_manual);
 else
     lprintf('    Manual threshold:  %.4f  [inactive — otsu used]\n', thresh_manual);
 end
@@ -481,9 +484,95 @@ switch mask_method
     case 'manual'
         thresh = thresh_manual;
         fprintf('  Manual threshold: %.4f\n', thresh);
+    case 'interactive'
+        all_bg_x    = [];
+        all_bg_y    = [];
+        all_bg_vals = [];
+        thresh      = thresh_manual;   % fallback if no points are selected
+        cl_disp     = pct_stretch(cl_reg, display_pct(1), display_pct(2));
+
+        fprintf('  Interactive mask mode.\n');
+        fprintf('  Click on BACKGROUND pixels (non-grain areas) in the figure.\n');
+        fprintf('  Press Enter when done clicking each round.\n\n');
+
+        done = false;
+        while ~done
+            fig_pk = figure('Name', 'Interactive mask — click background pixels', ...
+                            'Position', [50 50 900 700]);
+            imshow(cl_disp);
+            title({'Click on BACKGROUND pixels (outside the grain).', ...
+                   'Press Enter when done clicking.'}, 'FontSize', 11);
+            hold on;
+            if ~isempty(all_bg_x)
+                scatter(all_bg_x, all_bg_y, 60, 'r', 'filled', ...
+                        'MarkerEdgeColor', 'w', 'LineWidth', 0.8);
+            end
+
+            [new_x, new_y] = ginput();
+            close(fig_pk);
+
+            if ~isempty(new_x)
+                new_x    = max(1, min(ncols_epma, round(new_x)));
+                new_y    = max(1, min(nrows_epma, round(new_y)));
+                new_vals = cl_reg(sub2ind(size(cl_reg), new_y, new_x));
+                all_bg_x    = [all_bg_x;    new_x(:)];
+                all_bg_y    = [all_bg_y;    new_y(:)];
+                all_bg_vals = [all_bg_vals; new_vals(:)];
+            end
+
+            if isempty(all_bg_vals)
+                fprintf('  No points selected yet — using manual threshold %.4f.\n', thresh_manual);
+                thresh = thresh_manual;
+            else
+                thresh = max(all_bg_vals);
+                fprintf('  %d background sample(s): values in [%.4f, %.4f]\n', ...
+                        numel(all_bg_vals), min(all_bg_vals), max(all_bg_vals));
+                fprintf('  Threshold = max background value: %.4f\n', thresh);
+            end
+
+            % Build preview mask with current threshold
+            mask_preview = cl_reg > thresh;
+            if min_object_px > 0
+                mask_preview = bwareaopen(mask_preview, min_object_px);
+            end
+            if fill_holes
+                mask_preview = imfill(mask_preview, 'holes');
+            end
+
+            fig_prev = figure('Name', 'Mask preview', 'Position', [100 100 1000 420]);
+            subplot(1,2,1);
+            imshow(cl_disp); hold on;
+            if ~isempty(all_bg_x)
+                scatter(all_bg_x, all_bg_y, 60, 'r', 'filled', ...
+                        'MarkerEdgeColor', 'w', 'LineWidth', 0.8);
+            end
+            title(sprintf('Background samples (%d pts)', numel(all_bg_vals)));
+            subplot(1,2,2);
+            imshow(cl_disp); hold on;
+            visboundaries(mask_preview, 'Color', 'r', 'LineWidth', 1.5);
+            title(sprintf('Mask preview  thresh: %.4f  |  %d px in grain', ...
+                          thresh, sum(mask_preview(:))));
+            sgtitle(sprintf('%s — interactive mask', grain_id));
+            drawnow;
+
+            resp = input(['  Accept? (y = yes,  n = add more points,\n' ...
+                          '          or enter a number to override threshold): '], 's');
+            resp = strtrim(resp);
+
+            if strcmpi(resp, 'y')
+                done = true;
+            elseif ~isempty(resp) && ~isnan(str2double(resp))
+                thresh = str2double(resp);
+                fprintf('  Threshold manually overridden to: %.4f\n', thresh);
+                done = true;
+            end
+            % 'n' or unrecognized: close preview and loop back for more clicks
+            close(fig_prev);
+        end
+        fprintf('  Interactive threshold accepted: %.4f\n', thresh);
     otherwise
         fclose(log_fid);
-        error('mask_method must be ''otsu'' or ''manual''.');
+        error('mask_method must be ''otsu'', ''manual'', or ''interactive''.');
 end
 
 mask = cl_reg > thresh;
@@ -515,6 +604,19 @@ lprintf('  Final grain pixels:   %d  (%.2f%% of %d x %d image)\n', ...
         n_grain_px, 100*n_grain_px/numel(mask), nrows_epma, ncols_epma);
 lprintf('  Grain area:           %.2f µm²  (at %.4f µm/px)\n', ...
         n_grain_px * epma_pixel_um^2, epma_pixel_um);
+if strcmp(mask_method, 'interactive')
+    if isempty(all_bg_vals)
+        lprintf('  Background samples:   none — fell back to manual threshold\n');
+    else
+        lprintf('  Background samples:   %d points\n', numel(all_bg_vals));
+        lprintf('  Background val range: %.6f – %.6f\n', min(all_bg_vals), max(all_bg_vals));
+        lprintf('  Sample pts (col, row, value):\n');
+        for k = 1:numel(all_bg_vals)
+            lprintf('    pt%-3d  col=%4d  row=%4d  val=%.6f\n', ...
+                    k, all_bg_x(k), all_bg_y(k), all_bg_vals(k));
+        end
+    end
+end
 lprintf(SEC);
 
 % ---- Visualize mask ------------------------------------------------------
