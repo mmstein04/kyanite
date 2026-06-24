@@ -8,7 +8,7 @@
 %   exploratory scatter plots of CL vs. element concentrations.
 %
 % WORKFLOW:
-%   1. Load CL and EPMA images (handles 8-, 16-, and 32-bit TIFFs)
+%   1. Load CL and EPMA images (handyles 8-, 16-, and 32-bit TIFFs)
 %   2. Interactively pick control points to register CL onto EPMA grid
 %   3. Evaluate registration quality (RMSE in pixels and microns)
 %   4. Build a binary grain mask from the registered CL image
@@ -52,9 +52,9 @@ set(0, 'DefaultLegendInterpreter',      'none');
 % --- File paths -----------------------------------------------------------
 input_dir  = '/Users/mstein/bin/kyanite';
 
-grain_id    = 'NA-GS-P84-06';
+grain_id    = 'NA-SS-P1156-02';
 
-cl_filename = [grain_id, '_CL_color.png'];
+cl_filename = [grain_id, '_CL_color.bmp'];
 
 % Folder containing EPMA element map TIFFs.
 % All *.tif files in this folder are auto-discovered as element maps.
@@ -75,7 +75,7 @@ output_dir  = '/Users/mstein/bin/kyanite/figs';
 epma_pixel_um = 2.0;            % µm per pixel
 
 % --- Mask parameters ------------------------------------------------------
-mask_method   = 'manual';         % otsu | manual | interactive | polygon | activecontour
+mask_method   = 'otsu';         % otsu | manual | interactive | polygon | activecontour
 thresh_manual = 0.12;             % used for manual; fallback if interactive receives no clicks
 min_object_px = 500;
 fill_holes    = false;
@@ -83,7 +83,7 @@ fill_holes    = false;
 % Active contour parameters (used only when mask_method = 'activecontour')
 ac_niter        = 200;      % number of Chan-Vese iterations
 ac_smoothfactor = 1.0;      % contour smoothness (higher = smoother boundary)
-ac_init_method  = 'otsu';   % initial mask source: 'otsu' | 'manual' | 'polygon'
+ac_init_method  = 'polygon';   % initial mask source: 'otsu' | 'manual' | 'polygon'
 
 % --- Registration parameters ----------------------------------------------
 transform_type = 'affine';
@@ -690,14 +690,42 @@ switch mask_method
                 pos_init  = h_init.Position;
                 close(fig_ac_init);
                 init_mask = poly2mask(pos_init(:,1), pos_init(:,2), nrows_epma, ncols_epma);
-                fprintf('  Polygon seed: %d vertices, %d px.\n', size(pos_init,1), sum(init_mask(:)));
+                fprintf('  Outer polygon: %d vertices, %d px.\n', size(pos_init,1), sum(init_mask(:)));
+
+                % Optionally subtract hole polygons from the seed mask
+                n_holes = 0;
+                while true
+                    resp_hole = input('  Mark a hole in the seed mask? (y = draw hole, n = done): ', 's');
+                    if ~strcmpi(strtrim(resp_hole), 'y'), break; end
+
+                    fig_hole = figure('Name', 'Draw hole region — double-click to close', ...
+                                      'Position', [50 50 900 700]);
+                    imshow(cl_disp); hold on;
+                    visboundaries(init_mask, 'Color', 'g', 'LineWidth', 1.5);
+                    title({'Draw a polygon over a HOLE to exclude from the seed mask.', ...
+                           'Green boundary = current seed.  Double-click to close.'}, 'FontSize', 11);
+                    h_hole = drawpolygon();
+                    wait(h_hole);
+                    if ~isempty(h_hole.Position)
+                        pos_hole  = h_hole.Position;
+                        hole_mask = poly2mask(pos_hole(:,1), pos_hole(:,2), nrows_epma, ncols_epma);
+                        init_mask = init_mask & ~hole_mask;
+                        n_holes   = n_holes + 1;
+                        fprintf('  Hole %d: %d vertices, %d px removed. Seed now: %d px.\n', ...
+                                n_holes, size(pos_hole,1), sum(hole_mask(:)), sum(init_mask(:)));
+                    end
+                    close(fig_hole);
+                end
+                if n_holes > 0
+                    fprintf('  Total holes drawn: %d\n', n_holes);
+                end
             otherwise
                 fclose(log_fid);
                 error('ac_init_method must be ''otsu'', ''manual'', or ''polygon''.');
         end
 
         fprintf('  Running active contours...\n');
-        mask = activecontour(cl_reg, init_mask, ac_niter, 'method', 'Chan-Vese', ...
+        mask = activecontour(cl_reg, init_mask, ac_niter, 'Chan-Vese', ...
                              'SmoothFactor', ac_smoothfactor);
         fprintf('  Converged: %d px in grain.\n', sum(mask(:)));
 
@@ -973,13 +1001,27 @@ n_shifts  = length(shift_range);
 r_shift_x = zeros(n_shifts, n_elements);
 r_shift_y = zeros(n_shifts, n_elements);
 
+% Pre-compute per-element outlier keep-masks using the same pct thresholds
+% as the scatter plots so the r value at shift=0 matches r_vals exactly.
+keep_shift = true(n_grain_px, n_elements);
+if pct_lo_cut > 0 || pct_hi_cut < 100
+    for e = 1:n_elements
+        lo_e = prctile(epma_px(:,e), pct_lo_cut);
+        hi_e = prctile(epma_px(:,e), pct_hi_cut);
+        keep_shift(:,e) = epma_px(:,e) >= lo_e & epma_px(:,e) <= hi_e;
+    end
+end
+
 for s = 1:n_shifts
     dx = shift_range(s);
     cl_shift_x = circshift(cl_reg, [0,  dx]);
     cl_shift_y = circshift(cl_reg, [dx, 0 ]);
+    cl_vec_x = cl_shift_x(mask);
+    cl_vec_y = cl_shift_y(mask);
     for e = 1:n_elements
-        r_shift_x(s,e) = corr(epma_raw{e}(mask), cl_shift_x(mask));
-        r_shift_y(s,e) = corr(epma_raw{e}(mask), cl_shift_y(mask));
+        ke = keep_shift(:,e);
+        r_shift_x(s,e) = corr(epma_px(ke,e), cl_vec_x(ke));
+        r_shift_y(s,e) = corr(epma_px(ke,e), cl_vec_y(ke));
     end
 end
 
@@ -1016,6 +1058,7 @@ end
 lprintf('\n--- SHIFT SENSITIVITY ANALYSIS ---\n');
 lprintf('  Method:  circshift(cl_reg, [0 dx]) for X; circshift(cl_reg, [dx 0]) for Y\n');
 lprintf('  Note:  circshift wraps edges — valid for internal shifts, not boundary regions.\n');
+lprintf('  Outlier removal: same per-element pct thresholds as scatter plots applied (r at shift=0 matches r_vals).\n');
 if length(shift_range) > 1
     lprintf('  Shift range:  %d to %d px  (step %g)\n', ...
             min(shift_range), max(shift_range), shift_range(2)-shift_range(1));

@@ -16,8 +16,8 @@ from pathlib import Path
 # PARAMETERS — edit this section for each figure
 # =============================================================================
 
-CSV_FILE  = '/Users/mstein/bin/kyanite/NA-GS-P84-06_pixel_data.csv'
-ELEMENT   = 'Cr_Ka'    # column name in CSV (e.g. Fe_Ka, Cr_Ka, Ti_Ka, Mn_Ka)
+CSV_FILE  = '/Users/mstein/bin/kyanite/figs/NA-CM-G12B7-02_pixel_data.csv'
+ELEMENT   = 'Ti_Ka'    # column name in CSV (e.g. Fe_Ka, Cr_Ka, Ti_Ka, Mn_Ka)
 PLOT_TYPE = 'all'      # 'scatter', 'violin', 'boxplot', or 'all'
 
 # Binning — used by 'violin' and 'boxplot'.

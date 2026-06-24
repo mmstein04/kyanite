@@ -19,12 +19,11 @@ from pathlib import Path
 # PARAMETERS — edit this section for each use
 # =============================================================================
 
-H5_FILE   = '/Users/mstein/bin/kyanite/NA-GS-P84-06_xafs.h5'
-OUTPUT_DIR = '/Users/mstein/bin/kyanite'
+H5_FILE   = '/Users/mstein/bin/kyanite/NA-SS-P1156-02_xafs.h5'
+OUTPUT_DIR = '/Users/mstein/bin/kyanite/maps'
 
 # Sample name prefix used in output filenames.
-SAMPLE = 'NA-GS-P84-06'
-
+SAMPLE = 'NA-SS-P1156-02'
 # Elements to export.  Use exact names as stored in the HDF5 file (see the
 # "Available ROIs" list printed at startup).  Set to None to export all ROIs.
 
@@ -45,6 +44,11 @@ ELEMENTS = [
 # Clock map is read from xrmmap/scalars/Clock.
 NORMALIZE_BY_CLOCK = False
 
+# Normalize fluorescence counts by the per-pixel I0 (incident beam intensity).
+# Removes flux variation across the map. Applied after clock normalization if
+# both are enabled. I0 map is read from xrmmap/scalars/I0.
+NORMALIZE_BY_I0 = True
+
 # =============================================================================
 
 def roi_name_to_filename(sample, roi_name):
@@ -56,6 +60,28 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with h5py.File(H5_FILE, 'r') as f:
+        # --- Scan metadata ---------------------------------------------------
+        scan = f['xrmmap/config/scan']
+        def _scalar(ds):
+            v = ds[()]
+            return v.decode() if hasattr(v, 'decode') else float(v)
+
+        step1_mm  = _scalar(scan['step1'])
+        step2_mm  = _scalar(scan['step2'])
+        start1    = _scalar(scan['start1'])
+        stop1     = _scalar(scan['stop1'])
+        start2    = _scalar(scan['start2'])
+        stop2     = _scalar(scan['stop2'])
+        dwell_s   = _scalar(scan['time1'])
+
+        print(f"Scan metadata:")
+        print(f"  Step size (pos1 / X): {step1_mm*1000:.1f} µm  ({step1_mm} mm)")
+        print(f"  Step size (pos2 / Y): {step2_mm*1000:.1f} µm  ({step2_mm} mm)")
+        print(f"  Range pos1 (X):  {start1} to {stop1} mm  ({(stop1-start1)*1000:.0f} µm)")
+        print(f"  Range pos2 (Y):  {start2} to {stop2} mm  ({(stop2-start2)*1000:.0f} µm)")
+        print(f"  Dwell time:      {dwell_s} s/pixel")
+        print()
+
         names_raw = f['xrmmap/roimap/sum_name'][:]
         names = [n.decode() for n in names_raw]
         sum_cor = f['xrmmap/roimap/sum_cor']  # (rows, cols, n_rois), float32
@@ -71,6 +97,12 @@ def main():
             clock[clock == 0] = np.nan   # avoid divide-by-zero; zero-dwell pixels become NaN
             print(f"Clock map loaded: min={np.nanmin(clock):.2f}  max={np.nanmax(clock):.2f}")
 
+        if NORMALIZE_BY_I0:
+            i0 = np.array(f['xrmmap/scalars/I0'], dtype=np.float32)
+            i0 = np.flipud(i0)
+            i0[i0 == 0] = np.nan   # avoid divide-by-zero
+            print(f"I0 map loaded:    min={np.nanmin(i0):.2f}  max={np.nanmax(i0):.2f}")
+
         targets = ELEMENTS if ELEMENTS is not None else names
 
         for roi in targets:
@@ -84,6 +116,8 @@ def main():
 
             if NORMALIZE_BY_CLOCK:
                 data = data / clock
+            if NORMALIZE_BY_I0:
+                data = data / i0
 
             out_name = roi_name_to_filename(SAMPLE, roi)
             out_path = out_dir / out_name
