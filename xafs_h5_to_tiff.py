@@ -10,6 +10,7 @@ Data source: xrmmap/roimap/sum_cor  [rows x cols x n_rois]
 Output filename convention: <sample>_<El>_<Line>.tif  (e.g. NA-CM-G12B7-02_Fe_Ka.tif)
 """
 
+import datetime
 import h5py
 import numpy as np
 import tifffile
@@ -54,6 +55,66 @@ NORMALIZE_BY_I0 = True
 def roi_name_to_filename(sample, roi_name):
     """'Fe Ka' -> 'NA-CM-G12B7-02_Fe_Ka.tif'"""
     return f"{sample}_{roi_name.replace(' ', '_')}.tif"
+
+
+def write_metadata(meta_path, *, h5_file, sample, roi, roi_index, data,
+                   step1_um, step2_um, start1, stop1, start2, stop2,
+                   dwell_s, normalize_by_clock, normalize_by_i0,
+                   n_rois_in_file):
+    """Write a sidecar metadata text file for one element-map TIFF."""
+    valid = data[np.isfinite(data)]
+    rows, cols = data.shape
+    nan_count = np.sum(~np.isfinite(data))
+
+    norm_parts = []
+    if normalize_by_clock:
+        norm_parts.append("clock (dwell time)")
+    if normalize_by_i0:
+        norm_parts.append("I0 (incident beam intensity)")
+    normalization = " and ".join(norm_parts) if norm_parts else "none (raw fluorescence counts)"
+
+    lines = [
+        "# XAFS element-map metadata",
+        f"generated_by       : xafs_h5_to_tiff.py",
+        f"generated_utc      : {datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}",
+        "",
+        "# Source",
+        f"h5_file            : {Path(h5_file).resolve()}",
+        f"h5_dataset         : xrmmap/roimap/sum_cor[:, :, {roi_index}]",
+        f"roi_name           : {roi}",
+        f"roi_index          : {roi_index}  (0-based, out of {n_rois_in_file} ROIs in file)",
+        f"sample             : {sample}",
+        "",
+        "# Image properties",
+        f"bit_depth          : 32-bit float (float32)",
+        f"dimensions_px      : {rows} rows x {cols} cols  (height x width)",
+        f"pixel_count_total  : {rows * cols}",
+        f"pixel_count_valid  : {len(valid)}  (finite, non-NaN)",
+        f"pixel_count_nan    : {nan_count}  (set to NaN during normalization where divisor = 0)",
+        "",
+        "# Value statistics (valid pixels only)",
+        f"value_min          : {valid.min():.6g}" if len(valid) else "value_min          : N/A",
+        f"value_max          : {valid.max():.6g}" if len(valid) else "value_max          : N/A",
+        f"value_mean         : {valid.mean():.6g}" if len(valid) else "value_mean         : N/A",
+        f"value_median       : {np.median(valid):.6g}" if len(valid) else "value_median       : N/A",
+        f"value_std          : {valid.std():.6g}" if len(valid) else "value_std          : N/A",
+        "",
+        "# Normalization",
+        f"normalized_by      : {normalization}",
+        f"  (clock norm divides raw counts by per-pixel clock ticks to remove dwell-time variation)",
+        f"  (I0 norm divides by per-pixel incident beam intensity to remove flux variation)",
+        f"  (normalizations are applied in order: clock first, then I0)",
+        f"row_flip_applied   : yes  (rows flipped vertically; HDF5 stores bottom-to-top)",
+        "",
+        "# Scan geometry",
+        f"step_size_pos1_um  : {step1_um:.2f} µm  (fast axis / X)",
+        f"step_size_pos2_um  : {step2_um:.2f} µm  (slow axis / Y)",
+        f"range_pos1_mm      : {start1:.4f} to {stop1:.4f} mm  ({abs(stop1-start1)*1000:.1f} µm)",
+        f"range_pos2_mm      : {start2:.4f} to {stop2:.4f} mm  ({abs(stop2-start2)*1000:.1f} µm)",
+        f"dwell_time_s       : {dwell_s:.4g} s/pixel",
+    ]
+
+    meta_path.write_text("\n".join(lines) + "\n")
 
 def main():
     out_dir = Path(OUTPUT_DIR)
@@ -122,6 +183,19 @@ def main():
             out_name = roi_name_to_filename(SAMPLE, roi)
             out_path = out_dir / out_name
             tifffile.imwrite(str(out_path), data, photometric='minisblack')
+
+            meta_path = out_path.with_suffix('.txt')
+            write_metadata(
+                meta_path,
+                h5_file=H5_FILE, sample=SAMPLE, roi=roi, roi_index=idx,
+                data=data,
+                step1_um=step1_mm * 1000, step2_um=step2_mm * 1000,
+                start1=start1, stop1=stop1, start2=start2, stop2=stop2,
+                dwell_s=dwell_s,
+                normalize_by_clock=NORMALIZE_BY_CLOCK,
+                normalize_by_i0=NORMALIZE_BY_I0,
+                n_rois_in_file=len(names),
+            )
 
             print(f"  {roi:12s}  shape={data.shape}  "
                   f"min={np.nanmin(data):.4f}  max={np.nanmax(data):.4f}  ->  {out_name}")
