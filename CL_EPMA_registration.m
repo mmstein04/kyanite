@@ -124,7 +124,7 @@ end
 tif_names = {tif_listing.name};
 
 % Exclude the CL image and any script-generated output TIFFs
-output_suffixes = {'_CL_registered.tif', '_mask.tif'};
+output_suffixes = {'_CL_registered.tif', '_CL_registered_color.tif', '_mask.tif'};
 keep_flags = true(1, numel(tif_names));
 for k = 1:numel(tif_names)
     fname = tif_names{k};
@@ -281,6 +281,8 @@ load_normalize = @(fpath) normalize_image(imread(fullfile(input_dir, fpath)));
 
 % CL image
 cl_raw = load_normalize(cl_filename);
+% Keep unprocessed original for the color-registered output.
+cl_raw_color = imread(fullfile(input_dir, cl_filename));
 fprintf('  CL image loaded:   %d x %d pixels\n', size(cl_raw,1), size(cl_raw,2));
 log_file_info(log_fid, fullfile(input_dir, cl_filename), 'CL image (moving)');
 lprintf('    Normalized stats:  min=%.4f  max=%.4f  mean=%.4f  std=%.4f\n', ...
@@ -468,7 +470,12 @@ fprintf('CL image registered to EPMA grid.\n');
 
 cl_reg_file = fullfile(output_dir, [grain_id '_CL_registered.tif']);
 imwrite(uint16(cl_reg * 65535), cl_reg_file);
-fprintf('Registered CL saved to: %s\n\n', cl_reg_file);
+fprintf('Registered CL saved to: %s\n', cl_reg_file);
+
+cl_reg_color      = imwarp(cl_raw_color, tform, 'OutputView', ref_epma, 'Interp', 'bilinear');
+cl_reg_color_file = fullfile(output_dir, [grain_id '_CL_registered_color.tif']);
+imwrite(cl_reg_color, cl_reg_color_file);
+fprintf('Registered color CL saved to: %s\n\n', cl_reg_color_file);
 
 % ---- Visualize registration quality --------------------------------------
 figure('Name', 'Registration check', 'Position', [100 100 1200 400]);
@@ -1131,6 +1138,7 @@ saveas(gcf, fullfile(output_dir, [grain_id '_all_maps_QC.png']));
 % ---- Output file inventory -----------------------------------------------
 all_outputs = { ...
     cl_reg_file,                                                   'Registered CL image (16-bit TIFF)'; ...
+    cl_reg_color_file,                                             'Registered color CL image (TIFF)'; ...
     mask_file,                                                     'Grain mask (8-bit TIFF)'; ...
     cp_savefile,                                                   'Control points (.mat)'; ...
     mat_file,                                                      'Pixel data (.mat)'; ...
@@ -1169,6 +1177,7 @@ fprintf('Key files:\n');
 fprintf('  %s_analysis_log.txt         — comprehensive run record\n', grain_id);
 fprintf('  %s_controlpoints.mat        — saved control points (reusable)\n', grain_id);
 fprintf('  %s_CL_registered.tif\n', grain_id);
+fprintf('  %s_CL_registered_color.tif\n', grain_id);
 fprintf('  %s_mask.tif\n', grain_id);
 fprintf('  %s_pixel_data.mat/.csv      — main analysis data\n', grain_id);
 fprintf('  %s_CL_vs_elements.png\n', grain_id);
