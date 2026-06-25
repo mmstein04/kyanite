@@ -1,5 +1,5 @@
 """
-xafs_h5_to_tiff.py
+xrf_h5_to_tiff.py
 
 Extract element maps from a Larch/GSECARS XRF map HDF5 file and save each
 as a 32-bit float TIFF, ready for use in CL_EPMA_registration.m.
@@ -20,11 +20,11 @@ from pathlib import Path
 # PARAMETERS — edit this section for each use
 # =============================================================================
 
-H5_FILE   = '/Users/mstein/bin/kyanite/NA-SS-P1156-02_xafs.h5'
+H5_FILE   = '/Users/mstein/bin/kyanite/RH-XA-57081P-07_xafs.h5'
 OUTPUT_DIR = '/Users/mstein/bin/kyanite/maps'
 
 # Sample name prefix used in output filenames.
-SAMPLE = 'NA-SS-P1156-02'
+SAMPLE = 'RH-XA-57081P-07'
 # Elements to export.  Use exact names as stored in the HDF5 file (see the
 # "Available ROIs" list printed at startup).  Set to None to export all ROIs.
 
@@ -74,8 +74,8 @@ def write_metadata(meta_path, *, h5_file, sample, roi, roi_index, data,
     normalization = " and ".join(norm_parts) if norm_parts else "none (raw fluorescence counts)"
 
     lines = [
-        "# XAFS element-map metadata",
-        f"generated_by       : xafs_h5_to_tiff.py",
+        "# XRF element-map metadata",
+        f"generated_by       : xrf_h5_to_tiff.py",
         f"generated_utc      : {datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}",
         "",
         "# Source",

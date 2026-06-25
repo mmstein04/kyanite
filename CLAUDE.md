@@ -10,7 +10,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 - Known CL activators in kyanite: Cr³⁺, Ti
 - Known CL quencher: Fe²⁺ (quenches above ~3200 µg/g)
 - Goal: quantify per-pixel correlations between CL intensity and trace element
-  concentrations, using both EPMA and synchrotron XRF (XAFS) maps
+  concentrations, using both EPMA and synchrotron XRF maps
 
 ## Codebase overview
 
@@ -18,10 +18,10 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 
 | Script | Language | Purpose |
 |---|---|---|
-| `xafs_h5_to_tiff.py` | Python | Extract XRF element maps from a Larch/GSECARS HDF5 file; export as 32-bit float TIFFs + metadata sidecars |
+| `xrf_h5_to_tiff.py` | Python | Extract XRF element maps from a Larch/GSECARS HDF5 file; export as 32-bit float TIFFs + metadata sidecars |
 | `CL_EPMA_registration.m` | MATLAB | Full registration + analysis pipeline (see workflow below) |
 | `kyanite_figures.py` | Python | Standalone figure generation from exported CSV pixel data |
-| `xafs_display.m` | MATLAB | Visualize XAFS element-map TIFFs with grain mask overlay |
+| `xrf_display.m` | MATLAB | Visualize XRF element-map TIFFs with grain mask overlay |
 | `sum_epma_maps.m` | MATLAB | Sum two or more element maps into a combined TIFF (e.g. Zr_La + Zr_Lb) |
 
 ### `CL_EPMA_registration.m` workflow
@@ -34,7 +34,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 7. Shift-sensitivity analysis to quantify alignment-error impact on correlations
 8. Write analysis log, save registered CL TIFFs (grayscale 16-bit + original color), mask TIFF, pixel data `.mat` / `.csv`
 
-### `xafs_h5_to_tiff.py` details
+### `xrf_h5_to_tiff.py` details
 - Data source: `xrmmap/roimap/sum_cor` [rows × cols × n_rois], `xrmmap/roimap/sum_name`
 - Scan geometry read from `xrmmap/config/scan` (step sizes, ranges, dwell time)
 - Optional normalization: `NORMALIZE_BY_CLOCK` and/or `NORMALIZE_BY_I0` (applied in that order)
@@ -62,7 +62,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 - `mask_method` — grain segmentation method
 - `pct_lo_cut` / `pct_hi_cut` — outlier percentile bounds for scatter plots
 
-**`xafs_h5_to_tiff.py`**
+**`xrf_h5_to_tiff.py`**
 - `H5_FILE`, `OUTPUT_DIR`, `SAMPLE`
 - `ELEMENTS` — list of ROI names to export (or `None` for all)
 - `NORMALIZE_BY_CLOCK`, `NORMALIZE_BY_I0`

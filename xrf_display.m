@@ -1,8 +1,8 @@
 % =========================================================================
-% XAFS_DISPLAY.m
+% XRF_DISPLAY.m
 %
 % PURPOSE:
-%   load XAFS element map TIFFs for a single grain and display each
+%   load XRF element map TIFFs for a single grain and display each
 %   element as a figure with an optional colorbar. Off-grain pixels are
 %   masked transparent using a pre-existing binary mask.
 %
