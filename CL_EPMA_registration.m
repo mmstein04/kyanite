@@ -53,13 +53,13 @@ set(0, 'DefaultLegendInterpreter',      'none');
 % --- File paths -----------------------------------------------------------
 input_dir  = '/Users/mstein/bin/kyanite';
 
-grain_id    = 'NA-SS-P1156-02';
+grain_id    = 'NA-GS-P84-03';
 
-cl_filename = [grain_id, '_CL_color.bmp'];
+cl_filename = [grain_id, '_CL_color.png'];
 
 % Folder containing EPMA element map TIFFs.
 % All *.tif files in this folder are auto-discovered as element maps.
-% The CL file and any script-generated outputs are excluded automatically.
+% The CL file and any script-generated outputs anre excluded automatically.
 % Labels are extracted from filenames by stripping the grain_id prefix
 % and any trailing _itN iteration suffix (e.g. _Fe_Ka_it5 -> Fe_Ka).
 epma_dir = ['/Users/mstein/bin/kyanite/maps/', grain_id];
@@ -73,10 +73,10 @@ epma_ref_file = [grain_id, '_Cr_Ka.tif'];   % e.g., 'NA-CM-G12B4-02_Fe_Ka_it5.ti
 output_dir  = '/Users/mstein/bin/kyanite/figs';
 
 % --- Spatial calibration --------------------------------------------------
-epma_pixel_um = 2.0;            % µm per pixel
+epma_pixel_um = 1.0;            % µm per pixel
 
 % --- Mask parameters ------------------------------------------------------
-mask_method   = 'otsu';         % otsu | manual | interactive | polygon | activecontour
+mask_method   = 'activecontour';         % otsu | manual | interactive | polygon | activecontour
 thresh_manual = 0.12;             % used for manual; fallback if interactive receives no clicks
 min_object_px = 500;
 fill_holes    = false;
@@ -502,6 +502,22 @@ fprintf('\n--- BUILDING GRAIN MASK ---\n');
 cl_disp  = pct_stretch(cl_reg, display_pct(1), display_pct(2));
 thresh   = NaN;    % set for threshold-based methods; NaN otherwise
 poly_pos = [];     % set for polygon-based methods
+mask_source = 'newly generated';
+skip_mask = false;
+
+mask_file = fullfile(output_dir, [grain_id '_mask.tif']);
+if exist(mask_file, 'file')
+    resp = input('Saved mask found. Use it? (y/n): ', 's');
+    if strcmpi(resp, 'y')
+        mask_raw = imread(mask_file);
+        mask = mask_raw > 128;
+        fprintf('Loaded saved mask (%d px in grain).\n', sum(mask(:)));
+        mask_source = ['loaded from file: ', mask_file];
+        skip_mask = true;
+    end
+end
+
+if ~skip_mask
 
 switch mask_method
 
@@ -753,6 +769,7 @@ switch mask_method
         fclose(log_fid);
         error('mask_method must be ''otsu'', ''manual'', ''interactive'', ''polygon'', or ''activecontour''.');
 end
+end  % if ~skip_mask
 
 n_px_raw = sum(mask(:));
 
@@ -767,13 +784,17 @@ n_grain_px = sum(mask(:));
 fprintf('  Grain pixels in mask: %d  (%.1f%% of image)\n', ...
         n_grain_px, 100*n_grain_px/numel(mask));
 
-mask_file = fullfile(output_dir, [grain_id '_mask.tif']);
 imwrite(uint8(mask)*255, mask_file);
 fprintf('  Mask saved to: %s\n', mask_file);
 
 % ---- Log mask info -------------------------------------------------------
 lprintf('\n--- GRAIN MASK ---\n');
-lprintf('  Method:               %s\n', mask_method);
+lprintf('  Source:               %s\n', mask_source);
+if skip_mask
+    lprintf('  Method:               %s  [inactive — mask loaded from file]\n', mask_method);
+else
+    lprintf('  Method:               %s\n', mask_method);
+end
 if ~isnan(thresh)
     lprintf('  Threshold applied:    %.6f\n', thresh);
 else
@@ -786,29 +807,31 @@ lprintf('  Final grain pixels:   %d  (%.2f%% of %d x %d image)\n', ...
         n_grain_px, 100*n_grain_px/numel(mask), nrows_epma, ncols_epma);
 lprintf('  Grain area:           %.2f µm²  (at %.4f µm/px)\n', ...
         n_grain_px * epma_pixel_um^2, epma_pixel_um);
-if strcmp(mask_method, 'interactive')
-    if isempty(all_bg_vals)
-        lprintf('  Background samples:   none — fell back to manual threshold\n');
-    else
-        lprintf('  Background samples:   %d points\n', numel(all_bg_vals));
-        lprintf('  Background val range: %.6f – %.6f\n', min(all_bg_vals), max(all_bg_vals));
-        lprintf('  Sample pts (col, row, value):\n');
-        for k = 1:numel(all_bg_vals)
-            lprintf('    pt%-3d  col=%4d  row=%4d  val=%.6f\n', ...
-                    k, all_bg_x(k), all_bg_y(k), all_bg_vals(k));
+if ~skip_mask
+    if strcmp(mask_method, 'interactive')
+        if isempty(all_bg_vals)
+            lprintf('  Background samples:   none — fell back to manual threshold\n');
+        else
+            lprintf('  Background samples:   %d points\n', numel(all_bg_vals));
+            lprintf('  Background val range: %.6f – %.6f\n', min(all_bg_vals), max(all_bg_vals));
+            lprintf('  Sample pts (col, row, value):\n');
+            for k = 1:numel(all_bg_vals)
+                lprintf('    pt%-3d  col=%4d  row=%4d  val=%.6f\n', ...
+                        k, all_bg_x(k), all_bg_y(k), all_bg_vals(k));
+            end
         end
+    elseif strcmp(mask_method, 'polygon')
+        lprintf('  Polygon vertices:     %d\n', size(poly_pos,1));
+        lprintf('  Vertex coords (col, row):\n');
+        for k = 1:size(poly_pos,1)
+            lprintf('    pt%-3d  col=%8.2f  row=%8.2f\n', k, poly_pos(k,1), poly_pos(k,2));
+        end
+    elseif strcmp(mask_method, 'activecontour')
+        lprintf('  AC method:            Chan-Vese\n');
+        lprintf('  AC iterations:        %d\n', ac_niter);
+        lprintf('  AC smooth factor:     %.4f\n', ac_smoothfactor);
+        lprintf('  AC init method:       %s\n', ac_init_method);
     end
-elseif strcmp(mask_method, 'polygon')
-    lprintf('  Polygon vertices:     %d\n', size(poly_pos,1));
-    lprintf('  Vertex coords (col, row):\n');
-    for k = 1:size(poly_pos,1)
-        lprintf('    pt%-3d  col=%8.2f  row=%8.2f\n', k, poly_pos(k,1), poly_pos(k,2));
-    end
-elseif strcmp(mask_method, 'activecontour')
-    lprintf('  AC method:            Chan-Vese\n');
-    lprintf('  AC iterations:        %d\n', ac_niter);
-    lprintf('  AC smooth factor:     %.4f\n', ac_smoothfactor);
-    lprintf('  AC init method:       %s\n', ac_init_method);
 end
 lprintf(SEC);
 
