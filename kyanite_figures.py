@@ -20,7 +20,7 @@ from pathlib import Path
 # =============================================================================
 
 CSV_INPUT = '/Users/mstein/bin/kyanite/figs/'   # file or directory
-ELEMENTS  = ['Ti_Ka', 'Fe_Ka', 'Cr_Ka']          # CSV column names
+ELEMENTS  = ['Ti_Ka', 'Fe_Ka', 'Cr_Ka', 'Mn_Ka', 'V_Ka']          # CSV column names
 PLOT_TYPE = 'all'      # 'scatter', 'violin', 'boxplot', or 'all'
 
 # Binning — used by 'violin' and 'boxplot'.

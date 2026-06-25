@@ -53,7 +53,7 @@ set(0, 'DefaultLegendInterpreter',      'none');
 % --- File paths -----------------------------------------------------------
 input_dir  = '/Users/mstein/bin/kyanite';
 
-grain_id    = 'NA-GS-P84-03';
+grain_id    = 'NA-GS-P84-06';
 
 cl_filename = [grain_id, '_CL_color.png'];
 
