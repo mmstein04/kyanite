@@ -23,7 +23,8 @@
 %   - Pixel size of EPMA map in microns (for spatial error reporting)
 %
 % OUTPUTS:
-%   - Registered CL image saved as TIFF
+%   - Registered CL image saved as TIFF (16-bit grayscale)
+%   - Registered CL image saved as TIFF (original color, native bit depth)
 %   - Grain mask saved as TIFF
 %   - [grain_id]_analysis_log.txt — comprehensive run record
 %   - Scatter plots saved as .png
