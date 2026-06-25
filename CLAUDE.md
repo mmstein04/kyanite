@@ -32,7 +32,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 5. Apply mask; extract per-pixel CL and element concentration vectors
 6. Scatter plot CL vs. each element; compute Pearson r
 7. Shift-sensitivity analysis to quantify alignment-error impact on correlations
-8. Write analysis log, save registered CL TIFF, mask TIFF, pixel data `.mat` / `.csv`
+8. Write analysis log, save registered CL TIFFs (grayscale 16-bit + original color), mask TIFF, pixel data `.mat` / `.csv`
 
 ### `xafs_h5_to_tiff.py` details
 - Data source: `xrmmap/roimap/sum_cor` [rows × cols × n_rois], `xrmmap/roimap/sum_name`
@@ -45,6 +45,8 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 ## File conventions
 - Output filenames: `<sample>_<Element>_<Line>.tif`  (e.g. `NA-CM-G12B7-02_Fe_Ka.tif`)
 - Metadata sidecars: same base name, `.txt` extension
+- Registered CL (grayscale, 16-bit): `<grain_id>_CL_registered.tif`
+- Registered CL (original color, native bit depth): `<grain_id>_CL_registered_color.tif`
 - Pixel data exports: `<grain_id>_pixel_data.csv` and `.mat`
 - Analysis log: `<grain_id>_analysis_log.txt`
 - Figures saved to `figs/`, element maps to `maps/<grain_id>/`
