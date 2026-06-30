@@ -21,7 +21,7 @@ from pathlib import Path
 
 CSV_INPUT = '/Users/mstein/bin/kyanite/figs/'   # file or directory
 ELEMENTS  = ['Ti_Ka', 'Fe_Ka', 'Cr_Ka', 'Mn_Ka', 'V_Ka']          # CSV column names
-PLOT_TYPE = 'all'      # 'scatter', 'violin', 'boxplot', or 'all'
+PLOT_TYPE = 'scatter'      # 'scatter', 'violin', 'boxplot', or 'all'
 
 # Binning — used by 'violin' and 'boxplot'.
 # N_BINS splits the (filtered) element range into equal-width bins.
@@ -35,7 +35,7 @@ PCT_LO = 0
 PCT_HI = 99
 
 SAVE_FIG   = True      # False to display only
-SHOW_TITLE = False     # True to add a grain/element/plot-type title
+SHOW_TITLE = True      # True to add a grain/element/plot-type title
 
 # =============================================================================
 # RESOLVE INPUT → list of CSV paths
@@ -118,7 +118,7 @@ def make_plot(plot_type, element, grain_id, out_dir, x, y, plot_df, occupied, co
 
     # ---- Common styling -----------------------------------------------------
     if SHOW_TITLE:
-        ax.set_title(f'{grain_id} — CL vs. {element}  ({plot_type})', fontsize=11)
+        ax.set_title(grain_id, fontsize=11)
     ax.grid(True, alpha=0.25, linewidth=0.5)
     sns.despine(ax=ax)
     plt.tight_layout()

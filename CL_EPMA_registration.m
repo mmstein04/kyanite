@@ -53,7 +53,7 @@ set(0, 'DefaultLegendInterpreter',      'none');
 % --- File paths -----------------------------------------------------------
 input_dir  = '/Users/mstein/bin/kyanite';
 
-grain_id    = 'NA-GS-P84-06';
+grain_id    = 'LLF6-01';
 
 cl_filename = [grain_id, '_CL_color.png'];
 
@@ -73,10 +73,10 @@ epma_ref_file = [grain_id, '_Cr_Ka.tif'];   % e.g., 'NA-CM-G12B4-02_Fe_Ka_it5.ti
 output_dir  = '/Users/mstein/bin/kyanite/figs';
 
 % --- Spatial calibration --------------------------------------------------
-epma_pixel_um = 1.0;            % µm per pixel
+epma_pixel_um = 2.0;            % µm per pixel
 
 % --- Mask parameters ------------------------------------------------------
-mask_method   = 'activecontour';         % otsu | manual | interactive | polygon | activecontour
+mask_method   = 'interactive';         % otsu | manual | interactive | polygon | activecontour
 thresh_manual = 0.12;             % used for manual; fallback if interactive receives no clicks
 min_object_px = 500;
 fill_holes    = false;
@@ -85,6 +85,15 @@ fill_holes    = false;
 ac_niter        = 200;      % number of Chan-Vese iterations
 ac_smoothfactor = 1.0;      % contour smoothness (higher = smoother boundary)
 ac_init_method  = 'polygon';   % initial mask source: 'otsu' | 'manual' | 'polygon'
+
+% Optional: alternative image for grain mask generation
+% Leave empty ('') to use the registered CL image (default).
+% Provide a filename (relative to input_dir) when the grain is poorly
+% contrasted in CL — e.g. an EDS Al map to isolate kyanite in a quartzite
+% where surrounding quartz is brighter in CL than the grain.
+% If set, this image is registered to the EPMA grid using its own saved
+% control points (separate from the CL control points) before masking.
+mask_image_file = 'LLF6-01_EDS_Al.tiff';   % e.g., 'NA-GS-P84-06_Al_EDS.tif'
 
 % --- Registration parameters ----------------------------------------------
 transform_type = 'affine';
@@ -257,6 +266,11 @@ switch mask_method
 end
 lprintf('    Min object size:   %d px\n', min_object_px);
 lprintf('    Fill holes:        %s\n', mat2str(fill_holes));
+if ~isempty(mask_image_file)
+    lprintf('    Mask image:        %s  (will be registered to EPMA grid)\n', mask_image_file);
+else
+    lprintf('    Mask image:        <using registered CL image>\n');
+end
 lprintf('\n  Spatial calibration: %.4f µm/px\n', epma_pixel_um);
 if length(shift_range) > 1
     lprintf('  Shift test range:    %d to %d px  (step %g)\n', ...
@@ -288,6 +302,17 @@ fprintf('  CL image loaded:   %d x %d pixels\n', size(cl_raw,1), size(cl_raw,2))
 log_file_info(log_fid, fullfile(input_dir, cl_filename), 'CL image (moving)');
 lprintf('    Normalized stats:  min=%.4f  max=%.4f  mean=%.4f  std=%.4f\n', ...
         min(cl_raw(:)), max(cl_raw(:)), mean(cl_raw(:)), std(cl_raw(:)));
+
+% Alternative mask image (EDS map, or any image with better grain contrast)
+if ~isempty(mask_image_file)
+    mask_img_raw = load_normalize(mask_image_file);
+    fprintf('  Mask image loaded: %d x %d pixels  (%s)\n', ...
+            size(mask_img_raw,1), size(mask_img_raw,2), mask_image_file);
+    log_file_info(log_fid, fullfile(input_dir, mask_image_file), 'Mask image (alternative, moving)');
+    lprintf('    Normalized stats:  min=%.4f  max=%.4f  mean=%.4f  std=%.4f\n', ...
+            min(mask_img_raw(:)), max(mask_img_raw(:)), ...
+            mean(mask_img_raw(:)), std(mask_img_raw(:)));
+end
 
 % EPMA maps
 epma_raw = cell(1, n_elements);
@@ -469,6 +494,11 @@ ref_epma = imref2d([nrows_epma, ncols_epma]);
 cl_reg   = imwarp(cl_raw, tform, 'OutputView', ref_epma, 'Interp', 'bilinear');
 fprintf('CL image registered to EPMA grid.\n');
 
+% Footprint of the registered CL: true wherever imwarp mapped real CL pixels.
+% Used to clip EDS-derived masks so they never extend into the black padding
+% that imwarp inserts outside the CL data extent.
+cl_valid_mask = imwarp(ones(size(cl_raw)), tform, 'OutputView', ref_epma, 'Interp', 'nearest') > 0.5;
+
 cl_reg_file = fullfile(output_dir, [grain_id '_CL_registered.tif']);
 imwrite(uint16(cl_reg * 65535), cl_reg_file);
 fprintf('Registered CL saved to: %s\n', cl_reg_file);
@@ -494,12 +524,118 @@ title({'Overlay check: red = EPMA ref, green = registered CL', ...
 saveas(gcf, fullfile(output_dir, [grain_id '_registration_overlay.png']));
 
 % =========================================================================
+%% SECTION 4b: REGISTER MASK IMAGE TO EPMA GRID  (skipped if mask_image_file is empty)
+% =========================================================================
+
+if ~isempty(mask_image_file)
+    fprintf('\n--- MASK IMAGE REGISTRATION ---\n');
+    fprintf('Registering alternative mask image to EPMA grid: %s\n', mask_image_file);
+    fprintf('Instructions:\n');
+    fprintf('  Left  panel = mask image (moving): %s\n', mask_image_file);
+    fprintf('  Right panel = registered CL image (fixed)\n');
+    fprintf('  Pick at least 6 well-distributed pairs of matching points.\n');
+    fprintf('  Close the window when done.\n\n');
+
+    mask_cp_savefile = fullfile(output_dir, [grain_id '_mask_image_controlpoints.mat']);
+    mask_cp_source   = 'newly selected via cpselect';
+    skip_mask_cp     = false;
+
+    if exist(mask_cp_savefile, 'file')
+        resp = input('Saved mask-image control points found. Use them? (y/n): ', 's');
+        if strcmpi(resp, 'y')
+            load(mask_cp_savefile, 'mask_moving_pts', 'mask_fixed_pts');
+            fprintf('Loaded saved mask-image control points (%d pairs).\n', size(mask_moving_pts,1));
+            mask_cp_source = ['loaded from file: ', mask_cp_savefile];
+            skip_mask_cp   = true;
+        end
+    end
+
+    if ~skip_mask_cp
+        [mask_moving_pts, mask_fixed_pts] = cpselect(mask_img_raw, cl_reg, 'Wait', true);
+        if size(mask_moving_pts, 1) < 3
+            fclose(log_fid);
+            error('You need at least 3 control point pairs for the mask image. Please rerun.');
+        end
+        fprintf('%d control point pairs selected.\n', size(mask_moving_pts,1));
+        save(mask_cp_savefile, 'mask_moving_pts', 'mask_fixed_pts');
+        fprintf('Mask-image control points saved to: %s\n', mask_cp_savefile);
+    end
+
+    % Fit transform and evaluate quality
+    mask_tform          = fitgeotrans(mask_moving_pts, mask_fixed_pts, transform_type);
+    mask_pts_warped     = transformPointsForward(mask_tform, mask_moving_pts);
+    mask_residuals_px   = mask_fixed_pts - mask_pts_warped;
+    mask_residual_dist  = sqrt(sum(mask_residuals_px.^2, 2));
+    mask_RMSE_px        = sqrt(mean(mask_residual_dist.^2));
+    mask_RMSE_um        = mask_RMSE_px * epma_pixel_um;
+    mask_max_res        = max(mask_residual_dist);
+
+    fprintf('\n  Mask image registration quality:\n');
+    fprintf('    RMSE:          %.3f pixels  (%.2f µm)\n', mask_RMSE_px, mask_RMSE_um);
+    fprintf('    Max residual:  %.3f pixels  (%.2f µm)\n', mask_max_res, mask_max_res*epma_pixel_um);
+    fprintf('    Control pts:   %d pairs\n\n', size(mask_moving_pts,1));
+    if mask_RMSE_px > 3
+        warning('Mask image RMSE > 3 pixels. Consider re-picking control points.');
+    end
+
+    % Warp mask image to EPMA grid
+    mask_img_reg = imwarp(mask_img_raw, mask_tform, 'OutputView', ref_epma, 'Interp', 'bilinear');
+    fprintf('Mask image registered to EPMA grid.\n');
+
+    % Log
+    n_mask_cp = size(mask_moving_pts, 1);
+    lprintf('\n--- MASK IMAGE REGISTRATION ---\n');
+    lprintf('  Mask image:       %s  (moving)\n', mask_image_file);
+    lprintf('  Fixed reference:  registered CL image  (already on EPMA grid)\n');
+    lprintf('  CP source:        %s\n', mask_cp_source);
+    lprintf('  CP count:         %d pairs\n', n_mask_cp);
+    lprintf('  Transform type:   %s\n', transform_type);
+    lprintf('  RMSE:             %.6f px  (%.4f µm)\n', mask_RMSE_px, mask_RMSE_um);
+    lprintf('  Max residual:     %.6f px  (%.4f µm)\n', mask_max_res, mask_max_res*epma_pixel_um);
+    if mask_RMSE_px > 3
+        lprintf('  ** WARNING: RMSE > 3 pixels — consider re-picking control points **\n');
+    end
+    lprintf('\n  Per-point residuals:\n');
+    lprintf('  %-5s  %-10s  %-10s  %-11s  %-11s  %-10s\n', ...
+            '#', 'Fixed_X', 'Fixed_Y', 'Resid_X', 'Resid_Y', 'Dist_px');
+    for k = 1:n_mask_cp
+        lprintf('  %-5d  %-10.3f  %-10.3f  %-11.5f  %-11.5f  %-10.5f\n', ...
+                k, mask_fixed_pts(k,1), mask_fixed_pts(k,2), ...
+                mask_residuals_px(k,1), mask_residuals_px(k,2), mask_residual_dist(k));
+    end
+    lprintf(SEC);
+
+    % Registration check figure
+    figure('Name', 'Mask image registration check', 'Position', [100 100 1200 400]);
+    subplot(1,3,1); imshow(mask_img_raw);
+    title(sprintf('Mask image: %s', mask_image_file));
+    subplot(1,3,2); imshow(cl_reg);
+    title('Registered CL (fixed reference)');
+    subplot(1,3,3); imshow(mask_img_reg);
+    title('Mask image: registered to EPMA grid');
+    sgtitle(sprintf('%s — Mask image registration RMSE: %.2f px (%.2f µm)', ...
+            grain_id, mask_RMSE_px, mask_RMSE_um));
+    saveas(gcf, fullfile(output_dir, [grain_id '_mask_image_registration.png']));
+end
+
+% =========================================================================
 %% SECTION 5: BUILD GRAIN MASK
 % =========================================================================
 
 fprintf('\n--- BUILDING GRAIN MASK ---\n');
 
-cl_disp  = pct_stretch(cl_reg, display_pct(1), display_pct(2));
+% Select which image to use for masking
+if ~isempty(mask_image_file)
+    mask_img       = mask_img_reg;
+    mask_img_disp  = pct_stretch(mask_img_reg, display_pct(1), display_pct(2));
+    mask_img_label = mask_image_file;
+    fprintf('  Masking from alternative image: %s\n', mask_image_file);
+else
+    mask_img       = cl_reg;
+    mask_img_disp  = pct_stretch(cl_reg, display_pct(1), display_pct(2));
+    mask_img_label = 'CL (registered)';
+end
+
 thresh   = NaN;    % set for threshold-based methods; NaN otherwise
 poly_pos = [];     % set for polygon-based methods
 mask_source = 'newly generated';
@@ -522,14 +658,14 @@ if ~skip_mask
 switch mask_method
 
     case 'otsu'
-        thresh = graythresh(cl_reg);
+        thresh = graythresh(mask_img);
         fprintf('  Otsu threshold: %.4f\n', thresh);
-        mask = cl_reg > thresh;
+        mask = mask_img > thresh;
 
     case 'manual'
         thresh = thresh_manual;
         fprintf('  Manual threshold: %.4f\n', thresh);
-        mask = cl_reg > thresh;
+        mask = mask_img > thresh;
 
     case 'interactive'
         all_bg_x    = [];
@@ -545,7 +681,7 @@ switch mask_method
         while ~done
             fig_pk = figure('Name', 'Interactive mask — click background pixels', ...
                             'Position', [50 50 900 700]);
-            imshow(cl_disp);
+            imshow(mask_img_disp);
             title({'Click on BACKGROUND pixels (outside the grain).', ...
                    'Press Enter when done clicking.'}, 'FontSize', 11);
             hold on;
@@ -560,7 +696,7 @@ switch mask_method
             if ~isempty(new_x)
                 new_x    = max(1, min(ncols_epma, round(new_x)));
                 new_y    = max(1, min(nrows_epma, round(new_y)));
-                new_vals = cl_reg(sub2ind(size(cl_reg), new_y, new_x));
+                new_vals = mask_img(sub2ind(size(mask_img), new_y, new_x));
                 all_bg_x    = [all_bg_x;    new_x(:)];
                 all_bg_y    = [all_bg_y;    new_y(:)];
                 all_bg_vals = [all_bg_vals; new_vals(:)];
@@ -577,7 +713,7 @@ switch mask_method
             end
 
             % Build preview mask with current threshold
-            mask_preview = cl_reg > thresh;
+            mask_preview = mask_img > thresh;
             if min_object_px > 0
                 mask_preview = bwareaopen(mask_preview, min_object_px);
             end
@@ -587,14 +723,14 @@ switch mask_method
 
             fig_prev = figure('Name', 'Mask preview', 'Position', [100 100 1000 420]);
             subplot(1,2,1);
-            imshow(cl_disp); hold on;
+            imshow(mask_img_disp); hold on;
             if ~isempty(all_bg_x)
                 scatter(all_bg_x, all_bg_y, 60, 'r', 'filled', ...
                         'MarkerEdgeColor', 'w', 'LineWidth', 0.8);
             end
             title(sprintf('Background samples (%d pts)', numel(all_bg_vals)));
             subplot(1,2,2);
-            imshow(cl_disp); hold on;
+            imshow(mask_img_disp); hold on;
             visboundaries(mask_preview, 'Color', 'r', 'LineWidth', 1.5);
             title(sprintf('Mask preview  thresh: %.4f  |  %d px in grain', ...
                           thresh, sum(mask_preview(:))));
@@ -616,7 +752,7 @@ switch mask_method
             close(fig_prev);
         end
         fprintf('  Interactive threshold accepted: %.4f\n', thresh);
-        mask = cl_reg > thresh;
+        mask = mask_img > thresh;
 
     case 'polygon'
         % User traces the grain outline directly — no brightness threshold.
@@ -629,7 +765,7 @@ switch mask_method
         while ~done
             fig_poly = figure('Name', 'Draw grain boundary — double-click to close', ...
                               'Position', [50 50 900 700]);
-            imshow(cl_disp);
+            imshow(mask_img_disp);
             title({'Click to place vertices around the grain boundary.', ...
                    'Double-click the last vertex to close and accept.'}, 'FontSize', 11);
 
@@ -654,12 +790,12 @@ switch mask_method
 
             fig_prev = figure('Name', 'Polygon mask preview', 'Position', [100 100 1000 420]);
             subplot(1,2,1);
-            imshow(cl_disp); hold on;
+            imshow(mask_img_disp); hold on;
             plot([poly_pos(:,1); poly_pos(1,1)], [poly_pos(:,2); poly_pos(1,2)], ...
                  'b-o', 'LineWidth', 1.5, 'MarkerSize', 5, 'MarkerFaceColor', 'b');
             title(sprintf('Polygon (%d vertices)', size(poly_pos,1)));
             subplot(1,2,2);
-            imshow(cl_disp); hold on;
+            imshow(mask_img_disp); hold on;
             visboundaries(mask_preview, 'Color', 'r', 'LineWidth', 1.5);
             title(sprintf('Mask preview  |  %d px in grain', sum(mask_preview(:))));
             sgtitle(sprintf('%s — polygon mask', grain_id));
@@ -687,13 +823,13 @@ switch mask_method
 
         switch ac_init_method
             case 'otsu'
-                init_thresh = graythresh(cl_reg);
-                init_mask   = cl_reg > init_thresh;
+                init_thresh = graythresh(mask_img);
+                init_mask   = mask_img > init_thresh;
                 init_mask   = bwareaopen(init_mask, min_object_px);
                 fprintf('  Otsu seed threshold: %.4f  (%d px)\n', init_thresh, sum(init_mask(:)));
             case 'manual'
                 init_thresh = thresh_manual;
-                init_mask   = cl_reg > init_thresh;
+                init_mask   = mask_img > init_thresh;
                 init_mask   = bwareaopen(init_mask, min_object_px);
                 fprintf('  Manual seed threshold: %.4f  (%d px)\n', init_thresh, sum(init_mask(:)));
             case 'polygon'
@@ -701,7 +837,7 @@ switch mask_method
                 fprintf('  Precision is not required — just enclose the grain.\n\n');
                 fig_ac_init = figure('Name', 'Draw seed region for active contours', ...
                                      'Position', [50 50 900 700]);
-                imshow(cl_disp);
+                imshow(mask_img_disp);
                 title({'Draw a rough polygon enclosing the grain (seed for active contours).', ...
                        'It does not need to be precise — double-click to close.'}, 'FontSize', 11);
                 h_init = drawpolygon();
@@ -724,7 +860,7 @@ switch mask_method
 
                     fig_hole = figure('Name', 'Draw hole region — double-click to close', ...
                                       'Position', [50 50 900 700]);
-                    imshow(cl_disp); hold on;
+                    imshow(mask_img_disp); hold on;
                     visboundaries(init_mask, 'Color', 'g', 'LineWidth', 1.5);
                     title({'Draw a polygon over a HOLE to exclude from the seed mask.', ...
                            'Green boundary = current seed.  Double-click to close.'}, 'FontSize', 11);
@@ -749,17 +885,17 @@ switch mask_method
         end
 
         fprintf('  Running active contours...\n');
-        mask = activecontour(cl_reg, init_mask, ac_niter, 'Chan-Vese', ...
+        mask = activecontour(mask_img, init_mask, ac_niter, 'Chan-Vese', ...
                              'SmoothFactor', ac_smoothfactor);
         fprintf('  Converged: %d px in grain.\n', sum(mask(:)));
 
         fig_ac_result = figure('Name', 'Active contour result', 'Position', [100 100 1000 420]);
         subplot(1,2,1);
-        imshow(cl_disp); hold on;
+        imshow(mask_img_disp); hold on;
         visboundaries(init_mask, 'Color', 'b', 'LineWidth', 1.5);
         title('Seed mask (blue)');
         subplot(1,2,2);
-        imshow(cl_disp); hold on;
+        imshow(mask_img_disp); hold on;
         visboundaries(mask, 'Color', 'r', 'LineWidth', 1.5);
         title(sprintf('Active contour result  |  %d px', sum(mask(:))));
         sgtitle(sprintf('%s — active contour mask (%d iter)', grain_id, ac_niter));
@@ -770,6 +906,17 @@ switch mask_method
         error('mask_method must be ''otsu'', ''manual'', ''interactive'', ''polygon'', or ''activecontour''.');
 end
 end  % if ~skip_mask
+
+% Clip EDS-derived mask to the registered CL data footprint.
+% imwarp fills pixels outside the mapped CL region with zeros; an EDS mask
+% can extend into those padding pixels. AND-ing with cl_valid_mask removes them.
+if ~isempty(mask_image_file)
+    n_outside_cl = sum(mask(:) & ~cl_valid_mask(:));
+    mask = mask & cl_valid_mask;
+    if n_outside_cl > 0
+        fprintf('  EDS mask clipped to CL footprint: %d px removed outside CL data bounds.\n', n_outside_cl);
+    end
+end
 
 n_px_raw = sum(mask(:));
 
@@ -790,6 +937,7 @@ fprintf('  Mask saved to: %s\n', mask_file);
 % ---- Log mask info -------------------------------------------------------
 lprintf('\n--- GRAIN MASK ---\n');
 lprintf('  Source:               %s\n', mask_source);
+lprintf('  Image used:           %s\n', mask_img_label);
 if skip_mask
     lprintf('  Method:               %s  [inactive — mask loaded from file]\n', mask_method);
 else
@@ -799,6 +947,9 @@ if ~isnan(thresh)
     lprintf('  Threshold applied:    %.6f\n', thresh);
 else
     lprintf('  Threshold applied:    N/A (method: %s)\n', mask_method);
+end
+if ~isempty(mask_image_file)
+    lprintf('  CL footprint clip:    %d px removed outside CL data bounds\n', n_outside_cl);
 end
 lprintf('  Pixels before cleanup:%d\n', n_px_raw);
 lprintf('  Min object size:      %d px  (bwareaopen applied)\n', min_object_px);
@@ -836,15 +987,25 @@ end
 lprintf(SEC);
 
 % ---- Visualize mask ------------------------------------------------------
-figure('Name', 'Grain mask');
-subplot(1,3,1); imshow(cl_reg);  title('Registered CL');
-subplot(1,3,2); imshow(mask);    title('Grain mask');
-subplot(1,3,3);
-imshow(cl_reg); hold on;
-visboundaries(mask, 'Color', 'r', 'LineWidth', 1);
-title('Mask boundary on CL');
-sgtitle(sprintf('%s — Mask (method: %s, thresh: %.3f)', ...
-        grain_id, mask_method, thresh));
+if ~isempty(mask_image_file)
+    % 4-panel: CL + mask image + binary mask + mask boundary on mask image
+    figure('Name', 'Grain mask', 'Position', [50 50 1400 350]);
+    subplot(1,4,1); imshow(cl_reg);          title('Registered CL');
+    subplot(1,4,2); imshow(mask_img_disp);   title(sprintf('Mask image: %s', mask_image_file));
+    subplot(1,4,3); imshow(mask);            title('Grain mask');
+    subplot(1,4,4); imshow(mask_img_disp); hold on;
+    visboundaries(mask, 'Color', 'r', 'LineWidth', 1);
+    title('Mask boundary on mask image');
+else
+    figure('Name', 'Grain mask');
+    subplot(1,3,1); imshow(cl_reg);   title('Registered CL');
+    subplot(1,3,2); imshow(mask);     title('Grain mask');
+    subplot(1,3,3); imshow(cl_reg); hold on;
+    visboundaries(mask, 'Color', 'r', 'LineWidth', 1);
+    title('Mask boundary on CL');
+end
+sgtitle(sprintf('%s — Mask (method: %s, thresh: %.3f, image: %s)', ...
+        grain_id, mask_method, thresh, mask_img_label));
 saveas(gcf, fullfile(output_dir, [grain_id '_mask_check.png']));
 
 % =========================================================================
@@ -1164,7 +1325,7 @@ all_outputs = { ...
     cl_reg_file,                                                   'Registered CL image (16-bit TIFF)'; ...
     cl_reg_color_file,                                             'Registered color CL image (TIFF)'; ...
     mask_file,                                                     'Grain mask (8-bit TIFF)'; ...
-    cp_savefile,                                                   'Control points (.mat)'; ...
+    cp_savefile,                                                   'Control points — CL (.mat)'; ...
     mat_file,                                                      'Pixel data (.mat)'; ...
     csv_file,                                                      'Pixel data (.csv)'; ...
     fullfile(output_dir, [grain_id '_CL_vs_elements.png']),        'Scatter plots (PNG)'; ...
@@ -1174,6 +1335,13 @@ all_outputs = { ...
     fullfile(output_dir, [grain_id '_mask_check.png']),            'Mask check figure (PNG)'; ...
     log_file,                                                      'Analysis log (this file)'; ...
 };
+if ~isempty(mask_image_file)
+    mask_cp_savefile_inv = fullfile(output_dir, [grain_id '_mask_image_controlpoints.mat']);
+    all_outputs = [all_outputs; { ...
+        mask_cp_savefile_inv,                                                        'Control points — mask image (.mat)'; ...
+        fullfile(output_dir, [grain_id '_mask_image_registration.png']),             'Mask image reg. check (PNG)'; ...
+    }];
+end
 
 lprintf('\n--- OUTPUT FILE INVENTORY ---\n');
 lprintf('  %-40s  %-12s  %s\n', 'Description', 'Size (bytes)', 'Path');
@@ -1198,8 +1366,11 @@ fclose(log_fid);
 fprintf('\n=== COMPLETE ===\n');
 fprintf('All outputs written to: %s\n', output_dir);
 fprintf('Key files:\n');
-fprintf('  %s_analysis_log.txt         — comprehensive run record\n', grain_id);
-fprintf('  %s_controlpoints.mat        — saved control points (reusable)\n', grain_id);
+fprintf('  %s_analysis_log.txt               — comprehensive run record\n', grain_id);
+fprintf('  %s_controlpoints.mat              — CL control points (reusable)\n', grain_id);
+if ~isempty(mask_image_file)
+    fprintf('  %s_mask_image_controlpoints.mat   — mask image control points (reusable)\n', grain_id);
+end
 fprintf('  %s_CL_registered.tif\n', grain_id);
 fprintf('  %s_CL_registered_color.tif\n', grain_id);
 fprintf('  %s_mask.tif\n', grain_id);
