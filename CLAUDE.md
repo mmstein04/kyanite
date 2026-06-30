@@ -20,6 +20,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 |---|---|---|
 | `xrf_h5_to_tiff.py` | Python | Extract XRF element maps from a Larch/GSECARS HDF5 file; export as 32-bit float TIFFs + metadata sidecars |
 | `CL_EPMA_registration.m` | MATLAB | Full registration + analysis pipeline (see workflow below) |
+| `CL_region_extraction.m` | MATLAB | Draw named sub-grain polygon regions on an already-registered CL image and extract per-pixel CL + element data per region (no re-registration) |
 | `kyanite_figures.py` | Python | Standalone figure generation from exported CSV pixel data |
 | `xrf_display.m` | MATLAB | Visualize XRF element-map TIFFs with grain mask overlay |
 | `sum_epma_maps.m` | MATLAB | Sum two or more element maps into a combined TIFF (e.g. Zr_La + Zr_Lb) |
@@ -33,6 +34,18 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 6. Scatter plot CL vs. each element; compute Pearson r
 7. Shift-sensitivity analysis to quantify alignment-error impact on correlations
 8. Write analysis log, save registered CL TIFFs (grayscale 16-bit + original color), mask TIFF, pixel data `.mat` / `.csv`
+
+### `CL_region_extraction.m` workflow
+1. Load the registered CL image, grain mask, and EPMA/XRF maps already produced by
+   `CL_EPMA_registration.m` for this grain — no warping, control points, or mask
+   generation here
+2. Interactively draw and name one polygon per region of interest (e.g. core, rim);
+   saved regions can be reloaded on rerun
+3. Intersect each region with the grain mask (optional, default on)
+4. Extract per-pixel CL and element vectors per region into a combined long-format
+   table with a `Region` column
+5. Save per-region/per-channel summary statistics and QC figures (region boundaries
+   on the CL image and on every element map)
 
 ### `xrf_h5_to_tiff.py` details
 - Data source: `xrmmap/roimap/sum_cor` [rows × cols × n_rois], `xrmmap/roimap/sum_name`
@@ -50,6 +63,10 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 - Pixel data exports: `<grain_id>_pixel_data.csv` and `.mat`
 - Analysis log: `<grain_id>_analysis_log.txt`
 - Figures saved to `figs/`, element maps to `maps/<grain_id>/`
+- Region polygons (reusable): `<grain_id>_regions.mat`
+- Region pixel data exports: `<grain_id>_region_pixel_data.csv` and `.mat` (long-format, `Region` column)
+- Region summary stats: `<grain_id>_region_summary.csv`
+- Region analysis log: `<grain_id>_region_analysis_log.txt`
 
 ## Key parameters (set per-grain at top of each script)
 
@@ -61,6 +78,13 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 - `epma_pixel_um` — pixel size in µm (spatial calibration)
 - `mask_method` — grain segmentation method
 - `pct_lo_cut` / `pct_hi_cut` — outlier percentile bounds for scatter plots
+
+**`CL_region_extraction.m`**
+- `grain_id` — must match a grain already processed by `CL_EPMA_registration.m`
+- `input_dir` — folder holding that grain's registered CL TIFFs + mask TIFF
+- `epma_dir` — same EPMA/XRF map folder used during registration
+- `restrict_to_grain_mask` — intersect each drawn region with the grain mask (default `true`)
+- `normalize_epma` — match the value used in `CL_EPMA_registration.m` for comparable values
 
 **`xrf_h5_to_tiff.py`**
 - `H5_FILE`, `OUTPUT_DIR`, `SAMPLE`

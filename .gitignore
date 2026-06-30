@@ -1,0 +1,17 @@
+# OS / editor
+.DS_Store
+*.asv
+
+# Python
+__pycache__/
+*.pyc
+
+# Generated outputs and raw data (regenerated per-grain from the scripts)
+figs/
+maps/
+region_figs/
+*.h5
+*.tif
+*.tiff
+*.png
+*.bmp
