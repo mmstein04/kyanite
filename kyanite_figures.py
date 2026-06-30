@@ -19,9 +19,9 @@ from pathlib import Path
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs/'   # file or directory
+CSV_INPUT = '/Users/mstein/bin/kyanite/figs/LLF6-01_pixel_data.csv'   # file or directory
 ELEMENTS  = ['Ti_Ka', 'Fe_Ka', 'Cr_Ka', 'Mn_Ka', 'V_Ka']          # CSV column names
-PLOT_TYPE = 'scatter'      # 'scatter', 'violin', 'boxplot', or 'all'
+PLOT_TYPE = 'all'      # 'scatter', 'violin', 'boxplot', or 'all'
 
 # Binning — used by 'violin' and 'boxplot'.
 # N_BINS splits the (filtered) element range into equal-width bins.

@@ -53,9 +53,9 @@ set(0, 'DefaultLegendInterpreter',      'none');
 % --- File paths -----------------------------------------------------------
 input_dir  = '/Users/mstein/bin/kyanite';
 
-grain_id    = 'LLF6-01';
+grain_id    = 'NVD3-01';
 
-cl_filename = [grain_id, '_CL_color.png'];
+cl_filename = [grain_id, '_CL_color.bmp'];
 
 % Folder containing EPMA element map TIFFs.
 % All *.tif files in this folder are auto-discovered as element maps.
@@ -76,10 +76,11 @@ output_dir  = '/Users/mstein/bin/kyanite/figs';
 epma_pixel_um = 2.0;            % µm per pixel
 
 % --- Mask parameters ------------------------------------------------------
-mask_method   = 'interactive';         % otsu | manual | interactive | polygon | activecontour
-thresh_manual = 0.12;             % used for manual; fallback if interactive receives no clicks
-min_object_px = 500;
-fill_holes    = false;
+mask_method   = 'manual';         % otsu | manual | interactive | polygon | activecontour
+thresh_manual = 0.45;             % used for manual; fallback if interactive receives no clicks
+min_object_px    = 500;
+fill_holes       = false;
+close_radius_px  = 1;   % morphological closing radius (px); fills 1-2 px holes/gaps; 0 = disabled
 
 % Active contour parameters (used only when mask_method = 'activecontour')
 ac_niter        = 200;      % number of Chan-Vese iterations
@@ -93,7 +94,7 @@ ac_init_method  = 'polygon';   % initial mask source: 'otsu' | 'manual' | 'polyg
 % where surrounding quartz is brighter in CL than the grain.
 % If set, this image is registered to the EPMA grid using its own saved
 % control points (separate from the CL control points) before masking.
-mask_image_file = 'LLF6-01_EDS_Al.tiff';   % e.g., 'NA-GS-P84-06_Al_EDS.tif'
+mask_image_file = 'NVD3-01_EDS_Al.tif';   % e.g., 'NA-GS-P84-06_Al_EDS.tif'
 
 % --- Registration parameters ----------------------------------------------
 transform_type = 'affine';
@@ -714,6 +715,9 @@ switch mask_method
 
             % Build preview mask with current threshold
             mask_preview = mask_img > thresh;
+            if close_radius_px > 0
+                mask_preview = imclose(mask_preview, strel('disk', close_radius_px));
+            end
             if min_object_px > 0
                 mask_preview = bwareaopen(mask_preview, min_object_px);
             end
@@ -781,6 +785,9 @@ switch mask_method
             close(fig_poly);
 
             mask_preview = poly2mask(poly_pos(:,1), poly_pos(:,2), nrows_epma, ncols_epma);
+            if close_radius_px > 0
+                mask_preview = imclose(mask_preview, strel('disk', close_radius_px));
+            end
             if min_object_px > 0
                 mask_preview = bwareaopen(mask_preview, min_object_px);
             end
@@ -920,6 +927,9 @@ end
 
 n_px_raw = sum(mask(:));
 
+if close_radius_px > 0
+    mask = imclose(mask, strel('disk', close_radius_px));
+end
 if min_object_px > 0
     mask = bwareaopen(mask, min_object_px);
 end
@@ -952,6 +962,7 @@ if ~isempty(mask_image_file)
     lprintf('  CL footprint clip:    %d px removed outside CL data bounds\n', n_outside_cl);
 end
 lprintf('  Pixels before cleanup:%d\n', n_px_raw);
+lprintf('  Morph. close radius:  %d px  (imclose applied)\n', close_radius_px);
 lprintf('  Min object size:      %d px  (bwareaopen applied)\n', min_object_px);
 lprintf('  Fill holes:           %s  (imfill applied)\n', mat2str(fill_holes));
 lprintf('  Final grain pixels:   %d  (%.2f%% of %d x %d image)\n', ...

@@ -35,10 +35,7 @@ figs_dir = '/Users/mstein/bin/kyanite/figs/';
 % Grain and element selection
 % grainIDs may be a single string or a cell array for batch processing.
 % Mask files are auto-located as figs_dir/<grainID>_mask.tif
-grainIDs = {'NA-CM-G12B7-01', 'NA-CM-G12B7-02', ...
-    'NA-GS-P84-03', 'NA-GS-P84-06', 'NA-SS-P1156-01', ...
-    'NA-SS-P1156-02', 'RH-XA-57081B-02', 'RH-XA-57081P-05', ...
-    'RH-XA-57081P-07'};
+grainIDs = {'LLF6-01'};
 elements = {'Cr','Fe','Mn','Ti','V'};
 
 % Visualization options
@@ -54,7 +51,7 @@ fig_dpi     = 300;
 
 % Scale bar
 show_scalebar    = true;
-pixel_um         = [1.0, 2.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0];    % µm/pixel — scalar for all grains, or vector [1.0, 0.5, ...]
+pixel_um         = 2.0;    % µm/pixel — scalar for all grains, or vector [1.0, 0.5, ...]
 scalebar_um      = 100;    % physical length of scale bar in µm
 scalebar_pos     = 'se';   % corner: 'se' | 'sw' | 'ne' | 'nw'
 scalebar_margin  = 0.04;   % margin from edge as fraction of image dimensions
