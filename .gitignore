@@ -10,6 +10,7 @@ __pycache__/
 figs/
 maps/
 region_figs/
+local_regression_figs/
 *.h5
 *.tif
 *.tiff
