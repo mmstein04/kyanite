@@ -97,5 +97,5 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 
 ## Requirements
 - MATLAB with Image Processing Toolbox (for `cpselect`, `imwarp`, `imread`, etc.)
-- Python: `h5py`, `numpy`, `tifffile`, `pandas`, `matplotlib`, `seaborn`
+- Python: `h5py`, `numpy`, `tifffile`, `pandas`, `matplotlib`, `seaborn`, `scipy`
 - Images are 8-, 16-, or 32-bit grayscale TIFFs; EPMA maps are the fixed reference

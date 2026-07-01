@@ -3,8 +3,11 @@
 #
 # Figure generation for CL-EPMA pixel data.
 #
-# Loads one or more CSVs and produces scatter (with linear fit + Pearson r),
-# violin, or binned box plots of CL intensity vs. chosen elements.
+# Loads one or more CSVs and produces scatter, contour (density contour lines
+# over a scatter), heatmap (the same 2-D KDE, filled with a colorbar instead
+# of drawn as lines), violin, or binned box plots of CL intensity vs. chosen
+# elements. scatter, contour, and heatmap all include a linear fit line and
+# Pearson r.
 #
 # Two input formats are auto-detected by column name:
 #   - Whole-grain CSVs from CL_EPMA_registration.m (*_pixel_data.csv):
@@ -24,14 +27,21 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
+from scipy.stats import gaussian_kde
 
 # =============================================================================
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs/MW609-01_pixel_data.csv'   # file or directory
-ELEMENTS  = ['Ti_Ka', 'Fe_Ka', 'Cr_Ka', 'Mn_Ka', 'V_Ka']          # CSV column names
-PLOT_TYPE = 'all'      # 'scatter', 'violin', 'boxplot', or 'all'
+CSV_INPUT = '/Users/mstein/bin/kyanite/region_figs/MW609-01_region_pixel_data.csv'   # file or directory
+ELEMENTS  = ['Cr_Ka']          # CSV column names
+PLOT_TYPE = 'all'      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', or 'all'
+
+# 'contour' and 'heatmap' both estimate the same 2-D KDE (contour draws it as
+# lines over a scatter; heatmap draws it filled with a colorbar, no scatter).
+CONTOUR_LEVELS = 8      # number of contour lines for 'contour'
+HEATMAP_LEVELS = 30     # number of fill levels for 'heatmap' — more = smoother gradation
+KDE_GRIDSIZE   = 150    # resolution of the density grid each is evaluated on (per axis)
 
 # Binning — used by 'violin' and 'boxplot'.
 # N_BINS splits the (filtered) element range into equal-width bins.
@@ -69,7 +79,7 @@ print(f'Processing {len(csv_files)} CSV(s):')
 for p in csv_files:
     print(f'  {p.name}')
 
-plot_types = ['scatter', 'violin', 'boxplot'] if PLOT_TYPE == 'all' else [PLOT_TYPE]
+plot_types = ['scatter', 'violin', 'boxplot', 'contour', 'heatmap'] if PLOT_TYPE == 'all' else [PLOT_TYPE]
 
 # =============================================================================
 # PER-AXES PLOT PRIMITIVES — each draws into a given Axes, so the same code
@@ -160,7 +170,49 @@ def plot_boxplot(ax, x, y, element):
     ax.set_ylabel('CL intensity (norm.)')
 
 
-PLOT_FUNCS = {'scatter': plot_scatter, 'violin': plot_violin, 'boxplot': plot_boxplot}
+def kde_grid(x, y, gridsize=KDE_GRIDSIZE):
+    # Shared density estimate for 'contour' and 'heatmap', so the filled and
+    # line versions show exactly the same underlying field.
+    kde = gaussian_kde(np.vstack([x, y]))
+    xx, yy = np.mgrid[x.min():x.max():gridsize * 1j, y.min():y.max():gridsize * 1j]
+    zz = kde(np.vstack([xx.ravel(), yy.ravel()])).reshape(xx.shape)
+    return xx, yy, zz
+
+
+def add_fit_and_r(ax, x, y, line_color, text_color, text_bg):
+    m, b = np.polyfit(x, y, 1)
+    xfit = np.linspace(x.min(), x.max(), 300)
+    ax.plot(xfit, m * xfit + b, color=line_color, lw=1.5, zorder=3)
+    r = np.corrcoef(x, y)[0, 1]
+    ax.text(0.05, 0.95, f'r = {r:.3f}\nn = {len(x):,}',
+            transform=ax.transAxes, va='top', fontsize=9, color=text_color,
+            bbox=dict(facecolor=text_bg, alpha=0.55, edgecolor='none', pad=2))
+
+
+def plot_contour(ax, x, y, element):
+    # Light scatter for context, with density contour lines on top — clearer
+    # than a plain scatter when points are heavily overplotted.
+    ax.scatter(x, y, s=4, alpha=0.04, color='0.5', linewidths=0, zorder=1)
+    xx, yy, zz = kde_grid(x, y)
+    ax.contour(xx, yy, zz, levels=CONTOUR_LEVELS, colors=ORANG, linewidths=1.0, zorder=2)
+    add_fit_and_r(ax, x, y, line_color='k', text_color='black', text_bg='white')
+    ax.set_xlabel(element)
+    ax.set_ylabel('CL intensity (norm.)')
+
+
+def plot_heatmap(ax, x, y, element):
+    # Same KDE field as 'contour', filled with many levels instead of drawn
+    # as lines over a scatter — a smooth density heatmap with a colorbar.
+    xx, yy, zz = kde_grid(x, y)
+    cs = ax.contourf(xx, yy, zz, levels=HEATMAP_LEVELS, cmap='inferno')
+    ax.figure.colorbar(cs, ax=ax, label='density')
+    add_fit_and_r(ax, x, y, line_color='c', text_color='white', text_bg='black')
+    ax.set_xlabel(element)
+    ax.set_ylabel('CL intensity (norm.)')
+
+
+PLOT_FUNCS = {'scatter': plot_scatter, 'violin': plot_violin, 'boxplot': plot_boxplot,
+              'contour': plot_contour, 'heatmap': plot_heatmap}
 
 
 def render_plot(ax, plot_type, element, x, y):
