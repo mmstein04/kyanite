@@ -33,9 +33,9 @@ from scipy.stats import gaussian_kde
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/region_figs/MW609-01_region_pixel_data.csv'   # file or directory
+CSV_INPUT = '/Users/mstein/bin/kyanite/figs'   # file or directory
 ELEMENTS  = ['Cr_Ka']          # CSV column names
-PLOT_TYPE = 'all'      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', or 'all'
+PLOT_TYPE = ['contour', 'heatmap']      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'all', or a list of these
 
 # 'contour' and 'heatmap' both estimate the same 2-D KDE (contour draws it as
 # lines over a scatter; heatmap draws it filled with a colorbar, no scatter).
@@ -79,7 +79,18 @@ print(f'Processing {len(csv_files)} CSV(s):')
 for p in csv_files:
     print(f'  {p.name}')
 
-plot_types = ['scatter', 'violin', 'boxplot', 'contour', 'heatmap'] if PLOT_TYPE == 'all' else [PLOT_TYPE]
+ALL_PLOT_TYPES = ['scatter', 'violin', 'boxplot', 'contour', 'heatmap']
+
+if PLOT_TYPE == 'all':
+    plot_types = ALL_PLOT_TYPES
+elif isinstance(PLOT_TYPE, (list, tuple)):
+    plot_types = list(PLOT_TYPE)
+else:
+    plot_types = [PLOT_TYPE]
+
+unknown = [pt for pt in plot_types if pt not in ALL_PLOT_TYPES]
+if unknown:
+    raise ValueError(f"Unknown PLOT_TYPE(s) {unknown}; choose from {ALL_PLOT_TYPES}, 'all', or a list of these.")
 
 # =============================================================================
 # PER-AXES PLOT PRIMITIVES — each draws into a given Axes, so the same code
