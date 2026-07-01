@@ -34,6 +34,9 @@
 %   - [grain_id]_local_regression_pixel_data.csv — long-format per-pixel table
 %   - [grain_id]_local_regression_slope_QC.png   — slope map, all elements
 %   - [grain_id]_local_regression_R_QC.png       — R map, all elements
+%   - [grain_id]_local_regression_R_Cr_vs_CL.png — CL image next to the Cr R map
+%     (skipped with a warning if no Cr map is found among the discovered
+%     EPMA/XRF maps)
 %   - [grain_id]_local_regression_n_map.png      — window coverage map
 %   - [grain_id]_local_regression_analysis_log.txt — comprehensive run record
 %
@@ -55,14 +58,21 @@ set(0, 'DefaultLegendInterpreter',      'none');
 %% SECTION 1: PARAMETERS  — edit this section for each new grain / radius
 % =========================================================================
 
-grain_id = 'NA-GS-P84-06';
+grain_id = 'RH-XA-57081P-07';
 
 % Directory containing the outputs of CL_EPMA_registration.m for this grain
 % (registered CL TIFFs and the grain mask TIFF).
 input_dir = '/Users/mstein/bin/kyanite/figs';
 
-cl_filename   = [grain_id, '_CL_registered.tif'];   % 16-bit grayscale
-mask_filename = [grain_id, '_mask.tif'];
+cl_filename       = [grain_id, '_CL_registered.tif'];         % 16-bit grayscale, used for the regression math
+cl_color_filename = [grain_id, '_CL_registered_color.tif'];   % native color, display only
+mask_filename     = [grain_id, '_mask.tif'];
+
+% Use the color registered CL as the background for the Cr comparison figure
+% (Section 7). Falls back to the grayscale registered CL if false or if
+% cl_color_filename is not found. Does not affect the regression math, which
+% always uses the grayscale CL loaded from cl_filename.
+use_color_display = true;
 
 % Folder containing EPMA/XRF element map TIFFs (same folder used by
 % CL_EPMA_registration.m for this grain). All *.tif files auto-discovered.
@@ -71,13 +81,13 @@ epma_dir = ['/Users/mstein/bin/kyanite/maps/', grain_id];
 output_dir = '/Users/mstein/bin/kyanite/local_regression_figs';
 
 % --- Spatial calibration --------------------------------------------------
-epma_pixel_um = 1.0;     % µm per pixel — must match the value used during registration
+epma_pixel_um = 2.0;     % µm per pixel — must match the value used during registration
 
 % --- Moving-window regression parameters -----------------------------------
 % Physical radius of the circular regression window, in µm. Kept in µm
 % (rather than px) so it stays meaningful across grains imaged at
 % different pixel sizes; converted to px below using epma_pixel_um.
-window_radius_um = 20.0;
+window_radius_um = 30.0;
 
 % Minimum number of in-mask pixels required inside a window before a
 % regression is computed there; windows with fewer valid pixels are set
@@ -178,6 +188,7 @@ lprintf('  Input directory:       %s\n', input_dir);
 lprintf('  EPMA directory:        %s\n', epma_dir);
 lprintf('  Output directory:      %s\n', output_dir);
 lprintf('  Registered CL (gray):  %s\n', cl_filename);
+lprintf('  Registered CL (color): %s  (display: %s)\n', cl_color_filename, mat2str(use_color_display));
 lprintf('  Grain mask:            %s\n', mask_filename);
 lprintf('  EPMA maps (%d total):\n', n_elements);
 for e = 1:n_elements
@@ -205,6 +216,21 @@ cl_reg = im2double(imread(cl_path));
 [nrows, ncols] = size(cl_reg);
 fprintf('  Registered CL loaded: %d x %d pixels\n', nrows, ncols);
 log_file_info(log_fid, cl_path, 'Registered CL image (grayscale)');
+
+% Color registered CL — display only (Section 7's Cr figure); the
+% regression math above always uses the grayscale cl_reg.
+cl_color_path = fullfile(input_dir, cl_color_filename);
+have_color = exist(cl_color_path, 'file') == 2;
+if use_color_display && have_color
+    cl_disp = imread(cl_color_path);
+    fprintf('  Using registered color CL for display.\n');
+    log_file_info(log_fid, cl_color_path, 'Registered CL image (color, display only)');
+else
+    if use_color_display && ~have_color
+        warning('use_color_display = true but %s not found; falling back to grayscale.', cl_color_filename);
+    end
+    cl_disp = cl_reg;
+end
 
 mask_path = fullfile(input_dir, mask_filename);
 if ~exist(mask_path, 'file')
@@ -502,6 +528,60 @@ r_qc_file = fullfile(output_dir, [grain_id '_local_regression_R_QC.png']);
 saveas(fig_r, r_qc_file);
 fprintf('  R QC figure saved to: %s\n', r_qc_file);
 
+% ---- Chromium-specific figure: local R map next to the CL image -----------
+% Cr3+ is a known CL activator in kyanite, so this pairing is inspected on
+% every run regardless of how many other elements were mapped.
+cr_idx = find(cellfun(@(lbl) ~isempty(regexpi(lbl, '^Cr(_|$)')), epma_labels), 1);
+if ~isempty(cr_idx)
+    r_cr = r_maps(:,:,cr_idx);
+    disp_r_cr = r_cr;
+    disp_r_cr(~grain_mask) = NaN;
+
+    % Both panels use imagesc + axis image (rather than imshow for one and
+    % imagesc for the other) so they share identical axis/aspect handling —
+    % otherwise imshow and imagesc size their axes boxes differently and the
+    % two panels can render at different scales despite having the same
+    % pixel dimensions. The CL panel's box is then explicitly resized to
+    % match the R panel's box (which the colorbar shrinks) so the two grids
+    % of pixels line up exactly.
+    fig_cr = figure('Name', 'Cr: CL image vs. local R', 'Position', [100 100 950 450]);
+
+    ax1 = subplot(1,2,1);
+    if ndims(cl_disp) == 3
+        imagesc(ax1, cl_disp);   % truecolor — colormap/color limits don't apply
+    else
+        imagesc(ax1, cl_disp, [0, 1]);
+        colormap(ax1, gray(256));
+    end
+    axis(ax1, 'image', 'off');
+    title(ax1, sprintf('%s — registered CL', grain_id), 'FontSize', 10, 'Interpreter', 'none');
+
+    ax2 = subplot(1,2,2);
+    imagesc(ax2, disp_r_cr, [-1, 1]);
+    axis(ax2, 'image', 'off');
+    colormap(ax2, cmap_div);
+    set(ax2, 'Color', [0.85 0.85 0.85]);
+    colorbar(ax2);
+    title(ax2, sprintf('%s (local Pearson R, radius = %.1f um)', epma_labels{cr_idx}, window_radius_um), 'FontSize', 10);
+
+    drawnow;
+    pos2 = get(ax2, 'Position');
+    pos1 = get(ax1, 'Position');
+    pos1([3 4]) = pos2([3 4]);   % match width/height so both pixel grids render at the same size
+    set(ax1, 'Position', pos1);
+
+    linkaxes([ax1, ax2], 'xy');   % keep zoom/pan synced if inspected interactively before saving
+
+    sgtitle(sprintf('%s — CL image vs. local CL-%s correlation', grain_id, epma_labels{cr_idx}), 'Interpreter', 'none');
+    cr_cl_r_file = fullfile(output_dir, [grain_id '_local_regression_R_Cr_vs_CL.png']);
+    saveas(fig_cr, cr_cl_r_file);
+    fprintf('  Cr R-vs-CL figure saved to: %s\n', cr_cl_r_file);
+else
+    cr_cl_r_file = '';
+    warning('No element map matching "Cr" (chromium) found among: %s — skipping Cr-specific figure.', strjoin(epma_labels, ', '));
+    lprintf('\n  ** WARNING: no Cr element map found — Cr-specific R-vs-CL figure skipped. **\n');
+end
+
 % ---- Window-coverage (n) map -----------------------------------------------
 fig_n = figure('Name', 'Window coverage', 'Position', [100 100 550 500]);
 disp_n = n_map;
@@ -529,6 +609,9 @@ all_outputs = { ...
     n_map_file,     'Window coverage map (PNG)'; ...
     log_file,       'Analysis log (this file)'; ...
 };
+if ~isempty(cr_cl_r_file)
+    all_outputs = [all_outputs; {cr_cl_r_file, 'Cr R-vs-CL figure (PNG)'}];
+end
 
 lprintf('\n--- OUTPUT FILE INVENTORY ---\n');
 lprintf('  %-40s  %-12s  %s\n', 'Description', 'Size (bytes)', 'Path');
@@ -558,6 +641,9 @@ fprintf('  %s_local_regression.mat                — slope/R/n maps + metadata\
 fprintf('  %s_local_regression_pixel_data.csv     — long-format per-pixel table\n', grain_id);
 fprintf('  %s_local_regression_slope_QC.png\n', grain_id);
 fprintf('  %s_local_regression_R_QC.png\n', grain_id);
+if ~isempty(cr_cl_r_file)
+    fprintf('  %s_local_regression_R_Cr_vs_CL.png\n', grain_id);
+end
 fprintf('  %s_local_regression_n_map.png\n\n', grain_id);
 
 % =========================================================================
