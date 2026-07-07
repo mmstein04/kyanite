@@ -1,19 +1,27 @@
 # =============================================================================
 # kyanite_pca_rf.py
 #
-# Multivariate trace-element analysis of CL-EPMA/XRF pixel data: PCA and
-# Random Forest regression of CL intensity vs. element concentrations.
+# Multivariate trace-element analysis of CL-EPMA/XRF pixel data: PCA, Random
+# Forest regression, and SHAP importance/interactions for CL intensity vs.
+# element concentrations.
 #
 # Replaces the ad hoc SHRIMP-spot PCA/RF scripts in old_scripts/ (ky_pca.m,
 # ky_rf.m, ky_rf2.m) with a single script driven off the per-pixel CSVs
 # already produced by CL_EPMA_registration.m / CL_region_extraction.m.
 #
 # For each dataset:
-#   PCA — log-transform + z-score trace elements, run PCA, and plot a scree
-#         plot, per-PC loadings, and PC score vs. CL intensity.
-#   RF  — k-fold cross-validated Random Forest regression of CL from trace
-#         elements; observed-vs-predicted scatter and permutation feature
-#         importance (mean +/- std across folds).
+#   PCA  — log-transform + z-score trace elements, run PCA, and plot a scree
+#          plot, per-PC loadings, and PC score vs. CL intensity.
+#   RF   — k-fold cross-validated Random Forest regression of CL from trace
+#          elements; observed-vs-predicted scatter and permutation feature
+#          importance (mean +/- std across folds).
+#   SHAP — fits a single Random Forest on a subsample and uses TreeSHAP to
+#          compute per-feature importance (mean |SHAP value|), pairwise SHAP
+#          interaction values (whether elements act on CL jointly, e.g. Cr's
+#          effect depends on Fe level, rather than purely additively), and
+#          per-element dependence plots (element value vs. its own SHAP
+#          value, colored by its top interacting partner) showing the shape
+#          of each element's learned effect on CL.
 #
 # Two input formats are auto-detected by column name, same as
 # kyanite_figures.py:
@@ -37,6 +45,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import KFold
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import mean_squared_error, r2_score
+import shap
 
 # =============================================================================
 # PARAMETERS — edit this section for each run
@@ -45,7 +54,7 @@ from sklearn.metrics import mean_squared_error, r2_score
 CSV_INPUT = '/Users/mstein/bin/kyanite/figs/NA-GS-P84-06_pixel_data.csv'   # file or directory
 ELEMENTS  = None      # list of CSV column names to include; None = all columns except CL/Region
 
-ANALYSES = ['pca', 'rf']   # 'pca', 'rf', 'all', or a list of these
+ANALYSES = ['pca', 'rf', 'shap']   # 'pca', 'rf', 'shap', 'all', or a list of these
 
 # --- Data cleaning, shared by PCA and RF ---
 BELOW_DETECTION          = None   # values <= this are treated as below detection limit; None to disable
@@ -64,8 +73,15 @@ MIN_SAMPLES_LEAF     = 5
 CV_FOLDS             = 10
 N_PERMUTATIONS       = 10     # repeats per fold for permutation importance
 IMPORTANCE_SIG_RATIO = 1.0    # element flagged "significant" if mean/std of importance exceeds this
-MAX_SAMPLES          = 20000  # subsample pixels before RF/permutation importance for speed; None = use all
+MAX_SAMPLES          = 100000  # subsample pixels before RF/permutation importance for speed; None = use all
 RANDOM_STATE         = 42
+
+# --- SHAP ---
+SHAP_SAMPLES         = 1000   # pixels used to fit the SHAP explainer model; interaction values are
+                               # O(n * n_features^2), so keep this well below MAX_SAMPLES
+SHAP_INTERACTIONS    = True   # also compute pairwise SHAP interaction values (slower); False = importance only
+SHAP_DEPENDENCE_PLOTS = True  # element value vs. its own SHAP value, one panel per element;
+                              # colored by top interacting partner if SHAP_INTERACTIONS is True
 
 SAVE_FIG   = True
 SAVE_CSV   = True
@@ -92,7 +108,7 @@ for p in csv_files:
 
 RUN_TIMESTAMP = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-ALL_ANALYSES = ['pca', 'rf']
+ALL_ANALYSES = ['pca', 'rf', 'shap']
 if ANALYSES == 'all':
     analyses = ALL_ANALYSES
 elif isinstance(ANALYSES, (list, tuple)):
@@ -270,6 +286,120 @@ def plot_importance(mean_imp, std_imp, elements):
     return fig
 
 # =============================================================================
+# SHAP
+# =============================================================================
+
+def run_shap(X_df, y, elements):
+    """Fit a single RF on a subsample and compute TreeSHAP importance and,
+    optionally, pairwise interaction values. Returns
+    (mean_abs_shap, interaction_matrix, shap_values, X_vals); interaction_matrix
+    is None if SHAP_INTERACTIONS is False. shap_values and X_vals (both
+    n_used x n_elements) are the raw per-pixel values behind the summaries,
+    for dependence plots."""
+    X_vals, y_vals = subsample(X_df.values, y, SHAP_SAMPLES)
+
+    rf = RandomForestRegressor(n_estimators=N_ESTIMATORS,
+                                min_samples_leaf=MIN_SAMPLES_LEAF,
+                                random_state=RANDOM_STATE, n_jobs=1)
+    rf.fit(X_vals, y_vals)
+
+    explainer = shap.TreeExplainer(rf)
+    shap_values = explainer.shap_values(X_vals)
+    mean_abs_shap = np.abs(shap_values).mean(axis=0)
+
+    interaction_matrix = None
+    if SHAP_INTERACTIONS:
+        shap_interactions = explainer.shap_interaction_values(X_vals)
+        interaction_matrix = np.abs(shap_interactions).mean(axis=0)
+
+    return mean_abs_shap, interaction_matrix, shap_values, X_vals
+
+
+def plot_shap_importance(mean_abs_shap, elements):
+    order = np.argsort(mean_abs_shap)[::-1]
+    sorted_vals = mean_abs_shap[order]
+    sorted_names = [elements[i] for i in order]
+
+    fig, ax = plt.subplots(figsize=(max(6, 0.4 * len(elements)), 4.5))
+    ax.bar(range(len(sorted_vals)), sorted_vals, color=BLUE)
+    ax.set_xticks(range(len(sorted_names)))
+    ax.set_xticklabels(sorted_names, rotation=40, ha='right', fontsize=8)
+    ax.set_ylabel('Mean |SHAP value|')
+    return fig
+
+
+def plot_shap_interactions(interaction_matrix, elements):
+    # The matrix is symmetric (interaction[i,j] == interaction[j,i]), so the
+    # upper triangle is redundant — show only the lower triangle. Diagonal =
+    # main effect, already shown in the importance bar chart and typically
+    # much larger than any pairwise interaction, so it's excluded from the
+    # color scale (grayed out instead) or it would wash out the interactions,
+    # which are the whole point of this plot.
+    n = len(elements)
+    strict_lower = np.tril(np.ones((n, n), dtype=bool), k=-1)
+    vmax = interaction_matrix[strict_lower].max()
+
+    cmap = plt.cm.inferno.copy()
+    cmap.set_bad('white')   # upper triangle: left blank
+
+    masked = np.ma.masked_array(interaction_matrix, mask=~strict_lower)
+
+    fig, ax = plt.subplots(figsize=(max(5, 0.6 * n), max(5, 0.6 * n)))
+    im = ax.imshow(masked, cmap=cmap, vmin=0, vmax=vmax)
+    ax.set_xticks(range(n)); ax.set_xticklabels(elements, rotation=40, ha='right', fontsize=8)
+    ax.set_yticks(range(n)); ax.set_yticklabels(elements, fontsize=8)
+
+    for i in range(n):
+        for j in range(i + 1):   # lower triangle + diagonal only
+            if i == j:
+                ax.add_patch(plt.Rectangle((j - 0.5, i - 0.5), 1, 1,
+                                            facecolor='0.85', edgecolor='none', zorder=1))
+                color = 'black'
+            else:
+                color = 'white' if interaction_matrix[i, j] < 0.6 * vmax else 'black'
+            ax.text(j, i, f'{interaction_matrix[i, j]:.3f}', ha='center', va='center',
+                    color=color, fontsize=7, zorder=2)
+
+    fig.colorbar(im, ax=ax, label='mean |SHAP interaction value| (diagonal, gray = main effect)')
+    return fig
+
+
+def plot_shap_dependence(shap_values, X_vals, elements, interaction_matrix):
+    # Each panel: an element's own value vs. its SHAP value, i.e. how the
+    # model's learned effect of that element on CL varies across the element's
+    # observed range (linear, saturating, threshold-like, non-monotonic...).
+    # Colored by whichever other element interacts with it most strongly
+    # (per the SHAP interaction matrix), so interaction-driven scatter (e.g.
+    # Cr's effect on CL depending on Ti level) is visible as a color gradient.
+    n = len(elements)
+    cols = min(3, n)
+    rows = int(np.ceil(n / cols))
+    fig, axes = plt.subplots(rows, cols, figsize=(4.5 * cols, 4 * rows))
+    axes = np.atleast_1d(axes).ravel()
+
+    for i, ax in enumerate(axes[:n]):
+        x = X_vals[:, i]
+        y = shap_values[:, i]
+
+        if interaction_matrix is not None:
+            row = interaction_matrix[i].copy()
+            row[i] = -np.inf
+            partner = int(np.argmax(row))
+            sc = ax.scatter(x, y, c=X_vals[:, partner], cmap='viridis', s=8, alpha=0.7, linewidths=0)
+            fig.colorbar(sc, ax=ax, label=f'{elements[partner]}' + (' (log10)' if LOG_TRANSFORM else ''))
+        else:
+            ax.scatter(x, y, s=8, alpha=0.5, color=BLUE, linewidths=0)
+
+        ax.axhline(0, color='k', lw=0.8, ls='--')
+        ax.set_xlabel(elements[i] + (' (log10)' if LOG_TRANSFORM else ''))
+        ax.set_ylabel(f'SHAP value ({elements[i]})')
+        ax.grid(True, alpha=0.25, linewidth=0.5)
+
+    for ax in axes[n:]:
+        ax.axis('off')
+    return fig
+
+# =============================================================================
 # PER-DATASET DRIVER
 # =============================================================================
 
@@ -302,6 +432,12 @@ def build_log_header(label, csv_path, requested, missing, kept, dropped, n_valid
             f'  IMPORTANCE_SIG_RATIO: {IMPORTANCE_SIG_RATIO}',
             f'  MAX_SAMPLES: {MAX_SAMPLES}',
             f'  RANDOM_STATE: {RANDOM_STATE}',
+        ]
+    if 'shap' in analyses:
+        lines += [
+            f'  SHAP_SAMPLES: {SHAP_SAMPLES}',
+            f'  SHAP_INTERACTIONS: {SHAP_INTERACTIONS}',
+            f'  SHAP_DEPENDENCE_PLOTS: {SHAP_DEPENDENCE_PLOTS}',
         ]
     lines += [
         '',
@@ -415,6 +551,61 @@ def analyze(df, elements, label, out_dir, csv_path, missing=()):
             plt.close('all')
 
         print(f'  Saved RF outputs for {label}')
+
+    if 'shap' in analyses:
+        print('  Running SHAP...')
+        mean_abs_shap, interaction_matrix, shap_values, X_shap = run_shap(X_df, y, kept)
+        order = np.argsort(mean_abs_shap)[::-1]
+
+        log_lines.append('')
+        log_lines.append(f'SHAP fit on {len(X_shap):,} pixels (SHAP_SAMPLES={SHAP_SAMPLES})')
+        log_lines.append('Mean |SHAP value| by element: ' +
+                          ', '.join(f'{kept[i]}={mean_abs_shap[i]:.4f}' for i in order))
+
+        if SAVE_CSV:
+            shap_df = pd.DataFrame({'element': kept, 'mean_abs_shap': mean_abs_shap}) \
+                .sort_values('mean_abs_shap', ascending=False)
+            shap_df.to_csv(out_dir / f'{label}_shap_importance.csv', index=False)
+
+        if SAVE_FIG:
+            fig = plot_shap_importance(mean_abs_shap, kept)
+            if SHOW_TITLE:
+                fig.suptitle(f'{label} — SHAP importance')
+            fig.tight_layout()
+            fig.savefig(out_dir / f'{label}_shap_importance.png', dpi=200, bbox_inches='tight')
+            plt.close('all')
+
+        if interaction_matrix is not None:
+            off_diag = interaction_matrix.copy()
+            np.fill_diagonal(off_diag, -np.inf)
+            i, j = np.unravel_index(np.argmax(off_diag), off_diag.shape)
+            log_lines.append(f'Strongest pairwise interaction: {kept[i]} x {kept[j]} '
+                              f'(mean |interaction| = {interaction_matrix[i, j]:.4f})')
+            print(f'  Strongest interaction: {kept[i]} x {kept[j]}')
+
+            if SAVE_CSV:
+                inter_df = pd.DataFrame(interaction_matrix, index=kept, columns=kept)
+                inter_df.to_csv(out_dir / f'{label}_shap_interactions.csv')
+
+            if SAVE_FIG:
+                fig = plot_shap_interactions(interaction_matrix, kept)
+                if SHOW_TITLE:
+                    fig.suptitle(f'{label} — SHAP interaction values')
+                fig.tight_layout()
+                fig.savefig(out_dir / f'{label}_shap_interactions.png', dpi=200, bbox_inches='tight')
+                plt.close('all')
+
+        if SHAP_DEPENDENCE_PLOTS and SAVE_FIG:
+            fig = plot_shap_dependence(shap_values, X_shap, kept, interaction_matrix)
+            if SHOW_TITLE:
+                fig.suptitle(f'{label} — SHAP dependence (element value vs. own SHAP value)')
+            fig.tight_layout()
+            fig.savefig(out_dir / f'{label}_shap_dependence.png', dpi=200, bbox_inches='tight')
+            plt.close('all')
+            log_lines.append('Saved element-vs-SHAP-value dependence plots '
+                              f'({"colored by top interacting partner" if interaction_matrix is not None else "uncolored"})')
+
+        print(f'  Saved SHAP outputs for {label}')
 
     log_file = out_dir / f'{label}_pca_rf_log.txt'
     log_file.write_text('\n'.join(str(l) for l in log_lines) + '\n')
