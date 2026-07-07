@@ -22,6 +22,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | `CL_EPMA_registration.m` | MATLAB | Full registration + analysis pipeline (see workflow below) |
 | `CL_region_extraction.m` | MATLAB | Draw named sub-grain polygon regions on an already-registered CL image and extract per-pixel CL + element data per region (no re-registration) |
 | `kyanite_figures.py` | Python | Standalone figure generation from exported CSV pixel data |
+| `kyanite_pca_rf.py` | Python | PCA and cross-validated Random Forest analysis of CL vs. trace elements from exported CSV pixel data |
 | `xrf_display.m` | MATLAB | Visualize XRF element-map TIFFs with grain mask overlay |
 | `sum_epma_maps.m` | MATLAB | Sum two or more element maps into a combined TIFF (e.g. Zr_La + Zr_Lb) |
 
@@ -95,7 +96,14 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 - `CSV_FILE`, `ELEMENT`, `PLOT_TYPE` (`scatter`, `violin`, `boxplot`, or `all`)
 - `N_BINS` / `BIN_EDGES`, `PCT_LO` / `PCT_HI`
 
+**`kyanite_pca_rf.py`**
+- `CSV_INPUT`, `ELEMENTS` — file/directory and columns to include (defaults to all element columns)
+- `ANALYSES` — `pca`, `rf`, `all`, or a list of these
+- `BELOW_DETECTION` / `MAX_BELOW_DETECTION_FRAC` — drop poorly-detected elements
+- `LOG_TRANSFORM`, `PC_TO_PLOT`, `LOADING_THRESHOLD` — PCA options
+- `CV_FOLDS`, `N_ESTIMATORS`, `MAX_SAMPLES`, `IMPORTANCE_SIG_RATIO` — Random Forest options
+
 ## Requirements
 - MATLAB with Image Processing Toolbox (for `cpselect`, `imwarp`, `imread`, etc.)
-- Python: `h5py`, `numpy`, `tifffile`, `pandas`, `matplotlib`, `seaborn`, `scipy`
+- Python: `h5py`, `numpy`, `tifffile`, `pandas`, `matplotlib`, `seaborn`, `scipy`, `scikit-learn`
 - Images are 8-, 16-, or 32-bit grayscale TIFFs; EPMA maps are the fixed reference
