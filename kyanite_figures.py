@@ -46,6 +46,16 @@ PLOT_TYPE = ['corrmatrix']      # 'scatter', 'violin', 'boxplot', 'contour', 'he
 # ELEMENTS — set ELEMENTS to the full list of columns to compare (needs >=2).
 CORRMATRIX_CMAP = 'RdBu_r'   # diverging colormap, centered at r = 0
 
+# A ratio's highlight figure (see plot_element_highlights) requires beating
+# both raw component elements' |r| AND clearing this absolute floor, so
+# noise-level "wins" (e.g. 0.05 beating 0.03) don't generate a figure.
+CORRMATRIX_MIN_R = 0.5
+
+# Highlight-figure panels are heavily overplotted (whole-grain pixel counts),
+# same as the main scatter/contour/heatmap plots — so render each _beats
+# figure once per style below, rather than plain scatter alone.
+CORRMATRIX_BEATS_PLOT_TYPES = ['scatter', 'contour', 'heatmap']
+
 # 'contour' and 'heatmap' both estimate the same 2-D KDE (contour draws it as
 # lines over a scatter; heatmap draws it filled with a colorbar, no scatter).
 CONTOUR_LEVELS = 8      # number of contour lines for 'contour'
@@ -266,11 +276,11 @@ def filtered_ratio_xy(df, num, den):
     return ratio_all[keep], y_all[keep], n_removed
 
 
-def plot_corr_matrix(ax, elements, df):
+def compute_corr_matrix(elements, df):
     # Off-diagonal cells: r(row element / col element) vs. CL. Diagonal
-    # cells: r(element) vs. CL directly (the raw-element baseline) — outlined
-    # so it's visually clear a ratio wasn't involved — letting ratios be
-    # compared against the plain-element correlation they'd need to beat.
+    # cells: r(element) vs. CL directly (the raw-element baseline), so
+    # ratios can be compared against the plain-element correlation they'd
+    # need to beat.
     n = len(elements)
     rmat = np.full((n, n), np.nan)
     for i, num in enumerate(elements):
@@ -281,12 +291,19 @@ def plot_corr_matrix(ax, elements, df):
                 x, y, _ = filtered_ratio_xy(df, num, den)
             if len(x) >= 2 and np.std(x) > 0:
                 rmat[i, j] = np.corrcoef(x, y)[0, 1]
+    return pd.DataFrame(rmat, index=elements, columns=elements)
 
-    rdf = pd.DataFrame(rmat, index=elements, columns=elements)
+
+def plot_corr_matrix(ax, elements, df, rdf=None):
+    if rdf is None:
+        rdf = compute_corr_matrix(elements, df)
+    n = len(elements)
     sns.heatmap(rdf, ax=ax, cmap=CORRMATRIX_CMAP, vmin=-1, vmax=1, center=0,
                 annot=True, fmt='.2f', annot_kws={'fontsize': 8},
                 cbar_kws={'label': 'Pearson r'},
                 square=True, linewidths=0.5, linecolor='white')
+    # Diagonal (raw element vs. CL) outlined — it's the baseline the ratio
+    # cells around it are being compared against, not a ratio itself.
     for i in range(n):
         ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=False, edgecolor='black', linewidth=2))
     ax.set_xlabel('denominator (diagonal = raw element vs. CL)')
@@ -296,6 +313,59 @@ def plot_corr_matrix(ax, elements, df):
     for lbl in ax.get_xticklabels():
         lbl.set_ha('right')
     return rdf
+
+
+def plot_element_highlights(elements, df, rdf, grain_id, out_dir):
+    # For each element E, find every ratio with E as the NUMERATOR whose |r|
+    # beats BOTH raw elements it's built from AND clears CORRMATRIX_MIN_R —
+    # i.e. a genuine, non-trivial improvement over either component alone —
+    # and, if any exist, save one figure per E: E's raw scatter (the
+    # baseline being beaten) followed by a scatter for each winning ratio.
+    # Only checking the numerator role (not also denominator) means each
+    # ratio is only ever considered for one figure, so a given scatter never
+    # gets duplicated across two different elements' _beats figures.
+    diag = np.diag(rdf.values)
+
+    for i, elem in enumerate(elements):
+        winners = []  # (label, num, den, r)
+        for j, other in enumerate(elements):
+            if j == i:
+                continue
+            threshold = max(abs(diag[i]), abs(diag[j]), CORRMATRIX_MIN_R)
+
+            r_num = rdf.loc[elem, other]   # ratio elem/other — elem is numerator
+            if pd.notna(r_num) and abs(r_num) > threshold:
+                winners.append((f'{elem}/{other}', elem, other, r_num))
+
+        if not winners:
+            continue
+        winners.sort(key=lambda w: abs(w[3]), reverse=True)
+        print(f'  {elem}: {len(winners)} ratio(s) beat both raw elements')
+
+        n_panels = 1 + len(winners)
+        x0, y0, _ = filtered_xy(df, elem)
+        ratio_xy = [(label, r) + filtered_ratio_xy(df, num, den)[:2]
+                    for label, num, den, r in winners]
+
+        for pt in CORRMATRIX_BEATS_PLOT_TYPES:
+            fig, axes = plt.subplots(1, n_panels, figsize=(5 * n_panels, 5))
+            axes = np.atleast_1d(axes)
+
+            render_plot(axes[0], pt, elem, x0, y0)
+            axes[0].set_title(f'{elem} (raw, r={diag[i]:.3f})', fontsize=10)
+
+            for ax, (label, r, x, y) in zip(axes[1:], ratio_xy):
+                render_plot(ax, pt, label, x, y)
+                ax.set_title(f'{label} (r={r:.3f})', fontsize=10)
+
+            if SHOW_TITLE:
+                fig.suptitle(f'{grain_id} — ratios beating {elem} vs. CL ({pt})', fontsize=12)
+            plt.tight_layout()
+
+            if SAVE_FIG:
+                out = out_dir / f'{grain_id}_corrmatrix_{elem}_beats_{pt}.png'
+                fig.savefig(out, dpi=200, bbox_inches='tight')
+                print(f'  Saved: {out.name}')
 
 # =============================================================================
 # RUN
@@ -388,8 +458,10 @@ for csv_path in csv_files:
                 print(f'  Saved: {out.name}')
 
         else:
+            rdf = compute_corr_matrix(available, df)
+
             fig, ax = plt.subplots(figsize=(len(available) * 0.9 + 2, len(available) * 0.8 + 2))
-            plot_corr_matrix(ax, available, df)
+            plot_corr_matrix(ax, available, df, rdf=rdf)
             if SHOW_TITLE:
                 ax.set_title(f'{grain_id} — CL vs. element-ratio correlation', fontsize=11)
             plt.tight_layout()
@@ -398,5 +470,9 @@ for csv_path in csv_files:
                 out = out_dir / f'{grain_id}_corrmatrix.png'
                 fig.savefig(out, dpi=200, bbox_inches='tight')
                 print(f'  Saved: {out.name}')
+
+            # Ratios that beat both of their raw component elements get
+            # their own highlight figure (whole-grain mode only).
+            plot_element_highlights(available, df, rdf, grain_id, out_dir)
 
 plt.show()
