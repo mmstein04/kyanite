@@ -12,6 +12,10 @@
 #   - CL vs. element scatter plots, one per element, pooling spots from all
 #     input grains together and coloring by XANES class ('Bad data' /
 #     unclassified spots ARE included here, as grey points)
+#   - box-and-whisker plots, one per element (same element list as the
+#     scatter plots), showing that element's distribution grouped by XANES
+#     class, to check for a correlation between class and element amount
+#     ('Bad data' / unclassified excluded, same as the pie charts)
 #   - a labeled spot-location map per grain: the registered CL image with
 #     each spot plotted at its pixel location, colored by XANES class and
 #     labeled with its spot number
@@ -36,7 +40,7 @@ CSV_INPUT = '/Users/mstein/bin/kyanite/figs/xanes'   # file or directory of *_sp
 FIGS_DIR  = '/Users/mstein/bin/kyanite/figs'         # where <grain_id>_CL_registered.tif live
 OUT_DIR   = '/Users/mstein/bin/kyanite/figs/spot_analysis'
 
-ANALYSES = ['pie', 'scatter', 'map']   # 'pie', 'scatter', 'map', 'all', or a list of these
+ANALYSES = ['pie', 'scatter', 'box', 'map']   # 'pie', 'scatter', 'box', 'map', 'all', or a list of these
 
 # Columns to make a pooled "CL vs element" scatter plot for.
 # None = auto-detect every element ROI column present in the union of all input files.
@@ -206,7 +210,47 @@ def plot_cl_scatter(combined, element):
 
 
 # =============================================================================
-# ANALYSIS 3 — per-grain spot-location map
+# ANALYSIS 3 — element distribution by XANES class (box-and-whisker)
+# =============================================================================
+
+def plot_element_boxplot(combined, element):
+    """One box per XANES class (Type 1/2/3 only — 'Bad data'/unclassified
+    excluded, matching the pie chart's convention of only comparing real
+    classes) for this element, to check for a class/element correlation."""
+    sub = combined[combined['category_label'].isin(CATEGORY_ORDER)][['category_label', element]].dropna()
+    if sub.empty:
+        return None, sub
+
+    groups = [sub.loc[sub['category_label'] == c, element].values for c in CATEGORY_ORDER]
+    labels = [f'{c}\n(n={len(g)})' for c, g in zip(CATEGORY_ORDER, groups)]
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    bp = ax.boxplot(groups, labels=labels, patch_artist=True,
+                     medianprops=dict(color='black', linewidth=1.5),
+                     flierprops=dict(marker='.', markersize=4, alpha=0.5))
+    for patch, c in zip(bp['boxes'], CATEGORY_ORDER):
+        patch.set_facecolor(CATEGORY_COLORS[c])
+        patch.set_alpha(0.6)
+
+    # Overlay individual points (jittered) for context beyond the box summary.
+    rng = np.random.default_rng(0)
+    for i, (c, g) in enumerate(zip(CATEGORY_ORDER, groups), start=1):
+        if len(g):
+            jitter = rng.uniform(-0.08, 0.08, size=len(g))
+            ax.scatter(np.full(len(g), i) + jitter, g, s=10, alpha=0.4,
+                       color=CATEGORY_COLORS[c], edgecolors='none', zorder=3)
+
+    ax.set_xlabel('XANES pre-edge class')
+    ax.set_ylabel(element)
+    ax.grid(True, axis='y', alpha=0.25, linewidth=0.5)
+    if SHOW_TITLE:
+        ax.set_title(f'{element} by XANES class (n={len(sub):,})', fontsize=11)
+    plt.tight_layout()
+    return fig, sub
+
+
+# =============================================================================
+# ANALYSIS 4 — per-grain spot-location map
 # =============================================================================
 
 def load_cl_background(grain_id):
@@ -253,7 +297,7 @@ def plot_spot_map(grain_id, df, cl_img):
 # RUN
 # =============================================================================
 
-ALL_ANALYSES = ['pie', 'scatter', 'map']
+ALL_ANALYSES = ['pie', 'scatter', 'box', 'map']
 if ANALYSES == 'all':
     analyses = ALL_ANALYSES
 elif isinstance(ANALYSES, (list, tuple)):
@@ -264,6 +308,9 @@ unknown = [a for a in analyses if a not in ALL_ANALYSES]
 if unknown:
     raise ValueError(f"Unknown ANALYSES {unknown}; choose from {ALL_ANALYSES}, 'all', or a list of these.")
 
+# Shared by 'scatter' and 'box' — same element list for both.
+scatter_elements = list(SCATTER_ELEMENTS) if SCATTER_ELEMENTS is not None else detect_elements(combined)
+
 if 'pie' in analyses:
     print('\n--- XANES class pie grid ---')
     fig = plot_pie_grid(grain_frames)
@@ -273,7 +320,6 @@ if 'pie' in analyses:
         print(f'  Saved: {out.name}')
 
 if 'scatter' in analyses:
-    scatter_elements = list(SCATTER_ELEMENTS) if SCATTER_ELEMENTS is not None else detect_elements(combined)
     print(f'\n--- CL vs element scatter ({len(scatter_elements)} element(s)) ---')
     for element in scatter_elements:
         if element not in combined.columns:
@@ -290,6 +336,26 @@ if 'scatter' in analyses:
         print(f'  {element}: n={len(sub):,} pooled spot(s) from {sub["grain_id"].nunique()} grain(s)')
         if SAVE_FIG:
             out = out_dir / f'CL_vs_{element}_scatter.png'
+            fig.savefig(out, dpi=200, bbox_inches='tight')
+            print(f'  Saved: {out.name}')
+
+if 'box' in analyses:
+    print(f'\n--- element distribution by XANES class ({len(scatter_elements)} element(s)) ---')
+    for element in scatter_elements:
+        if element not in combined.columns:
+            print(f"  WARNING: '{element}' not found in any input file — skipping.")
+            continue
+        have, missing = element_availability(grain_frames, element)
+        if missing:
+            print(f"  WARNING: '{element}' not present in {len(missing)} grain CSV(s), "
+                  f"excluded from this plot: {missing}")
+        fig, sub = plot_element_boxplot(combined, element)
+        if fig is None:
+            print(f'  WARNING: no classified rows with {element} present — skipping.')
+            continue
+        print(f'  {element}: n={len(sub):,} classified spot(s)')
+        if SAVE_FIG:
+            out = out_dir / f'{element}_by_class_boxplot.png'
             fig.savefig(out, dpi=200, bbox_inches='tight')
             print(f'  Saved: {out.name}')
 
