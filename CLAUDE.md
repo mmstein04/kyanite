@@ -25,6 +25,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | `kyanite_figures.py` | Python | Standalone figure generation from exported CSV pixel data |
 | `kyanite_pca_rf.py` | Python | PCA and cross-validated Random Forest analysis of CL vs. trace elements from exported CSV pixel data |
 | `kyanite_sample_size_convergence.py` | Python | Diagnostic: sweeps RF/SHAP over a range of pixel subsample sizes for one grain to check whether importance estimates have converged below `kyanite_pca_rf.py`'s `MAX_SAMPLES`/`SHAP_SAMPLES`, or would still change with more data |
+| `kyanite_spot_analysis.py` | Python | Batch analysis of `<grain_id>_spot_geochemistry.csv` files: XANES class distribution pie-chart grid, pooled CL-vs-element scatter plots colored by class, and per-grain labeled spot-location maps on the registered CL image |
 | `xrf_display.m` | MATLAB | Visualize XRF element-map TIFFs with grain mask overlay |
 | `sum_epma_maps.m` | MATLAB | Sum two or more element maps into a combined TIFF (e.g. Zr_La + Zr_Lb) |
 
@@ -92,6 +93,30 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
   with exported XANES spot CSVs or `GRAIN_ID` (e.g. h5 area `LLF6-Area2-spot01` vs.
   grain `LLF6-01`) — everything joins on the trailing spot number + `GRAIN_ID`, not
   the h5 area's own name
+- Note: the 8 real `*_spot_geochemistry.csv` files currently on disk live in
+  `figs/xanes/`, not directly in `figs/` as `OUTPUT_CSV`'s own default implies —
+  `kyanite_spot_analysis.py`'s `CSV_INPUT` default points at the real location
+
+### `kyanite_spot_analysis.py` details
+- Input: `<grain_id>_spot_geochemistry.csv` files (see above), one per grain;
+  `CSV_INPUT` may be a single file or a directory (globs `*_spot_geochemistry.csv`)
+- Three independently toggleable analyses (`ANALYSES` list): `pie` (one combined
+  figure, small-multiples grid of per-grain XANES class pies — `'Bad data'`/
+  unclassified spots excluded from the pie counts entirely, per-grain slice
+  order/coloring stays identical even at zero count for a type), `scatter`
+  (CL-vs-element, one figure per element, pooling spots from every input grain —
+  `'Bad data'`/unclassified spots ARE included here, as grey points/markers, for
+  QC context), `map` (per-grain spot-location map on the registered CL image,
+  labeled by spot number)
+- `SCATTER_ELEMENTS` (default `None`) auto-detects every element column present in
+  the union of input files; an element missing from some grains' CSVs (ROI lists
+  vary slightly, e.g. LLF6-01 has extra REE lines) is pooled from whichever grains
+  do have it, with a warning listing which grains were excluded from that plot
+- `CATEGORY_COLORS` reuses `xanes_plot.py`'s hex values, re-keyed to this file's
+  real `category_label` strings (`'Bad data'`, not `'Ambiguous'`)
+- Spot maps plot directly at `row_px_tiff`/`col_px_tiff` on
+  `imshow(cl_img, cmap='gray', origin='upper')` with no additional flip — this
+  already matches the project's row-0-at-top convention
 
 ## File conventions
 - Output filenames: `<sample>_<Element>_<Line>.tif`  (e.g. `NA-CM-G12B7-02_Fe_Ka.tif`)
@@ -107,6 +132,9 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 - Region analysis log: `<grain_id>_region_analysis_log.txt`
 - Spot coordinate exports: `<sample>_spot_coordinates.csv`
 - Spot geochemistry/CL/XANES-class exports: `figs/<grain_id>_spot_geochemistry.csv`
+  (currently on disk in `figs/xanes/` for all 8 processed grains)
+- Spot analysis figures saved to `figs/spot_analysis/`: `xanes_class_pie_grid.png`,
+  `CL_vs_<element>_scatter.png`, `<grain_id>_spot_map.png`
 
 ## Key parameters (set per-grain at top of each script)
 
@@ -161,6 +189,13 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 - `SHAP_EXPLAIN_SAMPLES` — cap on held-out points explained by SHAP per repeat, so SHAP cost doesn't grow with sample size
 - `CONVERGENCE_THRESHOLD` — step-to-step relative change below which a metric counts as converged
 - Output: importance/RMSE/R2 vs. sample size plots with repeat-to-repeat spread as a shaded band, raw results CSV, and a log noting the convergence size per element/metric
+
+**`kyanite_spot_analysis.py`**
+- `CSV_INPUT` — file/directory of `*_spot_geochemistry.csv` (defaults to `figs/xanes/`)
+- `FIGS_DIR`, `OUT_DIR` — where to find `<grain_id>_CL_registered.tif` / save figures
+- `ANALYSES` — `pie`, `scatter`, `map`, `all`, or a list of these
+- `SCATTER_ELEMENTS` — element columns for the CL-vs-element plots (`None` = auto-detect all)
+- `CATEGORY_ORDER` / `CATEGORY_COLORS` — fixed XANES class order/coloring, shared across all figures
 
 ## Requirements
 - MATLAB with Image Processing Toolbox (for `cpselect`, `imwarp`, `imread`, etc.)
