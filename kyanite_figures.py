@@ -5,9 +5,13 @@
 #
 # Loads one or more CSVs and produces scatter, contour (density contour lines
 # over a scatter), heatmap (the same 2-D KDE, filled with a colorbar instead
-# of drawn as lines), violin, or binned box plots of CL intensity vs. chosen
-# elements. scatter, contour, and heatmap all include a linear fit line and
-# Pearson r.
+# of drawn as lines), violin, binned box plots, or a corrmatrix grid of CL
+# intensity vs. chosen elements. scatter, contour, and heatmap all include a
+# linear fit line and Pearson r. corrmatrix is different from the rest: it
+# doesn't loop per element — instead, for every ordered pair of elements in
+# ELEMENTS, it forms the ratio (row element / column element) and shows the
+# Pearson r of that ratio vs. CL as one annotated, color-mapped grid cell
+# (self-ratio cells on the diagonal are masked out as meaningless).
 #
 # Two input formats are auto-detected by column name:
 #   - Whole-grain CSVs from CL_EPMA_registration.m (*_pixel_data.csv):
@@ -34,8 +38,13 @@ from scipy.stats import gaussian_kde
 # =============================================================================
 
 CSV_INPUT = '/Users/mstein/bin/kyanite/figs'   # file or directory
-ELEMENTS  = ['Cr_Ka']          # CSV column names
-PLOT_TYPE = ['contour', 'heatmap']      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'all', or a list of these
+ELEMENTS  = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Mn_Ka', 'Ti_Ka']          # CSV column names
+PLOT_TYPE = ['corrmatrix']      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix', 'all', or a list of these
+
+# 'corrmatrix' ignores the per-element looping above and instead builds one
+# grid per grain (or per region) from every ordered pair of elements in
+# ELEMENTS — set ELEMENTS to the full list of columns to compare (needs >=2).
+CORRMATRIX_CMAP = 'RdBu_r'   # diverging colormap, centered at r = 0
 
 # 'contour' and 'heatmap' both estimate the same 2-D KDE (contour draws it as
 # lines over a scatter; heatmap draws it filled with a colorbar, no scatter).
@@ -79,7 +88,7 @@ print(f'Processing {len(csv_files)} CSV(s):')
 for p in csv_files:
     print(f'  {p.name}')
 
-ALL_PLOT_TYPES = ['scatter', 'violin', 'boxplot', 'contour', 'heatmap']
+ALL_PLOT_TYPES = ['scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix']
 
 if PLOT_TYPE == 'all':
     plot_types = ALL_PLOT_TYPES
@@ -239,6 +248,48 @@ def filtered_xy(df, element):
     keep = (x_all >= lo) & (x_all <= hi)
     return x_all[keep], y_all[keep], int((~keep).sum())
 
+
+def filtered_ratio_xy(df, num, den):
+    # Same percentile-cutoff outlier removal as filtered_xy, applied to the
+    # ratio itself (the quantity actually being correlated against CL), plus
+    # a finite-value mask to drop divide-by-zero/NaN ratios first.
+    ratio_all = df[num].values / df[den].values
+    y_all = df['CL'].values
+    finite = np.isfinite(ratio_all)
+    ratio_all, y_all = ratio_all[finite], y_all[finite]
+    n_removed = int((~finite).sum())
+    if len(ratio_all) == 0:
+        return ratio_all, y_all, n_removed
+    lo, hi = np.percentile(ratio_all, [PCT_LO, PCT_HI])
+    keep = (ratio_all >= lo) & (ratio_all <= hi)
+    n_removed += int((~keep).sum())
+    return ratio_all[keep], y_all[keep], n_removed
+
+
+def plot_corr_matrix(ax, elements, df):
+    n = len(elements)
+    rmat = np.full((n, n), np.nan)
+    for i, num in enumerate(elements):
+        for j, den in enumerate(elements):
+            if i == j:
+                continue
+            x, y, _ = filtered_ratio_xy(df, num, den)
+            if len(x) >= 2 and np.std(x) > 0:
+                rmat[i, j] = np.corrcoef(x, y)[0, 1]
+
+    rdf = pd.DataFrame(rmat, index=elements, columns=elements)
+    sns.heatmap(rdf, ax=ax, cmap=CORRMATRIX_CMAP, vmin=-1, vmax=1, center=0,
+                annot=True, fmt='.2f', annot_kws={'fontsize': 8},
+                mask=np.eye(n, dtype=bool), cbar_kws={'label': 'Pearson r'},
+                square=True, linewidths=0.5, linecolor='white')
+    ax.set_xlabel('denominator')
+    ax.set_ylabel('numerator')
+    ax.tick_params(axis='x', rotation=45)
+    ax.tick_params(axis='y', rotation=0)
+    for lbl in ax.get_xticklabels():
+        lbl.set_ha('right')
+    return rdf
+
 # =============================================================================
 # RUN
 # =============================================================================
@@ -261,11 +312,13 @@ for csv_path in csv_files:
     if missing:
         print(f'  WARNING: columns not found, skipping: {missing}')
 
+    element_plot_types = [pt for pt in plot_types if pt != 'corrmatrix']
+
     for element in available:
 
         if region_mode:
             n_r = len(regions)
-            for pt in plot_types:
+            for pt in element_plot_types:
                 fig, axes = plt.subplots(1, n_r, figsize=(5 * n_r, 5), sharey=True)
                 axes = np.atleast_1d(axes)
                 for ax, region in zip(axes, regions):
@@ -293,7 +346,7 @@ for csv_path in csv_files:
             x, y, n_removed = filtered_xy(df, element)
             print(f'  {element}: {len(x):,} px after filter ({n_removed:,} removed)')
 
-            for pt in plot_types:
+            for pt in element_plot_types:
                 fig, ax = plt.subplots(figsize=(10, 5))
                 render_plot(ax, pt, element, x, y)
                 if SHOW_TITLE:
@@ -304,5 +357,39 @@ for csv_path in csv_files:
                     out = out_dir / f'{grain_id}_{element}_{pt}.png'
                     fig.savefig(out, dpi=200, bbox_inches='tight')
                     print(f'  Saved: {out.name}')
+
+    # 'corrmatrix' isn't per-element — one grid per grain (or per region)
+    # built from every ordered pair within `available`.
+    if 'corrmatrix' in plot_types:
+        if len(available) < 2:
+            print(f'  WARNING: corrmatrix needs >=2 ELEMENTS columns, got {len(available)}; skipping')
+        elif region_mode:
+            n_r = len(regions)
+            fig, axes = plt.subplots(1, n_r, figsize=(5 * len(available) * n_r / 3 + 2, 5 * len(available) / 3 + 1))
+            axes = np.atleast_1d(axes)
+            for ax, region in zip(axes, regions):
+                sub = df[df['Region'] == region]
+                plot_corr_matrix(ax, available, sub)
+                ax.set_title(region, fontsize=10)
+            if SHOW_TITLE:
+                fig.suptitle(f'{grain_id} — CL vs. element-ratio correlation by region', fontsize=12)
+            plt.tight_layout()
+
+            if SAVE_FIG:
+                out = out_dir / f'{grain_id}_corrmatrix_by_region.png'
+                fig.savefig(out, dpi=200, bbox_inches='tight')
+                print(f'  Saved: {out.name}')
+
+        else:
+            fig, ax = plt.subplots(figsize=(len(available) * 0.9 + 2, len(available) * 0.8 + 2))
+            plot_corr_matrix(ax, available, df)
+            if SHOW_TITLE:
+                ax.set_title(f'{grain_id} — CL vs. element-ratio correlation', fontsize=11)
+            plt.tight_layout()
+
+            if SAVE_FIG:
+                out = out_dir / f'{grain_id}_corrmatrix.png'
+                fig.savefig(out, dpi=200, bbox_inches='tight')
+                print(f'  Saved: {out.name}')
 
 plt.show()
