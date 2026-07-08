@@ -19,6 +19,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | Script | Language | Purpose |
 |---|---|---|
 | `xrf_h5_to_tiff.py` | Python | Extract XRF element maps from a Larch/GSECARS HDF5 file; export as 32-bit float TIFFs + metadata sidecars |
+| `xrf_h5_extract_spots.py` | Python | Extract pixel + physical stage coordinates of XANES spot locations (`xrmmap/areas`) from an XRF HDF5 file, for pulling CL/element values at those spots from the registered pipeline outputs |
 | `CL_EPMA_registration.m` | MATLAB | Full registration + analysis pipeline (see workflow below) |
 | `CL_region_extraction.m` | MATLAB | Draw named sub-grain polygon regions on an already-registered CL image and extract per-pixel CL + element data per region (no re-registration) |
 | `kyanite_figures.py` | Python | Standalone figure generation from exported CSV pixel data |
@@ -57,6 +58,22 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 - Each TIFF gets a `.txt` sidecar with: source file, ROI index, dimensions, value stats
   (min/max/mean/median/std), normalization, scan step size, range, dwell time, UTC timestamp
 
+### `xrf_h5_extract_spots.py` details
+- Data source: `xrmmap/areas/<name>` — boolean point/region masks saved during the XRF
+  scan (e.g. XANES spot locations); `xrmmap/positions/pos` for the physical stage
+  position at each pixel; `xrmmap/config/scan` for axis identity and range
+- Reports each area's pixel index in two frames: native HDF5 orientation
+  (`row_px_h5`/`col_px_h5`, row 0 = bottom of scan) and row-flipped
+  (`row_px_tiff`/`col_px_tiff`, 0-based, and `row_matlab`/`col_matlab`, 1-based) to
+  match the TIFFs from `xrf_h5_to_tiff.py` (`np.flipud`) — the same pixel grid used
+  by `CL_EPMA_registration.m`/`CL_region_extraction.m` for the registered CL image,
+  element maps, and mask. Use the flipped columns to index those outputs directly.
+- `NAME_FILTER` (default `'spot'`) selects which `xrmmap/areas` entries to include;
+  set to `None` to include drawn polygon regions too
+- Note: spot numbering in the HDF5 area names doesn't necessarily share a prefix
+  with exported XANES spot CSVs (e.g. h5 area `LLF6-Area2-spot01` vs. CSV
+  `LLF6-01_spot01.csv`) — join on the trailing spot number, not the full name
+
 ## File conventions
 - Output filenames: `<sample>_<Element>_<Line>.tif`  (e.g. `NA-CM-G12B7-02_Fe_Ka.tif`)
 - Metadata sidecars: same base name, `.txt` extension
@@ -69,6 +86,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 - Region pixel data exports: `<grain_id>_region_pixel_data.csv` and `.mat` (long-format, `Region` column)
 - Region summary stats: `<grain_id>_region_summary.csv`
 - Region analysis log: `<grain_id>_region_analysis_log.txt`
+- Spot coordinate exports: `<sample>_spot_coordinates.csv`
 
 ## Key parameters (set per-grain at top of each script)
 
@@ -92,6 +110,10 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 - `H5_FILE`, `OUTPUT_DIR`, `SAMPLE`
 - `ELEMENTS` — list of ROI names to export (or `None` for all)
 - `NORMALIZE_BY_CLOCK`, `NORMALIZE_BY_I0`
+
+**`xrf_h5_extract_spots.py`**
+- `H5_FILE`, `OUTPUT_CSV` — set `OUTPUT_CSV` to write results to disk (default `None`, print only)
+- `NAME_FILTER` — regex to select which `xrmmap/areas` entries count as spots (default `'spot'`)
 
 **`kyanite_figures.py`**
 - `CSV_FILE`, `ELEMENT`, `PLOT_TYPE` (`scatter`, `violin`, `boxplot`, or `all`)
