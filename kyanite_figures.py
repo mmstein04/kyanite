@@ -267,22 +267,29 @@ def filtered_ratio_xy(df, num, den):
 
 
 def plot_corr_matrix(ax, elements, df):
+    # Off-diagonal cells: r(row element / col element) vs. CL. Diagonal
+    # cells: r(element) vs. CL directly (the raw-element baseline) — outlined
+    # so it's visually clear a ratio wasn't involved — letting ratios be
+    # compared against the plain-element correlation they'd need to beat.
     n = len(elements)
     rmat = np.full((n, n), np.nan)
     for i, num in enumerate(elements):
         for j, den in enumerate(elements):
             if i == j:
-                continue
-            x, y, _ = filtered_ratio_xy(df, num, den)
+                x, y, _ = filtered_xy(df, num)
+            else:
+                x, y, _ = filtered_ratio_xy(df, num, den)
             if len(x) >= 2 and np.std(x) > 0:
                 rmat[i, j] = np.corrcoef(x, y)[0, 1]
 
     rdf = pd.DataFrame(rmat, index=elements, columns=elements)
     sns.heatmap(rdf, ax=ax, cmap=CORRMATRIX_CMAP, vmin=-1, vmax=1, center=0,
                 annot=True, fmt='.2f', annot_kws={'fontsize': 8},
-                mask=np.eye(n, dtype=bool), cbar_kws={'label': 'Pearson r'},
+                cbar_kws={'label': 'Pearson r'},
                 square=True, linewidths=0.5, linecolor='white')
-    ax.set_xlabel('denominator')
+    for i in range(n):
+        ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=False, edgecolor='black', linewidth=2))
+    ax.set_xlabel('denominator (diagonal = raw element vs. CL)')
     ax.set_ylabel('numerator')
     ax.tick_params(axis='x', rotation=45)
     ax.tick_params(axis='y', rotation=0)
