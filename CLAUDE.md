@@ -18,6 +18,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 
 | Script | Language | Purpose |
 |---|---|---|
+| `onboard_dataset.py` | Python | Optional first step for a new (e.g. external collaborator's) dataset: stage a grain's arbitrarily-named raw files (CL image, element-map TIFFs, XANES classification CSV, XRF HDF5) into this project's exact file/folder conventions, driven by a per-grain YAML manifest |
 | `xrf_h5_to_tiff.py` | Python | Extract XRF element maps from a Larch/GSECARS HDF5 file; export as 32-bit float TIFFs + metadata sidecars |
 | `xrf_h5_extract_spots.py` | Python | Build a per-spot CSV: pixel + physical coordinates of XANES spot locations (`xrmmap/areas`), mean element concentrations and CL brightness over a small grain-mask-restricted circular zone around each spot, and the joined XANES pre-edge classification |
 | `CL_EPMA_registration.m` | MATLAB | Full registration + analysis pipeline (see workflow below) |
@@ -106,6 +107,31 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
    ever applied across runs, for audit/undo-by-inspection), a
    `<grain_id>_mask_edit_diff.png` (before/after boundary + added/removed
    pixel diff), and a `<grain_id>_mask_edit_log.txt` run record
+
+### `onboard_dataset.py` details
+- Purpose: let a collaborator with a differently-named/organized dataset feed it into
+  this workflow without hand-renaming files. Reads a per-grain YAML manifest (see
+  `dataset_manifest.example.yaml`) describing where their raw files actually are and
+  how their element-map files map to `<Element>_<Line>`, then copies (or, for the
+  multi-GB XRF h5, symlinks) everything into this project's exact naming/folder
+  conventions
+- Never guesses a mapping it wasn't told: element-map files resolve only via an
+  explicit `files` entry or a `filename_pattern` regex that must match the *whole*
+  filename (`re.fullmatch`, not `search`) — anything else is skipped with a warning
+  rather than silently mis-parsed
+- Defaults to `DRY_RUN = True`: prints the full plan (and any warnings/collisions,
+  e.g. two source files resolving to the same `<Element>_<Line>`) without touching
+  disk; set `DRY_RUN = False` to execute. Existing destination files are skipped
+  (not overwritten) unless `OVERWRITE = True`
+- For the raw XRF HDF5, also inspects `xrmmap/areas` key names against the
+  `spot<N>` convention `xrf_h5_extract_spots.py`'s `NAME_FILTER`/spot-number regex
+  expects, and — if it doesn't match — reports which built-in fallback pattern
+  (trailing digits, `pt<N>`, `point<N>`) does, so `NAME_FILTER` can be updated
+  instead of the h5 file itself being touched
+- All operations are copies or symlinks of originals — nothing is moved, renamed, or
+  modified in place
+- Writes `<grain_id>_onboarding_log.txt` (skipped in dry-run mode) recording every
+  planned source → destination mapping and warning, for audit purposes
 
 ### `xrf_h5_to_tiff.py` details
 - Data source: `xrmmap/roimap/sum_cor` [rows × cols × n_rois], `xrmmap/roimap/sum_name`
@@ -225,8 +251,19 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `CL_vs_<element>_scatter.png`, `<element>_by_class_boxplot.png`,
   `pca_pc1_pc2_scatter.png`, `pca_scree.png`, `pca_loadings_pc1_pc2.png`,
   `pca_biplot.png`, `<grain_id>_spot_map.png`
+- Onboarding manifest (per new dataset, hand-written from `dataset_manifest.example.yaml`):
+  `dataset_manifest.yaml` (or any name — set in `onboard_dataset.py`'s `MANIFEST_FILE`)
+- Onboarding audit log: `<grain_id>_onboarding_log.txt` (written by `onboard_dataset.py`,
+  only on a non-dry-run execution)
 
 ## Key parameters (set per-grain at top of each script)
+
+**`onboard_dataset.py`**
+- `MANIFEST_FILE` — path to the per-grain YAML manifest (see `dataset_manifest.example.yaml`)
+- `PROJECT_ROOT` — root this project's conventional paths (`maps/`, `figs/`,
+  `xanes_classification/`) are resolved relative to
+- `DRY_RUN` — `True` (default): print the plan and warnings only; `False`: execute it
+- `OVERWRITE` — `False` (default): skip any destination file that already exists
 
 **`CL_EPMA_registration.m`**
 - `grain_id` — sample name string, used in all output filenames
@@ -313,5 +350,5 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 
 ## Requirements
 - MATLAB with Image Processing Toolbox (for `cpselect`, `imwarp`, `imread`, etc.)
-- Python: `h5py`, `numpy`, `tifffile`, `pandas`, `matplotlib`, `seaborn`, `scipy`, `scikit-learn`, `shap`
+- Python: `h5py`, `numpy`, `tifffile`, `pandas`, `matplotlib`, `seaborn`, `scipy`, `scikit-learn`, `shap`, `pyyaml` (only needed for `onboard_dataset.py`)
 - Images are 8-, 16-, or 32-bit grayscale TIFFs; EPMA maps are the fixed reference
