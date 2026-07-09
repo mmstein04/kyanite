@@ -8,9 +8,9 @@
 %   Off-grain pixels are masked transparent using a pre-existing binary mask.
 %
 % INPUTS (set in PARAMETERS section below):
-%   - Folder of element map TIFFs (maps_dir)
+%   - Folder of element map TIFFs (epma_dir)
 %   - Grain ID string, or cell array of grain IDs for batch processing
-%   - Mask TIFFs are auto-located as figs_dir/data/<grainID>_mask.tif
+%   - Mask TIFFs are auto-located as figs_dir/data/<grain_id>_mask.tif
 %   - List of element names to display
 %   - List of element-ratio pairs to display (numerator, denominator)
 %   - Per-element upper percentile cutoffs for contrast scaling
@@ -20,7 +20,7 @@
 %   - One figure per element per grain showing the masked, contrast-scaled map
 %   - One figure per ratio per grain showing the masked, contrast-scaled
 %     ratio map (numerator element map ./ denominator element map)
-%   - Saved (if save_figs) as PNGs to figs_dir/maps/<grainID>_<tag>_display.png
+%   - Saved (if save_figs) as PNGs to figs_dir/map_renders/<grain_id>_<tag>_display.png
 %
 % REQUIREMENTS:
 %   - MATLAB Image Processing Toolbox (for imread)
@@ -34,17 +34,18 @@ clear; close all; clc;
 %% Parameters
 
 % File locations
-maps_dir = '/Users/mstein/bin/kyanite/inputs/maps/';
+epma_dir = '/Users/mstein/bin/kyanite/inputs/maps/';
 figs_dir = '/Users/mstein/bin/kyanite/figs/';
 
 % Rendered display PNGs are saved here, separate from figs_dir (which this
-% script only reads from — the grain mask).
-display_out_dir = fullfile(figs_dir, 'maps');
+% script only reads from — the grain mask). Named map_renders/, not maps/,
+% so it can't be confused with inputs/maps/ (the actual element-map TIFFs).
+display_out_dir = fullfile(figs_dir, 'map_renders');
 
 % Grain and element selection
-% grainIDs may be a single string or a cell array for batch processing.
-% Mask files are auto-located as figs_dir/data/<grainID>_mask.tif
-grainIDs = {'RH-XA-57081P-05'};
+% grain_ids may be a single string or a cell array for batch processing.
+% Mask files are auto-located as figs_dir/data/<grain_id>_mask.tif
+grain_ids = {'RH-XA-57081P-05'};
 elements = {'Cr','Fe','Mn','Ti','V'};
 
 % Element-ratio maps (numerator, denominator), e.g. Cr/Ti and Fe/Ti.
@@ -76,12 +77,12 @@ scalebar_um      = 100;    % physical length of scale bar in µm
 scalebar_pos     = 'se';   % corner: 'se' | 'sw' | 'ne' | 'nw'
 scalebar_margin  = 0.04;   % margin from edge as fraction of image dimensions
 
-%% Normalize grainIDs to a cell array
+%% Normalize grain_ids to a cell array
 
-if ischar(grainIDs)
-    grainIDs = {grainIDs};
+if ischar(grain_ids)
+    grain_ids = {grain_ids};
 end
-nGrains   = numel(grainIDs);
+nGrains   = numel(grain_ids);
 nElements = numel(elements);
 nRatios   = numel(ratios);
 figOffset = 0;
@@ -103,7 +104,7 @@ opts = struct( ...
 
 fprintf('Processing %d grain(s):\n', nGrains);
 for g = 1:nGrains
-    fprintf('  %s\n', grainIDs{g});
+    fprintf('  %s\n', grain_ids{g});
 end
 if nRatios > 0
     fprintf('Ratio maps requested (%d):\n', nRatios);
@@ -116,11 +117,11 @@ end
 
 for g = 1:nGrains
 
-    grainID      = grainIDs{g};
-    mask_path    = fullfile(figs_dir, 'data', sprintf('%s_mask.tif', grainID));
+    grain_id      = grain_ids{g};
+    mask_path    = fullfile(figs_dir, 'data', sprintf('%s_mask.tif', grain_id));
     grain_px_um  = pixel_um(min(g, end));
 
-    fprintf('\n--- %s ---\n', grainID);
+    fprintf('\n--- %s ---\n', grain_id);
 
     %% Load element maps (union of `elements` and every ratio component)
 
@@ -133,7 +134,7 @@ for g = 1:nGrains
     imgs = struct();
     for i = 1:numel(elements_to_load)
         el = elements_to_load{i};
-        fn = fullfile(maps_dir, grainID, sprintf('%s_%s_Ka.tif', grainID, el));
+        fn = fullfile(epma_dir, grain_id, sprintf('%s_%s_Ka.tif', grain_id, el));
         if ~exist(fn, 'file')
             error('Element map not found: %s', fn);
         end
@@ -150,7 +151,7 @@ for g = 1:nGrains
         img(~mask) = NaN;
 
         opts.saturation_pct = saturation_pct;
-        render_and_save_map(figOffset + i, grainID, el, sprintf('%s_Ka', el), ...
+        render_and_save_map(figOffset + i, grain_id, el, sprintf('%s_Ka', el), ...
                             img, mask, grain_px_um, opts);
     end % elements
 
@@ -170,7 +171,7 @@ for g = 1:nGrains
         filenameTag  = sprintf('%s_%s_ratio', numEl, denEl);
 
         opts.saturation_pct = ratio_saturation_pct;
-        render_and_save_map(figOffset + r, grainID, label, filenameTag, ...
+        render_and_save_map(figOffset + r, grain_id, label, filenameTag, ...
                             ratio_img, mask, grain_px_um, opts);
     end % ratios
 
@@ -182,7 +183,7 @@ end % grains
 %% LOCAL FUNCTIONS
 % =========================================================================
 
-function render_and_save_map(figNum, grainID, label, filenameTag, img, mask, grain_px_um, opts)
+function render_and_save_map(figNum, grain_id, label, filenameTag, img, mask, grain_px_um, opts)
 % Renders one masked, contrast-scaled map (element or ratio) in the
 % project's standard style and optionally exports it as a PNG. Shared by
 % both the element and ratio display loops so their look never drifts.
@@ -190,14 +191,14 @@ function render_and_save_map(figNum, grainID, label, filenameTag, img, mask, gra
     finite_mask = mask & isfinite(img);
     grain_vals  = img(finite_mask);
     if isempty(grain_vals)
-        warning('%s — %s: no finite in-mask pixels, skipping.', grainID, label);
+        warning('%s — %s: no finite in-mask pixels, skipping.', grain_id, label);
         return;
     end
     lo = max(0, prctile(grain_vals, opts.saturation_pct));
     hi = prctile(grain_vals, 100 - opts.saturation_pct);
 
     fig = figure(figNum);
-    fig.Name = sprintf('%s — %s', grainID, label);
+    fig.Name = sprintf('%s — %s', grain_id, label);
     fig.Color = opts.bkgdColor;
     ax = axes;
 
@@ -214,7 +215,7 @@ function render_and_save_map(figNum, grainID, label, filenameTag, img, mask, gra
         cb.Color = opts.fontColor;
     end
 
-    title(sprintf('%s  %s', grainID, label), 'Color', opts.fontColor);
+    title(sprintf('%s  %s', grain_id, label), 'Color', opts.fontColor);
 
     if opts.show_scalebar
         [nrows, ncols] = size(img);
@@ -247,7 +248,7 @@ function render_and_save_map(figNum, grainID, label, filenameTag, img, mask, gra
 
     if opts.save_figs
         if ~exist(opts.output_dir, 'dir'), mkdir(opts.output_dir); end
-        out_path = fullfile(opts.output_dir, sprintf('%s_%s_display.png', grainID, filenameTag));
+        out_path = fullfile(opts.output_dir, sprintf('%s_%s_display.png', grain_id, filenameTag));
         exportgraphics(fig, out_path, 'Resolution', opts.fig_dpi);
         fprintf('Saved: %s\n', out_path);
     end

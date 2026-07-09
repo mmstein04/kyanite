@@ -16,13 +16,13 @@ resolve is skipped with a warning rather than silently renamed wrong.
 Conventions staged (see CLAUDE.md "File conventions" for the source of
 truth this mirrors):
   - EPMA/XRF element maps -> inputs/maps/<grain_id>/<grain_id>_<Element>_<Line>.tif
-  - CL image              -> <project_root>/inputs/cl/<grain_id>_CL_raw<ext>
+  - CL image              -> <project_root>/inputs/cl/<grain_id>_CL_color<ext>
                              (cl_filename in CL_EPMA_registration.m is a
                              free parameter, so this is a staging
                              convenience/predictable name, not a hard
                              requirement)
   - XANES classification  -> <project_root>/inputs/xanes_classification/<grain_id>_pre_edge_classification.csv
-  - Raw XRF HDF5          -> optionally symlinked to <project_root>/inputs/xrf/<grain_id>_xrf.h5
+  - Raw XRF scan (HDF5)   -> optionally symlinked to <project_root>/inputs/xrf/<grain_id>_xrf.h5
                              (also analyzes xrmmap/areas spot naming and
                              suggests NAME_FILTER/spot-number-regex overrides
                              for xrf_h5_extract_spots.py if the default
@@ -83,7 +83,7 @@ def plan_cl_image(manifest, project_root, grain_id):
     if not cfg:
         return [], []
     src = Path(cfg['source'])
-    dst = Path(cfg['dest']) if cfg.get('dest') else project_root / 'inputs' / 'cl' / f"{grain_id}_CL_raw{src.suffix}"
+    dst = Path(cfg['dest']) if cfg.get('dest') else project_root / 'inputs' / 'cl' / f"{grain_id}_CL_color{src.suffix}"
     warnings = [] if src.exists() else [f"cl_image.source not found: {src}"]
     return [_copy_op(src, dst)], warnings
 
@@ -166,18 +166,18 @@ def suggest_name_filter(h5_path):
 
     with h5py.File(h5_path, 'r') as f:
         if 'xrmmap/areas' not in f:
-            return ["xrf_h5: no xrmmap/areas group found — cannot check spot naming"]
+            return ["xrf_scan: no xrmmap/areas group found — cannot check spot naming"]
         names = list(f['xrmmap/areas'].keys())
 
     if not names:
-        return ["xrf_h5: xrmmap/areas is empty — nothing to check"]
+        return ["xrf_scan: xrmmap/areas is empty — nothing to check"]
 
     default_hits = [n for n in names if DEFAULT_SPOT_NUM_RE.search(n)]
     if len(default_hits) == len(names):
-        return [f"xrf_h5: all {len(names)} xrmmap/areas names match the default "
+        return [f"xrf_scan: all {len(names)} xrmmap/areas names match the default "
                 f"'spot<N>' convention — no NAME_FILTER/regex changes needed."]
 
-    msgs = [f"xrf_h5: only {len(default_hits)}/{len(names)} xrmmap/areas names "
+    msgs = [f"xrf_scan: only {len(default_hits)}/{len(names)} xrmmap/areas names "
             f"matched the default 'spot<N>' convention. Example names: "
             f"{', '.join(names[:5])}"]
 
@@ -199,14 +199,14 @@ def suggest_name_filter(h5_path):
     return msgs
 
 
-def plan_xrf_h5(manifest, project_root, grain_id):
-    cfg = manifest.get('xrf_h5')
+def plan_xrf_scan(manifest, project_root, grain_id):
+    cfg = manifest.get('xrf_scan')
     if not cfg:
         return [], []
     src = Path(cfg['source'])
     warnings = []
     if not src.exists():
-        return [], [f"xrf_h5.source not found: {src}"]
+        return [], [f"xrf_scan.source not found: {src}"]
 
     ops = []
     if cfg.get('stage', True):
@@ -217,7 +217,7 @@ def plan_xrf_h5(manifest, project_root, grain_id):
         try:
             warnings.extend(suggest_name_filter(src))
         except Exception as e:
-            warnings.append(f"xrf_h5: could not inspect {src} for spot naming: {e}")
+            warnings.append(f"xrf_scan: could not inspect {src} for spot naming: {e}")
 
     return ops, warnings
 
@@ -268,7 +268,7 @@ def main():
     project_root = Path(PROJECT_ROOT)
 
     all_ops, all_warnings = [], []
-    for plan_fn in (plan_cl_image, plan_epma_maps, plan_xanes_classification, plan_xrf_h5):
+    for plan_fn in (plan_cl_image, plan_epma_maps, plan_xanes_classification, plan_xrf_scan):
         ops, warnings = plan_fn(manifest, project_root, grain_id)
         all_ops.extend(ops)
         all_warnings.extend(warnings)

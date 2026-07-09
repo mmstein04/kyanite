@@ -7,7 +7,7 @@ as a 32-bit float TIFF, ready for use in CL_EPMA_registration.m.
 Data source: xrmmap/roimap/sum_cor  [rows x cols x n_rois]
              xrmmap/roimap/sum_name [n_rois] — ROI labels, e.g. "Fe Ka"
 
-Output filename convention: <sample>_<El>_<Line>.tif  (e.g. NA-CM-G12B7-02_Fe_Ka.tif)
+Output filename convention: <grain_id>_<El>_<Line>.tif  (e.g. NA-CM-G12B7-02_Fe_Ka.tif)
 """
 
 import datetime
@@ -23,8 +23,8 @@ from pathlib import Path
 H5_FILE   = '/Users/mstein/bin/kyanite/inputs/xrf/MW609-01_xrf.h5'
 OUTPUT_DIR = '/Users/mstein/bin/kyanite/inputs/maps'
 
-# Sample name prefix used in output filenames.
-SAMPLE = 'MW609-01'
+# Grain ID prefix used in output filenames.
+GRAIN_ID = 'MW609-01'
 # Elements to export.  Use exact names as stored in the HDF5 file (see the
 # "Available ROIs" list printed at startup).  Set to None to export all ROIs.
 
@@ -52,12 +52,12 @@ NORMALIZE_BY_I0 = True
 
 # =============================================================================
 
-def roi_name_to_filename(sample, roi_name):
+def roi_name_to_filename(grain_id, roi_name):
     """'Fe Ka' -> 'NA-CM-G12B7-02_Fe_Ka.tif'"""
-    return f"{sample}_{roi_name.replace(' ', '_')}.tif"
+    return f"{grain_id}_{roi_name.replace(' ', '_')}.tif"
 
 
-def write_metadata(meta_path, *, h5_file, sample, roi, roi_index, data,
+def write_metadata(meta_path, *, h5_file, grain_id, roi, roi_index, data,
                    step1_um, step2_um, start1, stop1, start2, stop2,
                    dwell_s, normalize_by_clock, normalize_by_i0,
                    n_rois_in_file):
@@ -83,7 +83,7 @@ def write_metadata(meta_path, *, h5_file, sample, roi, roi_index, data,
         f"h5_dataset         : xrmmap/roimap/sum_cor[:, :, {roi_index}]",
         f"roi_name           : {roi}",
         f"roi_index          : {roi_index}  (0-based, out of {n_rois_in_file} ROIs in file)",
-        f"sample             : {sample}",
+        f"grain_id           : {grain_id}",
         "",
         "# Image properties",
         f"bit_depth          : 32-bit float (float32)",
@@ -180,14 +180,14 @@ def main():
             if NORMALIZE_BY_I0:
                 data = data / i0
 
-            out_name = roi_name_to_filename(SAMPLE, roi)
+            out_name = roi_name_to_filename(GRAIN_ID, roi)
             out_path = out_dir / out_name
             tifffile.imwrite(str(out_path), data, photometric='minisblack')
 
             meta_path = out_path.with_suffix('.txt')
             write_metadata(
                 meta_path,
-                h5_file=H5_FILE, sample=SAMPLE, roi=roi, roi_index=idx,
+                h5_file=H5_FILE, grain_id=GRAIN_ID, roi=roi, roi_index=idx,
                 data=data,
                 step1_um=step1_mm * 1000, step2_um=step2_mm * 1000,
                 start1=start1, stop1=stop1, start2=start2, stop2=stop2,

@@ -232,7 +232,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   downstream script (`CL_EPMA_registration.m` and friends) only ever reads it as
   `epma_dir`, never writes to it, so it lives alongside the rest of `inputs/`
   rather than in `figs/`
-- Output filenames: `<sample>_<Element>_<Line>.tif`  (e.g. `NA-CM-G12B7-02_Fe_Ka.tif`)
+- Output filenames: `<grain_id>_<Element>_<Line>.tif`  (e.g. `NA-CM-G12B7-02_Fe_Ka.tif`)
 - Metadata sidecars: same base name, `.txt` extension
 - Registered CL (grayscale, 16-bit): `<grain_id>_CL_registered.tif`
 - Registered CL (original color, native bit depth): `<grain_id>_CL_registered_color.tif`
@@ -265,7 +265,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `diagnostics/<grain_id>_mask_edit_log.txt` (per-run record); pre-edit copies of every
   file `CL_mask_edit.m` is about to overwrite are saved to
   `figs/mask_edit_backups/<grain_id>_<timestamp>/` before each run
-- Spot coordinate exports: `<sample>_spot_coordinates.csv`
+- Spot coordinate exports: `<grain_id>_spot_coordinates.csv`
 - Spot geochemistry/CL/XANES-class exports: `figs/<grain_id>_spot_geochemistry.csv`
   (currently on disk in `figs/xanes/` for all 8 processed grains)
 - Spot analysis figures saved to `figs/spot_analysis/`: `xanes_class_pie_grid.png`,
@@ -327,7 +327,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 
 **`xrf_h5_to_tiff.py`**
 - `H5_FILE` — raw XRF HDF5 file, default location `inputs/xrf/`
-- `OUTPUT_DIR`, `SAMPLE`
+- `OUTPUT_DIR`, `GRAIN_ID`
 - `ELEMENTS` — list of ROI names to export (or `None` for all)
 - `NORMALIZE_BY_CLOCK`, `NORMALIZE_BY_I0`
 

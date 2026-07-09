@@ -1,5 +1,5 @@
 # =============================================================================
-# kyanite_xanes_rf_classifier.py
+# xanes_rf_classifier.py
 #
 # Cross-validated Random Forest classification of XANES pre-edge class
 # (Type 1/2/3 — a proxy for Fe2+/Fe3+ ratio: Type 1 = Fe2+-dominant, Type 3 =
@@ -275,7 +275,7 @@ def plot_confusion_matrix(cm, labels, accuracy, balanced_accuracy):
 
 def build_log_header(requested, per_grain_dropped, kept, dropped_detection, n_valid, n_total):
     lines = [
-        'kyanite_xanes_rf_classifier.py',
+        'xanes_rf_classifier.py',
         f'Run date: {RUN_TIMESTAMP}',
         f'Source CSVs ({len(csv_files)}):',
     ]

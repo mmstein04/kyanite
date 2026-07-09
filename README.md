@@ -48,8 +48,8 @@ figs/xanes/               XANES spot geochemistry CSVs + pre-edge plots
 figs/spot_analysis/       batch spot-analysis figures (pie/scatter/box/PCA/RF)
 figs/regions/             CL_region_extraction.m outputs
 figs/local_regression/    CL_local_regression_map.m outputs
-figs/maps/                xrf_display.m's rendered element/ratio-map PNGs (visualizations
-                          of inputs/maps/ TIFFs — not the same thing, don't confuse the two)
+figs/map_renders/         xrf_display.m's rendered element/ratio-map PNGs (visualizations
+                          of the inputs/maps/ TIFFs)
 figs/diagnostics/         not-for-publishing sanity/alignment-check + run-metadata
                           outputs from CL_EPMA_registration.m / CL_mask_edit.m
                           (analysis log, all-maps QC, registration overlay,
@@ -88,14 +88,14 @@ Only needed if your element maps come from a Larch/GSECARS synchrotron XRF
 scan (`.h5`) rather than already being EPMA TIFFs from the microprobe
 software. Set `H5_FILE` (typically `inputs/xrf/<grain_id>_xrf.h5`), `OUTPUT_DIR`
 (typically `inputs/maps/<grain_id>`),
-`SAMPLE` (= your `grain_id`), and `ELEMENTS` (or `None` for all ROIs in the
+`GRAIN_ID`, and `ELEMENTS` (or `None` for all ROIs in the
 file — it prints the full ROI list at startup so you can copy names
 exactly). Decide `NORMALIZE_BY_CLOCK`/`NORMALIZE_BY_I0` once per grain and
 use the same setting everywhere downstream that touches this h5
 (`xrf_h5_extract_spots.py` in particular) — otherwise values won't be
 comparable.
 
-Output: `<sample>_<Element>_<Line>.tif` (32-bit float) + a `.txt` metadata
+Output: `<grain_id>_<Element>_<Line>.tif` (32-bit float) + a `.txt` metadata
 sidecar per map, both in `OUTPUT_DIR`.
 
 ### Step 2 — Register CL to EPMA/XRF and extract pixel data (the core step)
@@ -254,7 +254,7 @@ Steps 3–7:
    `PCA_ELEMENTS` — all colored consistently by class, with
    `'Bad data'`/unclassified spots shown as grey QC context rather than
    dropped.
-5. **`kyanite_xanes_rf_classifier.py`** — the classification analog of
+5. **`xanes_rf_classifier.py`** — the classification analog of
    Step 7's regression: cross-validated Random Forest predicting XANES
    class from spot chemistry, pooled across all grains (some grains are
    100% one class, so per-grain models aren't meaningful). Use
@@ -266,7 +266,7 @@ Steps 3–7:
 ### Utilities
 - **`xrf_display.m`** — visualize an element-map TIFF (or an element-ratio
   map) with the grain mask overlaid; useful for a quick sanity check before
-  or after registration. Saves rendered PNGs to `figs/maps/`.
+  or after registration. Saves rendered PNGs to `figs/map_renders/`.
 - **`sum_epma_maps.m`** — sum two or more element-line maps into one TIFF
   (e.g. `Zr_La` + `Zr_Lb` when a single line doesn't capture the full
   signal).
@@ -291,7 +291,7 @@ Steps 3–7:
    predict CL.
 6. If you also have XANES spectra for spots on this grain, run that track
    in parallel (Step 8 above) and combine with the rest at the
-   `kyanite_spot_analysis.py`/`kyanite_xanes_rf_classifier.py` stage.
+   `kyanite_spot_analysis.py`/`xanes_rf_classifier.py` stage.
 
 ## Key gotchas
 
@@ -311,7 +311,3 @@ Steps 3–7:
 - **Mask edits and region/domain extraction never re-register** — if
   registration itself was bad, fix it by rerunning Step 2, not by editing
   around it downstream.
-- **`inputs/maps/` and `figs/maps/` are unrelated despite the name** —
-  `inputs/maps/<grain_id>/` holds the actual element-map TIFFs (`epma_dir`);
-  `figs/maps/` holds `xrf_display.m`'s rendered visualization PNGs of those
-  same maps. Don't point a script at the wrong one.
