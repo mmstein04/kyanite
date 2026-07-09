@@ -15,14 +15,14 @@ resolve is skipped with a warning rather than silently renamed wrong.
 
 Conventions staged (see CLAUDE.md "File conventions" for the source of
 truth this mirrors):
-  - EPMA/XRF element maps -> maps/<grain_id>/<grain_id>_<Element>_<Line>.tif
-  - CL image              -> <project_root>/<grain_id>_CL_raw<ext>
+  - EPMA/XRF element maps -> inputs/maps/<grain_id>/<grain_id>_<Element>_<Line>.tif
+  - CL image              -> <project_root>/inputs/cl/<grain_id>_CL_raw<ext>
                              (cl_filename in CL_EPMA_registration.m is a
                              free parameter, so this is a staging
                              convenience/predictable name, not a hard
                              requirement)
-  - XANES classification  -> xanes_classification/<grain_id>_pre_edge_classification.csv
-  - Raw XRF HDF5          -> optionally symlinked to <project_root>/<grain_id>_xrf.h5
+  - XANES classification  -> <project_root>/inputs/xanes_classification/<grain_id>_pre_edge_classification.csv
+  - Raw XRF HDF5          -> optionally symlinked to <project_root>/inputs/xrf/<grain_id>_xrf.h5
                              (also analyzes xrmmap/areas spot naming and
                              suggests NAME_FILTER/spot-number-regex overrides
                              for xrf_h5_extract_spots.py if the default
@@ -83,7 +83,7 @@ def plan_cl_image(manifest, project_root, grain_id):
     if not cfg:
         return [], []
     src = Path(cfg['source'])
-    dst = Path(cfg['dest']) if cfg.get('dest') else project_root / f"{grain_id}_CL_raw{src.suffix}"
+    dst = Path(cfg['dest']) if cfg.get('dest') else project_root / 'inputs' / 'cl' / f"{grain_id}_CL_raw{src.suffix}"
     warnings = [] if src.exists() else [f"cl_image.source not found: {src}"]
     return [_copy_op(src, dst)], warnings
 
@@ -94,7 +94,7 @@ def plan_epma_maps(manifest, project_root, grain_id):
         return [], []
 
     src_dir = Path(cfg['source_dir'])
-    out_dir = Path(cfg['output_dir']) if cfg.get('output_dir') else project_root / 'maps' / grain_id
+    out_dir = Path(cfg['output_dir']) if cfg.get('output_dir') else project_root / 'inputs' / 'maps' / grain_id
     element_alias = cfg.get('element_alias', {})
     line_alias = cfg.get('line_alias', {})
     explicit_files = cfg.get('files', {})
@@ -153,7 +153,7 @@ def plan_xanes_classification(manifest, project_root, grain_id):
         return [], []
     src = Path(cfg['source'])
     dst = (Path(cfg['dest']) if cfg.get('dest')
-           else project_root / 'xanes_classification' / f"{grain_id}_pre_edge_classification.csv")
+           else project_root / 'inputs' / 'xanes_classification' / f"{grain_id}_pre_edge_classification.csv")
     warnings = [] if src.exists() else [f"xanes_classification.source not found: {src}"]
     return [_copy_op(src, dst)], warnings
 
@@ -210,7 +210,7 @@ def plan_xrf_h5(manifest, project_root, grain_id):
 
     ops = []
     if cfg.get('stage', True):
-        dst = Path(cfg['dest']) if cfg.get('dest') else project_root / f"{grain_id}_xrf.h5"
+        dst = Path(cfg['dest']) if cfg.get('dest') else project_root / 'inputs' / 'xrf' / f"{grain_id}_xrf.h5"
         ops.append(_symlink_op(src, dst))
 
     if cfg.get('suggest_name_filter', True):

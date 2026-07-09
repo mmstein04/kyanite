@@ -22,8 +22,11 @@
 #     compared side by side.
 #
 # CSV_INPUT may be a single CSV file or a directory; all *_pixel_data.csv
-# files found in a directory are processed automatically (this also matches
-# *_region_pixel_data.csv, since it shares the same suffix).
+# files found in a directory are processed automatically. Whole-grain CSVs
+# live in figs/data/ and region CSVs in figs/regions/ by default, so pointing
+# CSV_INPUT at one or the other only picks up that kind — but the glob would
+# also match *_region_pixel_data.csv if the two were ever mixed into one
+# directory, since it shares the same suffix.
 # =============================================================================
 
 import numpy as np
@@ -37,9 +40,9 @@ from scipy.stats import gaussian_kde
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs'   # file or directory
+CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data/RH-XA-57081P-05_pixel_data.csv'   # file or directory
 ELEMENTS  = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Mn_Ka', 'Ti_Ka']          # CSV column names
-PLOT_TYPE = ['corrmatrix']      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix', 'all', or a list of these
+PLOT_TYPE = 'all'      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix', 'all', or a list of these
 
 # 'corrmatrix' ignores the per-element looping above and instead builds one
 # grid per grain (or per region) from every ordered pair of elements in

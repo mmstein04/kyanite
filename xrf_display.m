@@ -10,7 +10,7 @@
 % INPUTS (set in PARAMETERS section below):
 %   - Folder of element map TIFFs (maps_dir)
 %   - Grain ID string, or cell array of grain IDs for batch processing
-%   - Mask TIFFs are auto-located as figs_dir/<grainID>_mask.tif
+%   - Mask TIFFs are auto-located as figs_dir/data/<grainID>_mask.tif
 %   - List of element names to display
 %   - List of element-ratio pairs to display (numerator, denominator)
 %   - Per-element upper percentile cutoffs for contrast scaling
@@ -20,6 +20,7 @@
 %   - One figure per element per grain showing the masked, contrast-scaled map
 %   - One figure per ratio per grain showing the masked, contrast-scaled
 %     ratio map (numerator element map ./ denominator element map)
+%   - Saved (if save_figs) as PNGs to figs_dir/maps/<grainID>_<tag>_display.png
 %
 % REQUIREMENTS:
 %   - MATLAB Image Processing Toolbox (for imread)
@@ -33,12 +34,16 @@ clear; close all; clc;
 %% Parameters
 
 % File locations
-maps_dir = '/Users/mstein/bin/kyanite/maps/';
+maps_dir = '/Users/mstein/bin/kyanite/inputs/maps/';
 figs_dir = '/Users/mstein/bin/kyanite/figs/';
+
+% Rendered display PNGs are saved here, separate from figs_dir (which this
+% script only reads from — the grain mask).
+display_out_dir = fullfile(figs_dir, 'maps');
 
 % Grain and element selection
 % grainIDs may be a single string or a cell array for batch processing.
-% Mask files are auto-located as figs_dir/<grainID>_mask.tif
+% Mask files are auto-located as figs_dir/data/<grainID>_mask.tif
 grainIDs = {'RH-XA-57081P-05'};
 elements = {'Cr','Fe','Mn','Ti','V'};
 
@@ -93,7 +98,7 @@ opts = struct( ...
     'scalebar_pos',    scalebar_pos, ...
     'scalebar_margin', scalebar_margin, ...
     'save_figs',       save_figs, ...
-    'figs_dir',        figs_dir, ...
+    'output_dir',      display_out_dir, ...
     'fig_dpi',         fig_dpi);
 
 fprintf('Processing %d grain(s):\n', nGrains);
@@ -112,7 +117,7 @@ end
 for g = 1:nGrains
 
     grainID      = grainIDs{g};
-    mask_path    = fullfile(figs_dir, sprintf('%s_mask.tif', grainID));
+    mask_path    = fullfile(figs_dir, 'data', sprintf('%s_mask.tif', grainID));
     grain_px_um  = pixel_um(min(g, end));
 
     fprintf('\n--- %s ---\n', grainID);
@@ -241,8 +246,8 @@ function render_and_save_map(figNum, grainID, label, filenameTag, img, mask, gra
     drawnow;
 
     if opts.save_figs
-        if ~exist(opts.figs_dir, 'dir'), mkdir(opts.figs_dir); end
-        out_path = fullfile(opts.figs_dir, sprintf('%s_%s_display.png', grainID, filenameTag));
+        if ~exist(opts.output_dir, 'dir'), mkdir(opts.output_dir); end
+        out_path = fullfile(opts.output_dir, sprintf('%s_%s_display.png', grainID, filenameTag));
         exportgraphics(fig, out_path, 'Resolution', opts.fig_dpi);
         fprintf('Saved: %s\n', out_path);
     end

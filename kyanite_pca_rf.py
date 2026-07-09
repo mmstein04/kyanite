@@ -30,8 +30,11 @@
 #     analysis per region.
 #
 # CSV_INPUT may be a single CSV file or a directory; all *_pixel_data.csv
-# files found in a directory are processed (this also matches
-# *_region_pixel_data.csv, since it shares the same suffix).
+# files found in a directory are processed. Whole-grain CSVs live in
+# figs/data/ and region CSVs in figs/regions/ by default, so pointing
+# CSV_INPUT at one or the other only picks up that kind — but the glob would
+# also match *_region_pixel_data.csv if the two were ever mixed into one
+# directory, since it shares the same suffix.
 # =============================================================================
 
 import numpy as np
@@ -51,7 +54,7 @@ import shap
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs/NA-GS-P84-06_pixel_data.csv'   # file or directory
+CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data/NA-GS-P84-06_pixel_data.csv'   # file or directory
 ELEMENTS  = None      # list of CSV column names to include; None = all columns except CL/Region
 
 ANALYSES = ['pca', 'rf', 'shap']   # 'pca', 'rf', 'shap', 'all', or a list of these

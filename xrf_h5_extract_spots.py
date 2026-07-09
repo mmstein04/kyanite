@@ -26,12 +26,12 @@ Data sources:
                                 — these files are multi-GB)
   xrmmap/roimap/sum_name     — ROI labels, e.g. "Fe Ka"
   xrmmap/scalars/Clock, I0   — per-pixel normalization maps (optional)
-  figs/<GRAIN_ID>_mask.tif           — binary grain mask (8-bit, 0/255),
+  figs/data/<GRAIN_ID>_mask.tif      — binary grain mask (8-bit, 0/255),
                                         written by CL_EPMA_registration.m
   figs/<GRAIN_ID>_CL_registered.tif  — registered CL image (16-bit, scaled
                                         from a [0,1] normalized value),
                                         written by CL_EPMA_registration.m
-  xanes_classification/<GRAIN_ID>_pre_edge_classification.csv
+  inputs/xanes_classification/<GRAIN_ID>_pre_edge_classification.csv
                                 — hand classification, written by
                                   xanes_classification_split.py
 
@@ -71,13 +71,13 @@ from pathlib import Path
 # PARAMETERS — edit this section for each use
 # =============================================================================
 
-H5_FILE  = '/Users/mstein/bin/kyanite/NVD3-01_xrf.h5'
-GRAIN_ID = 'NVD3-01'   # drives figs/<GRAIN_ID>_mask.tif, _CL_registered.tif,
-                       # xanes_classification/<GRAIN_ID>_pre_edge_classification.csv,
+H5_FILE  = '/Users/mstein/bin/kyanite/inputs/xrf/NVD3-01_xrf.h5'
+GRAIN_ID = 'NVD3-01'   # drives figs/data/<GRAIN_ID>_mask.tif, figs/<GRAIN_ID>_CL_registered.tif,
+                       # inputs/xanes_classification/<GRAIN_ID>_pre_edge_classification.csv,
                        # and spot_id = <GRAIN_ID>_spotNN
 
 FIGS_DIR           = '/Users/mstein/bin/kyanite/figs'
-CLASSIFICATION_DIR = '/Users/mstein/bin/kyanite/xanes_classification'
+CLASSIFICATION_DIR = '/Users/mstein/bin/kyanite/inputs/xanes_classification'
 
 OUTPUT_CSV = f'/Users/mstein/bin/kyanite/figs/{GRAIN_ID}_spot_geochemistry.csv'
 
@@ -123,7 +123,7 @@ def spot_sort_key(name):
 
 
 def load_grain_mask(figs_dir, grain_id):
-    path = Path(figs_dir) / f'{grain_id}_mask.tif'
+    path = Path(figs_dir) / 'data' / f'{grain_id}_mask.tif'
     if not path.exists():
         print(f"WARNING: grain mask not found at {path} — element/CL zone means will be NaN.")
         return None

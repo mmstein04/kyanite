@@ -17,14 +17,14 @@ grain_id: "EXAMPLE-01"   # drives every destination filename below
 # location, not a hard requirement.
 cl_image:
   source: "/path/to/raw/cl_photo_whatever_they_called_it.tif"
-  dest: null   # default: <project_root>/<grain_id>_CL_raw<ext>
+  dest: null   # default: <project_root>/inputs/cl/<grain_id>_CL_raw<ext>
 
 # --- EPMA / XRF element maps --------------------------------------------
 # Required destination convention (auto-discovered by CL_EPMA_registration.m
-# / CL_region_extraction.m as epma_dir): maps/<grain_id>/<grain_id>_<Element>_<Line>.tif
+# / CL_region_extraction.m as epma_dir): inputs/maps/<grain_id>/<grain_id>_<Element>_<Line>.tif
 epma_maps:
   source_dir: "/path/to/raw/element_maps"
-  output_dir: null       # default: maps/<grain_id>
+  output_dir: null       # default: inputs/maps/<grain_id>
   include: "*.tif*"      # glob for which files in source_dir to consider
 
   # Option A — explicit per-file mapping (highest priority, exact control):
@@ -51,7 +51,7 @@ epma_maps:
 # --- XANES pre-edge classification CSV ----------------------------------
 xanes_classification:
   source: "/path/to/raw/my_classification_results.csv"
-  dest: null   # default: xanes_classification/<grain_id>_pre_edge_classification.csv
+  dest: null   # default: inputs/xanes_classification/<grain_id>_pre_edge_classification.csv
 
 # --- Raw XRF HDF5 --------------------------------------------------------
 # H5_FILE/GRAIN_ID in xrf_h5_to_tiff.py and xrf_h5_extract_spots.py are set
@@ -62,5 +62,5 @@ xanes_classification:
 xrf_h5:
   source: "/path/to/raw/whatever_they_named_the_scan.h5"
   stage: true                  # symlink (not copy — these are multi-GB) to dest
-  dest: null                   # default: <project_root>/<grain_id>_xrf.h5
+  dest: null                   # default: <project_root>/inputs/xrf/<grain_id>_xrf.h5
   suggest_name_filter: true    # analyze xrmmap/areas naming, print recommendations

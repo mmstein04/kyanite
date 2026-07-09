@@ -6,11 +6,10 @@
 __pycache__/
 *.pyc
 
-# Generated outputs and raw data (regenerated per-grain from the scripts)
+# Generated outputs and raw data (regenerated per-grain from the scripts,
+# or fed in per-grain as raw instrument/hand-classification data)
 figs/
-maps/
-region_figs/
-local_regression_figs/
+inputs/
 *.h5
 *.tif
 *.tiff

@@ -27,8 +27,8 @@ clear; clc;
 %% PARAMETERS  — edit this section for each use
 % =========================================================================
 
-input_dir  = '/Users/mstein/bin/kyanite';
-output_dir = '/Users/mstein/bin/kyanite';
+input_dir  = '/Users/mstein/bin/kyanite/inputs/maps';
+output_dir = '/Users/mstein/bin/kyanite/inputs/maps';
 
 % List all map filenames to be summed.
 input_files = {

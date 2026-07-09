@@ -63,7 +63,7 @@ from pathlib import Path
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-XANES_INPUT = '/Users/mstein/bin/kyanite/xanes'   # file or directory
+XANES_INPUT = '/Users/mstein/bin/kyanite/inputs/xanes'   # file or directory
 OUT_DIR     = '/Users/mstein/bin/kyanite/figs/xanes'
 
 EDGE_ENERGY      = None          # Fe K edge (eV), reference line; None to disable

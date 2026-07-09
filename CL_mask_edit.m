@@ -32,15 +32,15 @@
 %   - Folder of EPMA/XRF element map TIFFs for the same grain
 %
 % OUTPUTS:
-%   - <grain_id>_mask.tif                  — overwritten with the edited mask
-%   - <grain_id>_pixel_data.csv / .mat     — overwritten, re-extracted under new mask
+%   - data/<grain_id>_mask.tif              — overwritten with the edited mask
+%   - data/<grain_id>_pixel_data.csv / .mat — overwritten, re-extracted under new mask
 %   - <grain_id>_CL_vs_elements.png        — overwritten
-%   - <grain_id>_shift_sensitivity.png     — overwritten
-%   - <grain_id>_all_maps_QC.png           — overwritten
-%   - <grain_id>_mask_check.png            — overwritten
-%   - <grain_id>_mask_edits.mat            — cumulative add/remove edit history (reusable/auditable)
-%   - <grain_id>_mask_edit_diff.png        — old vs. new mask boundary comparison
-%   - <grain_id>_mask_edit_log.txt         — this run's record
+%   - diagnostics/<grain_id>_shift_sensitivity.png  — overwritten (not for publishing)
+%   - diagnostics/<grain_id>_all_maps_QC.png        — overwritten (not for publishing)
+%   - diagnostics/<grain_id>_mask_check.png         — overwritten (not for publishing)
+%   - data/<grain_id>_mask_edits.mat        — cumulative add/remove edit history (reusable/auditable)
+%   - diagnostics/<grain_id>_mask_edit_diff.png     — old vs. new mask boundary comparison
+%   - diagnostics/<grain_id>_mask_edit_log.txt      — this run's record
 %   - mask_edit_backups/<grain_id>_<timestamp>/  — pre-edit copies of every file this
 %     script is about to overwrite
 %
@@ -80,7 +80,7 @@ use_color_display = true;
 
 % Folder containing EPMA/XRF element map TIFFs (same folder used by
 % CL_EPMA_registration.m for this grain). All *.tif files auto-discovered.
-epma_dir = ['/Users/mstein/bin/kyanite/maps/', grain_id];
+epma_dir = ['/Users/mstein/bin/kyanite/inputs/maps/', grain_id];
 
 % --- Spatial calibration --------------------------------------------------
 % Must match the value used in CL_EPMA_registration.m for this grain.
@@ -124,6 +124,17 @@ display_pct = [0, 97];
 
 if ~exist(output_dir, 'dir'), mkdir(output_dir); end
 
+% Sanity-check/QC/metadata outputs (shift-sensitivity, all-maps QC) live in
+% their own subfolder, matching CL_EPMA_registration.m's convention — not
+% meant for publishing, just re-derived alongside the rest.
+diagnostics_dir = fullfile(output_dir, 'diagnostics');
+if ~exist(diagnostics_dir, 'dir'), mkdir(diagnostics_dir); end
+
+% Reusable data files (grain mask, pixel-data CSV/MAT, edit-history MAT)
+% live in their own subfolder, matching CL_EPMA_registration.m's convention.
+data_dir = fullfile(output_dir, 'data');
+if ~exist(data_dir, 'dir'), mkdir(data_dir); end
+
 % --- Auto-discover EPMA maps from epma_dir --------------------------------
 tif_listing = dir(fullfile(epma_dir, '*.tif'));
 if isempty(tif_listing)
@@ -164,7 +175,7 @@ fprintf('=== CL Mask Edit: %s ===\n\n', grain_id);
 
 run_timestamp = datestr(now, 'yyyymmdd_HHMMSS');
 
-log_file = fullfile(output_dir, [grain_id '_mask_edit_log.txt']);
+log_file = fullfile(diagnostics_dir, [grain_id '_mask_edit_log.txt']);
 log_fid  = fopen(log_file, 'w');
 if log_fid == -1
     error('Cannot open log file for writing: %s', log_file);
@@ -242,7 +253,7 @@ else
     cl_disp = pct_stretch(cl_reg, display_pct(1), display_pct(2));
 end
 
-mask_path = fullfile(input_dir, mask_filename);
+mask_path = fullfile(data_dir, mask_filename);
 if ~exist(mask_path, 'file')
     fclose(log_fid);
     error('Grain mask not found: %s\nRun CL_EPMA_registration.m for this grain first.', mask_path);
@@ -291,7 +302,7 @@ end
 % Attempt to recover RMSE_px/RMSE_um from the existing pixel_data.mat so the
 % re-extracted .mat retains correct registration-quality provenance (this
 % script never re-registers, so these values are carried forward unchanged).
-old_mat_file = fullfile(input_dir, [grain_id '_pixel_data.mat']);
+old_mat_file = fullfile(data_dir, [grain_id '_pixel_data.mat']);
 RMSE_px = NaN; RMSE_um = NaN;
 if exist(old_mat_file, 'file')
     old_vars = load(old_mat_file, 'RMSE_px', 'RMSE_um');
@@ -316,26 +327,30 @@ mkdir(backup_dir);
 fprintf('\n--- BACKING UP EXISTING OUTPUTS ---\n');
 fprintf('  Backup directory: %s\n', backup_dir);
 
+% {filename, source directory} — mask/pixel_data/mask_edits read from
+% data_dir, shift_sensitivity/all_maps_QC read from diagnostics_dir,
+% everything else from input_dir; backups themselves stay flat (by
+% basename) regardless of source subfolder.
 files_to_backup = { ...
-    mask_filename; ...
-    [grain_id '_pixel_data.csv']; ...
-    [grain_id '_pixel_data.mat']; ...
-    [grain_id '_CL_vs_elements.png']; ...
-    [grain_id '_shift_sensitivity.png']; ...
-    [grain_id '_all_maps_QC.png']; ...
-    [grain_id '_mask_check.png']; ...
-    [grain_id '_mask_edits.mat']; ...
+    mask_filename,                        data_dir; ...
+    [grain_id '_pixel_data.csv'],         data_dir; ...
+    [grain_id '_pixel_data.mat'],         data_dir; ...
+    [grain_id '_CL_vs_elements.png'],     input_dir; ...
+    [grain_id '_shift_sensitivity.png'],  diagnostics_dir; ...
+    [grain_id '_all_maps_QC.png'],        diagnostics_dir; ...
+    [grain_id '_mask_check.png'],         diagnostics_dir; ...
+    [grain_id '_mask_edits.mat'],         data_dir; ...
 };
 
 lprintf('\n--- PRE-EDIT BACKUP ---\n');
 lprintf('  Backup directory: %s\n', backup_dir);
 n_backed_up = 0;
-for k = 1:numel(files_to_backup)
-    src = fullfile(input_dir, files_to_backup{k});
+for k = 1:size(files_to_backup, 1)
+    src = fullfile(files_to_backup{k, 2}, files_to_backup{k, 1});
     if exist(src, 'file')
-        copyfile(src, fullfile(backup_dir, files_to_backup{k}));
-        fprintf('  Backed up: %s\n', files_to_backup{k});
-        lprintf('  Backed up: %s\n', files_to_backup{k});
+        copyfile(src, fullfile(backup_dir, files_to_backup{k, 1}));
+        fprintf('  Backed up: %s\n', files_to_backup{k, 1});
+        lprintf('  Backed up: %s\n', files_to_backup{k, 1});
         n_backed_up = n_backed_up + 1;
     end
 end
@@ -468,7 +483,7 @@ lprintf('  Pixels after this run:   %d  (%+d, %.2f%% -> %.2f%% of image)\n', ...
 lprintf(SEC);
 
 % ---- Cumulative edit history (.mat) --------------------------------------
-edits_mat_file = fullfile(output_dir, [grain_id '_mask_edits.mat']);
+edits_mat_file = fullfile(data_dir, [grain_id '_mask_edits.mat']);
 if exist(edits_mat_file, 'file')
     prior = load(edits_mat_file, 'edit_history');
     all_edit_history = [prior.edit_history, edit_history];
@@ -492,8 +507,8 @@ imshow(diff_img);
 title('Green = added, Red = removed');
 sgtitle(sprintf('%s — mask edit diff (%d edits, net %+d px)', ...
         grain_id, n_edits, n_grain_px - n_grain_px_orig));
-saveas(fig_diff, fullfile(output_dir, [grain_id '_mask_edit_diff.png']));
-fprintf('  Diff figure saved to: %s\n', fullfile(output_dir, [grain_id '_mask_edit_diff.png']));
+saveas(fig_diff, fullfile(diagnostics_dir, [grain_id '_mask_edit_diff.png']));
+fprintf('  Diff figure saved to: %s\n', fullfile(diagnostics_dir, [grain_id '_mask_edit_diff.png']));
 
 % ---- Mask check figure (matches CL_EPMA_registration.m's own) ------------
 fig_check = figure('Name', 'Grain mask');
@@ -503,7 +518,7 @@ subplot(1,3,3); imshow(cl_reg); hold on;
 visboundaries(mask, 'Color', 'r', 'LineWidth', 1);
 title('Mask boundary on CL');
 sgtitle(sprintf('%s — Mask (edited, %d px)', grain_id, n_grain_px));
-saveas(fig_check, fullfile(output_dir, [grain_id '_mask_check.png']));
+saveas(fig_check, fullfile(diagnostics_dir, [grain_id '_mask_check.png']));
 
 if ~regenerate_downstream
     lprintf('\nregenerate_downstream = false — pixel data and scatter/shift plots NOT re-derived.\n');
@@ -542,12 +557,12 @@ end
 col_names   = [{'CL'}, epma_labels];
 data_matrix = [cl_px, epma_px];
 
-mat_file = fullfile(output_dir, [grain_id '_pixel_data.mat']);
+mat_file = fullfile(data_dir, [grain_id '_pixel_data.mat']);
 save(mat_file, 'data_matrix', 'col_names', 'mask', ...
      'grain_id', 'epma_pixel_um', 'RMSE_px', 'RMSE_um');
 fprintf('  Pixel data saved to: %s\n', mat_file);
 
-csv_file = fullfile(output_dir, [grain_id '_pixel_data.csv']);
+csv_file = fullfile(data_dir, [grain_id '_pixel_data.csv']);
 Tbl = array2table(data_matrix, 'VariableNames', col_names);
 writetable(Tbl, csv_file);
 fprintf('  Pixel data CSV saved to: %s\n', csv_file);
@@ -662,7 +677,7 @@ legend(epma_labels, 'Location', 'best', 'FontSize', 8);
 title('Sensitivity to Y-shift'); grid on;
 
 sgtitle(sprintf('%s — Shift sensitivity (mask edited)', grain_id), 'FontSize', 11);
-saveas(gcf, fullfile(output_dir, [grain_id '_shift_sensitivity.png']));
+saveas(gcf, fullfile(diagnostics_dir, [grain_id '_shift_sensitivity.png']));
 
 delta_r_x = max(r_shift_x) - min(r_shift_x);
 delta_r_y = max(r_shift_y) - min(r_shift_y);
@@ -700,7 +715,7 @@ for m = 1:n_maps
     title(all_labels{m}, 'FontSize', 9);
 end
 sgtitle(sprintf('%s — All maps with edited grain mask boundary', grain_id));
-saveas(gcf, fullfile(output_dir, [grain_id '_all_maps_QC.png']));
+saveas(gcf, fullfile(diagnostics_dir, [grain_id '_all_maps_QC.png']));
 
 % =========================================================================
 %% DONE — write log footer and close
@@ -712,10 +727,10 @@ all_outputs = { ...
     mat_file,                                                      'Pixel data (.mat, re-extracted)'; ...
     csv_file,                                                      'Pixel data (.csv, re-extracted)'; ...
     fullfile(output_dir, [grain_id '_CL_vs_elements.png']),        'Scatter plots (PNG, regenerated)'; ...
-    fullfile(output_dir, [grain_id '_shift_sensitivity.png']),     'Shift sensitivity (PNG, regenerated)'; ...
-    fullfile(output_dir, [grain_id '_all_maps_QC.png']),           'All-maps QC figure (PNG, regenerated)'; ...
-    fullfile(output_dir, [grain_id '_mask_check.png']),            'Mask check figure (PNG, regenerated)'; ...
-    fullfile(output_dir, [grain_id '_mask_edit_diff.png']),        'Before/after mask diff (PNG)'; ...
+    fullfile(diagnostics_dir, [grain_id '_shift_sensitivity.png']),     'Shift sensitivity (PNG, regenerated)'; ...
+    fullfile(diagnostics_dir, [grain_id '_all_maps_QC.png']),           'All-maps QC figure (PNG, regenerated)'; ...
+    fullfile(diagnostics_dir, [grain_id '_mask_check.png']),       'Mask check figure (PNG, regenerated)'; ...
+    fullfile(diagnostics_dir, [grain_id '_mask_edit_diff.png']),   'Before/after mask diff (PNG)'; ...
     edits_mat_file,                                                'Cumulative mask edit history (.mat)'; ...
     log_file,                                                      'Mask edit log (this file)'; ...
     backup_dir,                                                    'Pre-edit backup of overwritten files'; ...

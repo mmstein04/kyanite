@@ -4,7 +4,7 @@ xanes_classification_split.py
 Split a combined hand-classification CSV (columns: GrainID, Spot, Class,
 where Class is 1/2/3 for pre-edge Type 1/2/3 and 4 for bad data) into one
 CSV per grain, matching the pre-edge spot CSV naming used elsewhere in this
-project (<grain_id>_spotNN.csv in xanes/).
+project (<grain_id>_spotNN.csv in inputs/xanes/).
 
 Output: <grain_id>_pre_edge_classification.csv per grain, in OUTPUT_DIR —
 same filename convention as the (optional, off-by-default) automatic
@@ -18,8 +18,8 @@ from pathlib import Path
 # PARAMETERS
 # =============================================================================
 
-INPUT_CSV  = '/Users/mstein/bin/kyanite/xanes_classification.csv'
-OUTPUT_DIR = '/Users/mstein/bin/kyanite/xanes_classification'
+INPUT_CSV  = '/Users/mstein/bin/kyanite/inputs/xanes_classification/xanes_classification.csv'
+OUTPUT_DIR = '/Users/mstein/bin/kyanite/inputs/xanes_classification'
 
 CATEGORY_LABELS = {1: 'Type 1', 2: 'Type 2', 3: 'Type 3', 4: 'Bad data'}
 

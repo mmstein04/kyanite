@@ -86,6 +86,10 @@ grain_id = 'NA-GS-P84-06';
 % (registered CL TIFFs and the grain mask TIFF).
 input_dir = '/Users/mstein/bin/kyanite/figs';
 
+% Reusable data files (grain mask, pixel data, etc.) live in their own
+% subfolder of input_dir, per CL_EPMA_registration.m's convention.
+data_dir = fullfile(input_dir, 'data');
+
 cl_filename       = [grain_id, '_CL_registered.tif'];         % 16-bit grayscale
 cl_color_filename = [grain_id, '_CL_registered_color.tif'];   % native color
 mask_filename     = [grain_id, '_mask.tif'];
@@ -97,9 +101,9 @@ use_color_display = true;
 
 % Folder containing EPMA/XRF element map TIFFs (same folder used by
 % CL_EPMA_registration.m for this grain). All *.tif files auto-discovered.
-epma_dir = ['/Users/mstein/bin/kyanite/maps/', grain_id];
+epma_dir = ['/Users/mstein/bin/kyanite/inputs/maps/', grain_id];
 
-output_dir = '/Users/mstein/bin/kyanite/region_figs';
+output_dir = '/Users/mstein/bin/kyanite/figs/regions';
 
 % --- Spatial calibration --------------------------------------------------
 epma_pixel_um = 2.0;     % µm per pixel — must match the value used during registration
@@ -281,7 +285,7 @@ else
     cl_disp = pct_stretch(cl_reg, display_pct(1), display_pct(2));
 end
 
-mask_path = fullfile(input_dir, mask_filename);
+mask_path = fullfile(data_dir, mask_filename);
 if restrict_to_grain_mask
     if ~exist(mask_path, 'file')
         fclose(log_fid);

@@ -37,7 +37,7 @@ import shap
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs/NA-GS-P84-06_pixel_data.csv'   # a single grain's *_pixel_data.csv
+CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data/NA-GS-P84-06_pixel_data.csv'   # a single grain's *_pixel_data.csv
 ELEMENTS  = None      # list of CSV column names to include; None = all columns except CL/Region
 
 # --- Data cleaning, same conventions as kyanite_pca_rf.py ---
