@@ -22,6 +22,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | `xrf_h5_extract_spots.py` | Python | Build a per-spot CSV: pixel + physical coordinates of XANES spot locations (`xrmmap/areas`), mean element concentrations and CL brightness over a small grain-mask-restricted circular zone around each spot, and the joined XANES pre-edge classification |
 | `CL_EPMA_registration.m` | MATLAB | Full registration + analysis pipeline (see workflow below) |
 | `CL_region_extraction.m` | MATLAB | Draw named sub-grain polygon regions on an already-registered CL image and extract per-pixel CL + element data per region (no re-registration) |
+| `CL_mask_edit.m` | MATLAB | After-the-fact touch-up of a grain mask already produced by `CL_EPMA_registration.m` (e.g. an inclusion was masked-in, or real grain was masked-out weeks earlier) — draw add/remove polygons on the already-registered CL image, then re-derive pixel data and downstream figures under the corrected mask |
 | `kyanite_figures.py` | Python | Standalone figure generation from exported CSV pixel data |
 | `kyanite_pca_rf.py` | Python | PCA and cross-validated Random Forest analysis of CL vs. trace elements from exported CSV pixel data |
 | `kyanite_sample_size_convergence.py` | Python | Diagnostic: sweeps RF/SHAP over a range of pixel subsample sizes for one grain to check whether importance estimates have converged below `kyanite_pca_rf.py`'s `MAX_SAMPLES`/`SHAP_SAMPLES`, or would still change with more data |
@@ -76,6 +77,35 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 - Produces an additional full-grain texture class label map
   (`<grain_id>_texture_class_map.tif`, a uint8 index raster in `TEXTURE_CLASSES`
   order + Unclassified, and a matching colored/legend PNG)
+
+### `CL_mask_edit.m` workflow
+1. Load the registered CL image, EPMA/XRF maps, and current grain mask already
+   produced by `CL_EPMA_registration.m` for this grain — no control points,
+   warping, or from-scratch mask generation here
+2. Back up every mask-dependent output file this run is about to overwrite
+   (mask TIFF, pixel data, scatter/shift-sensitivity/QC PNGs, prior edit
+   history) into `mask_edit_backups/<grain_id>_<timestamp>/` before touching
+   anything
+3. Interactive add/remove loop: draw a polygon, tag it add or remove, see it
+   applied immediately with a live preview; `u` undoes the last edit, `d`
+   finishes — mirrors the add/remove-by-drawing pattern, but for freeform
+   whole-mask touch-ups rather than exhaustive non-overlapping domains like
+   `CL_region_extraction.m`'s `classification_mode`
+4. Re-applies the same morphological cleanup knobs used at registration time
+   (`close_radius_px` / `min_object_px` / `fill_holes`) and overwrites
+   `<grain_id>_mask.tif`
+5. `regenerate_downstream` (default `true`): re-extracts per-pixel CL +
+   element vectors under the corrected mask and overwrites
+   `<grain_id>_pixel_data.csv`/`.mat`, then regenerates the CL-vs-element
+   scatter plots, shift-sensitivity analysis, and all-maps/mask-check QC
+   figures — so every figure in `figs/` matches the corrected mask, not just
+   the CSV. Registration-quality fields (`RMSE_px`/`RMSE_um`) are carried
+   forward unchanged from the prior `pixel_data.mat` since no re-registration
+   happens here. Set `false` to touch only the mask TIFF + edit history.
+6. Saves a cumulative `<grain_id>_mask_edits.mat` (every add/remove polygon
+   ever applied across runs, for audit/undo-by-inspection), a
+   `<grain_id>_mask_edit_diff.png` (before/after boundary + added/removed
+   pixel diff), and a `<grain_id>_mask_edit_log.txt` run record
 
 ### `xrf_h5_to_tiff.py` details
 - Data source: `xrmmap/roimap/sum_cor` [rows × cols × n_rois], `xrmmap/roimap/sum_name`
@@ -183,6 +213,11 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `<grain_id>_texture_domain_summary.csv`, `<grain_id>_texture_domains_overlay.png`,
   `<grain_id>_texture_domains_all_maps_QC.png`, `<grain_id>_texture_class_map.tif`
   (uint8 class-index raster) and `.png` (colored + legend)
+- Mask edit outputs: `<grain_id>_mask_edits.mat` (cumulative add/remove edit
+  history), `<grain_id>_mask_edit_diff.png` (before/after boundary + diff),
+  `<grain_id>_mask_edit_log.txt` (per-run record); pre-edit copies of every
+  file `CL_mask_edit.m` is about to overwrite are saved to
+  `mask_edit_backups/<grain_id>_<timestamp>/` before each run
 - Spot coordinate exports: `<sample>_spot_coordinates.csv`
 - Spot geochemistry/CL/XANES-class exports: `figs/<grain_id>_spot_geochemistry.csv`
   (currently on disk in `figs/xanes/` for all 8 processed grains)
@@ -214,6 +249,20 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 - `TEXTURE_CLASSES` / `TEXTURE_CLASS_COLORS` — fixed vocabulary + color map for
   `classification_mode` (never include `'Unclassified'` — it's reserved, auto-assigned
   to any grain-mask pixels left over when you stop drawing)
+
+**`CL_mask_edit.m`**
+- `grain_id` — must match a grain already processed by `CL_EPMA_registration.m`
+- `input_dir` — folder holding that grain's registered CL TIFFs, mask TIFF, and
+  pixel data (also used as `output_dir`; edits happen in place)
+- `epma_dir` — same EPMA/XRF map folder used during registration
+- `epma_pixel_um`, `normalize_epma`, `pct_lo_cut`/`pct_hi_cut`, `shift_range` — must
+  match the values used in the grain's original `CL_EPMA_registration.m` run, or
+  re-derived pixel data/plots won't be comparable to before the edit
+- `close_radius_px` / `min_object_px` / `fill_holes` — post-edit mask cleanup,
+  same knobs as `CL_EPMA_registration.m`'s `SECTION 5`
+- `regenerate_downstream` — `true` (default): re-extract pixel data and
+  regenerate scatter/shift-sensitivity/QC figures after saving the edited mask;
+  `false`: touch only the mask TIFF + edit history
 
 **`xrf_h5_to_tiff.py`**
 - `H5_FILE`, `OUTPUT_DIR`, `SAMPLE`
