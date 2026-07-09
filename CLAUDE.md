@@ -51,6 +51,32 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 5. Save per-region/per-channel summary statistics and QC figures (region boundaries
    on the CL image and on every element map)
 
+`classification_mode = true` switches to a different workflow: subdividing the WHOLE
+grain into non-overlapping CL textural classification domains (e.g. sector,
+oscillatory) instead of arbitrary/partial-coverage named ROIs.
+- Domain class labels are drawn from a fixed vocabulary (`TEXTURE_CLASSES` +
+  `TEXTURE_CLASS_COLORS`, mirroring `kyanite_spot_analysis.py`'s
+  `CATEGORY_ORDER`/`CATEGORY_COLORS` pattern), not freeform typed names; multiple
+  disjoint polygons can share one class, each getting its own instance id
+  (e.g. `sector_1`, `sector_2`)
+- Each newly drawn domain auto-clips to whatever grain-mask area is not yet claimed
+  by an earlier domain (`poly_mask & grain_mask & ~already_classified_mask`), so
+  domains are guaranteed non-overlapping by construction — draw loosely; the last
+  domain can just cover whatever remains
+- Any grain-mask pixels left over when you stop drawing are auto-bucketed into a
+  reserved `Unclassified` class, so output always covers the full grain mask
+- `Region` column holds the texture class (for grouping/plotting downstream), a new
+  `DomainID` column holds the per-polygon instance id; `<grain_id>_regions.mat` /
+  `_region_summary.csv` are replaced by mode-specific `_texture_domains.mat` /
+  `_texture_domain_summary.csv` so the two modes never collide on disk for the same
+  grain — but `_region_pixel_data.csv`/`.mat` keep their exact default-mode filenames
+  in both modes (downstream scripts glob on that literal suffix), so running one mode
+  after the other for the same grain overwrites that file (a runtime warning fires
+  if the mode differs from what's already on disk)
+- Produces an additional full-grain texture class label map
+  (`<grain_id>_texture_class_map.tif`, a uint8 index raster in `TEXTURE_CLASSES`
+  order + Unclassified, and a matching colored/legend PNG)
+
 ### `xrf_h5_to_tiff.py` details
 - Data source: `xrmmap/roimap/sum_cor` [rows × cols × n_rois], `xrmmap/roimap/sum_name`
 - Scan geometry read from `xrmmap/config/scan` (step sizes, ranges, dwell time)
@@ -150,6 +176,13 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 - Region pixel data exports: `<grain_id>_region_pixel_data.csv` and `.mat` (long-format, `Region` column)
 - Region summary stats: `<grain_id>_region_summary.csv`
 - Region analysis log: `<grain_id>_region_analysis_log.txt`
+- Texture classification mode (`classification_mode = true` in `CL_region_extraction.m`)
+  outputs, per grain: `<grain_id>_texture_domains.mat` (domain polygons + classes,
+  reusable), `<grain_id>_region_pixel_data.csv`/`.mat` (same filename as default mode —
+  `Region` = texture class, `DomainID` = per-polygon instance id),
+  `<grain_id>_texture_domain_summary.csv`, `<grain_id>_texture_domains_overlay.png`,
+  `<grain_id>_texture_domains_all_maps_QC.png`, `<grain_id>_texture_class_map.tif`
+  (uint8 class-index raster) and `.png` (colored + legend)
 - Spot coordinate exports: `<sample>_spot_coordinates.csv`
 - Spot geochemistry/CL/XANES-class exports: `figs/<grain_id>_spot_geochemistry.csv`
   (currently on disk in `figs/xanes/` for all 8 processed grains)
@@ -175,6 +208,12 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 - `epma_dir` — same EPMA/XRF map folder used during registration
 - `restrict_to_grain_mask` — intersect each drawn region with the grain mask (default `true`)
 - `normalize_epma` — match the value used in `CL_EPMA_registration.m` for comparable values
+- `classification_mode` — `false` (default): freeform/possibly-overlapping/partial-coverage
+  named ROIs, unchanged from prior behavior. `true`: exhaustive, non-overlapping CL
+  textural classification domains (requires `restrict_to_grain_mask = true`)
+- `TEXTURE_CLASSES` / `TEXTURE_CLASS_COLORS` — fixed vocabulary + color map for
+  `classification_mode` (never include `'Unclassified'` — it's reserved, auto-assigned
+  to any grain-mask pixels left over when you stop drawing)
 
 **`xrf_h5_to_tiff.py`**
 - `H5_FILE`, `OUTPUT_DIR`, `SAMPLE`

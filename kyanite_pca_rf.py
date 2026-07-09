@@ -620,7 +620,7 @@ for csv_path in csv_files:
     region_mode = 'Region' in df.columns
     out_dir = csv_path.parent
 
-    exclude = {'CL', 'Region'}
+    exclude = {'CL', 'Region', 'DomainID'}
     elements = ELEMENTS or [c for c in df.columns if c not in exclude]
     missing = [e for e in elements if e not in df.columns]
     available = [e for e in elements if e in df.columns]

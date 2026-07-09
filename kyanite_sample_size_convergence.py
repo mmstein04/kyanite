@@ -85,7 +85,7 @@ df = pd.read_csv(csv_path)
 label = csv_path.stem.replace('_pixel_data', '').replace('_region_pixel_data', '')
 out_dir = csv_path.parent
 
-exclude = {'CL', 'Region'}
+exclude = {'CL', 'Region', 'DomainID'}
 elements = ELEMENTS or [c for c in df.columns if c not in exclude]
 missing = [e for e in elements if e not in df.columns]
 elements = [e for e in elements if e in df.columns]

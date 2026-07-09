@@ -8,7 +8,17 @@
 %   for each region. Lets you compare sub-grain crystal regions (e.g. core
 %   vs. rim, growth zones) rather than whole-grain statistics.
 %
-% WORKFLOW:
+%   Set classification_mode = true for a different workflow: subdividing
+%   the WHOLE grain into non-overlapping CL textural classification domains
+%   (e.g. sector zoning, oscillatory zoning) drawn from a fixed vocabulary
+%   (TEXTURE_CLASSES). Domains auto-clip to whatever grain-mask area isn't
+%   yet claimed, so they can never overlap, and any pixels left over when
+%   you stop drawing are auto-bucketed into 'Unclassified' — so every
+%   grain-mask pixel always ends up classified. classification_mode = false
+%   (default) keeps the original freeform/partial-coverage ROI behavior
+%   above, byte-for-byte.
+%
+% WORKFLOW (classification_mode = false, default):
 %   1. Load the registered CL image, grain mask, and EPMA/XRF maps already
 %      produced by CL_EPMA_registration.m for this grain — no warping,
 %      control-point picking, or grain-mask generation is done here.
@@ -21,17 +31,35 @@
 %   6. Save QC figures: region boundaries on the CL image, and region
 %      boundaries overlaid on every element map.
 %
+% WORKFLOW (classification_mode = true):
+%   1-6 as above, except: each drawn domain is assigned a class from
+%   TEXTURE_CLASSES (not a freeform name) and auto-clipped to unclaimed
+%   grain-mask area; leftover pixels become an 'Unclassified' domain; the
+%   Region column holds the texture class (for grouping/plotting) and a
+%   DomainID column holds the per-polygon instance id; an additional
+%   full-grain texture class label map (TIFF + colored PNG) is saved.
+%
 % INPUTS (set in PARAMETERS section below):
 %   - Registered CL image + grain mask (outputs of CL_EPMA_registration.m)
 %   - Folder of EPMA/XRF element map TIFFs for the same grain
 %
-% OUTPUTS:
+% OUTPUTS (classification_mode = false, default):
 %   - [grain_id]_regions.mat            — region polygons + names (reusable)
 %   - [grain_id]_region_pixel_data.mat  — per-pixel data, all regions
 %   - [grain_id]_region_pixel_data.csv  — per-pixel data, all regions
 %   - [grain_id]_region_summary.csv     — per-region/per-channel stats
 %   - [grain_id]_regions_overlay.png    — region boundaries on CL image
 %   - [grain_id]_regions_all_maps_QC.png — region boundaries on all maps
+%   - [grain_id]_region_analysis_log.txt — comprehensive run record
+%
+% OUTPUTS (classification_mode = true, additional/renamed):
+%   - [grain_id]_texture_domains.mat        — domain polygons + classes (reusable)
+%   - [grain_id]_region_pixel_data.mat/.csv — per-pixel data, Region=class, DomainID=instance
+%   - [grain_id]_texture_domain_summary.csv — per-class/per-instance stats
+%   - [grain_id]_texture_domains_overlay.png
+%   - [grain_id]_texture_domains_all_maps_QC.png
+%   - [grain_id]_texture_class_map.tif  — full-grain class index raster
+%   - [grain_id]_texture_class_map.png  — full-grain class-colored figure
 %   - [grain_id]_region_analysis_log.txt — comprehensive run record
 %
 % REQUIREMENTS:
@@ -52,7 +80,7 @@ set(0, 'DefaultLegendInterpreter',      'none');
 %% SECTION 1: PARAMETERS  — edit this section for each new grain / region set
 % =========================================================================
 
-grain_id = 'MW609-01';
+grain_id = 'NA-GS-P84-06';
 
 % Directory containing the outputs of CL_EPMA_registration.m for this grain
 % (registered CL TIFFs and the grain mask TIFF).
@@ -85,6 +113,28 @@ restrict_to_grain_mask = true;
 % Set to 0 to disable.
 min_region_px = 25;
 
+% --- Texture classification mode --------------------------------------------
+% false (default): freeform-named, possibly-overlapping, partial-coverage ROI
+%   workflow above — unchanged from prior versions of this script.
+% true: subdivide the WHOLE grain into non-overlapping CL textural
+%   classification domains drawn from TEXTURE_CLASSES below. Every newly drawn
+%   domain auto-clips to whatever grain-mask area is still unclaimed by a
+%   prior domain, so domains can never overlap. Any grain-mask pixels left
+%   over when you stop drawing are auto-bucketed into a reserved
+%   'Unclassified' class, so the output always covers the full grain mask.
+classification_mode = true;
+
+% Fixed vocabulary of CL textural classes (classification_mode only) — mirrors
+% kyanite_spot_analysis.py's CATEGORY_ORDER/CATEGORY_COLORS pattern so a class
+% name means the same thing across every grain. Do NOT include 'Unclassified'
+% here — it is reserved and assigned automatically, never offered as a manual
+% choice.
+TEXTURE_CLASSES = {'sector', 'oscillatory', 'feathered', 'homogenous'};
+TEXTURE_CLASS_COLORS = containers.Map( ...
+    [TEXTURE_CLASSES, {'Unclassified'}], ...
+    { [0.85 0.33 0.10], [0.30 0.60 0.45], [0.47 0.32 0.58], [0.40 0.40 0.40], ...
+      [0.60 0.60 0.60] });
+
 % --- Element map normalization ---------------------------------------------
 % true:  re-normalize each element map to [0 1] using its min/max within the
 %        grain mask (matches CL_EPMA_registration.m's normalize_epma = true,
@@ -99,6 +149,11 @@ display_pct = [0, 97];
 % =========================================================================
 %% SECTION 2: SETUP
 % =========================================================================
+
+if classification_mode && ~restrict_to_grain_mask
+    error(['classification_mode = true requires restrict_to_grain_mask = true ' ...
+           '(texture domains are defined relative to, and must fully cover, the grain mask).']);
+end
 
 if ~exist(output_dir, 'dir'), mkdir(output_dir); end
 
@@ -190,6 +245,10 @@ lprintf('\n  Restrict regions to grain mask: %s\n', mat2str(restrict_to_grain_ma
 lprintf('  Min region size warning:        %d px\n', min_region_px);
 lprintf('  Normalize EPMA maps:            %s\n', mat2str(normalize_epma));
 lprintf('  Spatial calibration:            %.4f µm/px\n', epma_pixel_um);
+lprintf('  Classification mode:            %s\n', mat2str(classification_mode));
+if classification_mode
+    lprintf('  Texture class vocabulary:       %s  (+ auto ''Unclassified'')\n', strjoin(TEXTURE_CLASSES, ', '));
+end
 lprintf(SEC);
 
 % =========================================================================
@@ -309,21 +368,200 @@ end
 %% SECTION 4: DEFINE REGIONS  (interactive draw-and-name loop, or reload)
 % =========================================================================
 
-regions_savefile = fullfile(output_dir, [grain_id '_regions.mat']);
+if classification_mode
+    regions_savefile = fullfile(output_dir, [grain_id '_texture_domains.mat']);
+else
+    regions_savefile = fullfile(output_dir, [grain_id '_regions.mat']);
+end
 regions_source   = 'newly drawn';
 skip_drawing     = false;
 
 if exist(regions_savefile, 'file')
-    resp = input(sprintf('Saved regions found (%s). Use them? (y/n): ', regions_savefile), 's');
+    if classification_mode
+        prompt_msg = sprintf('Saved texture domains found (%s). Use them? (y/n): ', regions_savefile);
+    else
+        prompt_msg = sprintf('Saved regions found (%s). Use them? (y/n): ', regions_savefile);
+    end
+    resp = input(prompt_msg, 's');
     if strcmpi(strtrim(resp), 'y')
-        load(regions_savefile, 'region_names', 'region_polys');
-        fprintf('Loaded %d saved region(s): %s\n', numel(region_names), strjoin(region_names, ', '));
+        if classification_mode
+            load(regions_savefile, 'domain_ids', 'domain_classes', 'domain_polys', 'domain_masks');
+            valid_classes = [TEXTURE_CLASSES, {'Unclassified'}];
+            bad_classes = unique(domain_classes(~ismember(domain_classes, valid_classes)));
+            if ~isempty(bad_classes)
+                fclose(log_fid);
+                error(['Saved texture domain(s) use class(es) not in the current TEXTURE_CLASSES ' ...
+                       'vocabulary (or ''Unclassified''): %s.\nUpdate TEXTURE_CLASSES to match, or ' ...
+                       'delete %s and redraw.'], strjoin(bad_classes, ', '), regions_savefile);
+            end
+            region_names = domain_ids;
+            region_polys = domain_polys;
+            region_masks = domain_masks;
+            fprintf('Loaded %d saved texture domain(s): %s\n', numel(domain_ids), strjoin(domain_ids, ', '));
+        else
+            load(regions_savefile, 'region_names', 'region_polys');
+            fprintf('Loaded %d saved region(s): %s\n', numel(region_names), strjoin(region_names, ', '));
+        end
         regions_source = ['loaded from file: ', regions_savefile];
         skip_drawing = true;
     end
 end
 
-if ~skip_drawing
+if ~skip_drawing && classification_mode
+    % ---- classification mode: exhaustive, non-overlapping texture domains ----
+    domain_ids               = {};
+    domain_classes            = {};
+    domain_polys              = {};
+    domain_masks              = {};
+    already_classified_mask  = false(nrows, ncols);
+    class_counts = containers.Map(TEXTURE_CLASSES, num2cell(zeros(1, numel(TEXTURE_CLASSES))));
+
+    fprintf('\n--- DEFINE TEXTURE DOMAINS ---\n');
+    fprintf('Draw a polygon for each CL textural domain. Each domain auto-clips to\n');
+    fprintf('whatever grain-mask area is not yet claimed by an earlier domain, so\n');
+    fprintf('domains can never overlap — draw loosely; the last domain can simply\n');
+    fprintf('cover whatever remains.\n');
+    fprintf('Double-click the last vertex (or first) to close each polygon.\n\n');
+
+    grain_px_total = sum(grain_mask(:));
+    keep_drawing   = true;
+    domain_num     = 0;
+
+    while keep_drawing
+        domain_num = domain_num + 1;
+
+        fig_r = figure('Name', 'Draw texture domain — double-click to close', 'Position', [50 50 900 700]);
+        imshow(cl_disp); hold on;
+        for rr = 1:numel(domain_polys)
+            p = domain_polys{rr};
+            if isempty(p), continue; end   % auto-filled 'Unclassified' entry — no drawn polygon
+            plot([p(:,1); p(1,1)], [p(:,2); p(1,2)], '-', ...
+                 'Color', TEXTURE_CLASS_COLORS(domain_classes{rr}), 'LineWidth', 1.5);
+            text(mean(p(:,1)), mean(p(:,2)), domain_ids{rr}, ...
+                 'Color', 'w', 'FontWeight', 'bold', 'HorizontalAlignment', 'center');
+        end
+        remaining_now = grain_px_total - sum(already_classified_mask(:));
+        title(sprintf('Domain %d: click vertices, double-click to close  (%d px remain unclassified)', ...
+              domain_num, remaining_now), 'FontSize', 11);
+
+        h_poly = drawpolygon();
+        wait(h_poly);
+
+        % Read Position before closing the figure — closing deletes the
+        % underlying ROI object, which invalidates any later access to it.
+        if isempty(h_poly.Position) || size(h_poly.Position, 1) < 3
+            close(fig_r);
+            fprintf('  No valid polygon drawn (need at least 3 vertices).\n');
+            resp = input('  Try again? (y/n): ', 's');
+            domain_num = domain_num - 1;
+            if strcmpi(strtrim(resp), 'y'), continue; else, break; end
+        end
+
+        pos = h_poly.Position;   % Nx2: [x (col), y (row)]
+        close(fig_r);
+
+        % ---- texture class selection: numbered menu, validated input ----
+        fprintf('  Texture classes:\n');
+        for c = 1:numel(TEXTURE_CLASSES)
+            fprintf('    [%d]  %s\n', c, TEXTURE_CLASSES{c});
+        end
+        chosen_class = '';
+        while isempty(chosen_class)
+            class_resp = strtrim(input('  Class for this domain (number or name): ', 's'));
+            idx = str2double(class_resp);
+            if ~isnan(idx) && idx >= 1 && idx <= numel(TEXTURE_CLASSES) && idx == round(idx)
+                chosen_class = TEXTURE_CLASSES{idx};
+            elseif strcmpi(class_resp, 'Unclassified')
+                fprintf('  ''Unclassified'' is reserved — assigned automatically only to leftover pixels.\n');
+            else
+                match = find(strcmpi(TEXTURE_CLASSES, class_resp), 1);
+                if ~isempty(match)
+                    chosen_class = TEXTURE_CLASSES{match};
+                else
+                    fprintf('  Not a valid class. Enter a number 1-%d or an exact class name.\n', numel(TEXTURE_CLASSES));
+                end
+            end
+        end
+
+        domain_id_preview = sprintf('%s_%d', chosen_class, class_counts(chosen_class) + 1);
+
+        poly_mask_raw   = poly2mask(pos(:,1), pos(:,2), nrows, ncols);
+        new_domain_mask = poly_mask_raw & grain_mask & ~already_classified_mask;
+
+        px_raw             = sum(poly_mask_raw(:));
+        px_outside_grain   = px_raw - sum(sum(poly_mask_raw & grain_mask));
+        px_overlap_claimed = sum(sum(poly_mask_raw & grain_mask)) - sum(new_domain_mask(:));
+        remaining_after    = grain_px_total - sum(already_classified_mask(:) | new_domain_mask(:));
+
+        fig_p = figure('Name', 'Domain preview', 'Position', [100 100 500 500]);
+        imshow(cl_disp); hold on;
+        visboundaries(new_domain_mask, 'Color', 'y', 'LineWidth', 1.5);
+        title({sprintf('%s (%s) — %d px  [%d clipped: outside grain / already claimed]', ...
+                        domain_id_preview, chosen_class, sum(new_domain_mask(:)), ...
+                        px_outside_grain + px_overlap_claimed), ...
+               sprintf('%d px remain unclassified', remaining_after)});
+        drawnow;
+
+        resp = lower(strtrim(input('  Accept this domain? (y = accept, n = redraw, s = stop adding domains): ', 's')));
+        close(fig_p);
+
+        if strcmp(resp, 'y')
+            class_counts(chosen_class) = class_counts(chosen_class) + 1;
+            domain_id = sprintf('%s_%d', chosen_class, class_counts(chosen_class));
+            domain_ids{end+1}     = domain_id;
+            domain_classes{end+1} = chosen_class;
+            domain_polys{end+1}   = pos;
+            domain_masks{end+1}   = new_domain_mask;
+            already_classified_mask = already_classified_mask | new_domain_mask;
+
+            % Re-save after every accepted domain so a mid-session crash
+            % doesn't discard already-completed work.
+            save(regions_savefile, 'domain_ids', 'domain_classes', 'domain_polys', 'domain_masks');
+            fprintf('  Domain "%s" (%s) accepted: %d px. %d grain-mask px remain unclassified (%.1f%%).\n', ...
+                    domain_id, chosen_class, sum(new_domain_mask(:)), remaining_after, ...
+                    100 * remaining_after / max(grain_px_total, 1));
+        elseif strcmp(resp, 's')
+            keep_drawing = false;
+        else
+            domain_num = domain_num - 1;   % redraw — don't consume the domain number
+            continue;
+        end
+
+        if keep_drawing && remaining_after == 0
+            fprintf('  Full grain-mask coverage reached — no pixels left to classify.\n');
+            keep_drawing = false;
+        elseif keep_drawing
+            resp2 = strtrim(input('  Draw another domain? (y/n): ', 's'));
+            if ~strcmpi(resp2, 'y')
+                keep_drawing = false;
+            end
+        end
+    end
+
+    % ---- auto-fill any leftover grain-mask pixels as 'Unclassified' ----
+    n_user_domains = numel(domain_ids);
+    leftover_mask  = grain_mask & ~already_classified_mask;
+    if any(leftover_mask(:))
+        domain_ids{end+1}     = 'Unclassified';
+        domain_classes{end+1} = 'Unclassified';
+        domain_polys{end+1}   = [];
+        domain_masks{end+1}   = leftover_mask;
+        fprintf('  %d px left unclassified — auto-assigned to "Unclassified".\n', sum(leftover_mask(:)));
+    else
+        fprintf('  Full grain-mask coverage achieved by hand-drawn domains — no Unclassified bucket needed.\n');
+    end
+    if n_user_domains == 0
+        warning('No texture domains were drawn — the entire grain is "Unclassified".');
+    end
+
+    region_names = domain_ids;
+    region_polys = domain_polys;
+    region_masks = domain_masks;
+
+    save(regions_savefile, 'domain_ids', 'domain_classes', 'domain_polys', 'domain_masks');
+    fprintf('Saved %d texture domain(s) to: %s\n', numel(domain_ids), regions_savefile);
+
+elseif ~skip_drawing
     region_names = {};
     region_polys = {};
 
@@ -428,38 +666,75 @@ n_regions = numel(region_names);
 
 fprintf('\n--- BUILDING REGION MASKS ---\n');
 
-region_masks            = cell(1, n_regions);
-region_px_raw           = zeros(1, n_regions);
-region_px_outside_grain = zeros(1, n_regions);
-region_px_final         = zeros(1, n_regions);
-region_area_um2         = zeros(1, n_regions);
+if classification_mode
+    % Masks were already finalized (auto-clipped against already_classified_mask,
+    % so guaranteed non-overlapping) back in Section 4 — recomputing them here
+    % generically would require replaying draw order, so just measure them and
+    % sanity-check that they fully cover the grain mask.
+    region_px_final         = zeros(1, n_regions);
+    region_area_um2         = zeros(1, n_regions);
+    region_px_raw           = zeros(1, n_regions);
+    region_px_outside_grain = zeros(1, n_regions);
 
-for r = 1:n_regions
-    p = region_polys{r};
-    m_raw = poly2mask(p(:,1), p(:,2), nrows, ncols);
-    region_px_raw(r) = sum(m_raw(:));
+    for r = 1:n_regions
+        m = region_masks{r};
+        region_px_final(r) = sum(m(:));
+        region_px_raw(r)   = region_px_final(r);
+        region_area_um2(r) = region_px_final(r) * epma_pixel_um^2;
 
-    if restrict_to_grain_mask
-        m = m_raw & grain_mask;
+        fprintf('  %-20s [%-12s]  %6d px  (%.1f µm²)\n', ...
+                region_names{r}, domain_classes{r}, region_px_final(r), region_area_um2(r));
+
+        if region_px_final(r) == 0
+            warning('Domain "%s" has 0 px — check polygon placement.', region_names{r});
+        elseif min_region_px > 0 && region_px_final(r) < min_region_px && ~strcmp(domain_classes{r}, 'Unclassified')
+            warning('Domain "%s" has only %d px (< min_region_px = %d).', ...
+                    region_names{r}, region_px_final(r), min_region_px);
+        end
+    end
+
+    total_classified = sum(cellfun(@(m) sum(m(:)), region_masks));
+    grain_px_check    = sum(grain_mask(:));
+    if total_classified ~= grain_px_check
+        warning('Coverage mismatch: %d classified px vs %d grain-mask px — investigate.', ...
+                total_classified, grain_px_check);
     else
-        m = m_raw;
+        fprintf('  Full grain-mask coverage confirmed: %d px across %d domain(s).\n', total_classified, n_regions);
     end
-    region_px_outside_grain(r) = region_px_raw(r) - sum(m(:));
-    region_masks{r}    = m;
-    region_px_final(r) = sum(m(:));
-    region_area_um2(r) = region_px_final(r) * epma_pixel_um^2;
+else
+    region_masks            = cell(1, n_regions);
+    region_px_raw           = zeros(1, n_regions);
+    region_px_outside_grain = zeros(1, n_regions);
+    region_px_final         = zeros(1, n_regions);
+    region_area_um2         = zeros(1, n_regions);
 
-    fprintf('  %-20s  %6d px  (%.1f µm²)', region_names{r}, region_px_final(r), region_area_um2(r));
-    if region_px_outside_grain(r) > 0
-        fprintf('   [%d px clipped outside grain mask]', region_px_outside_grain(r));
-    end
-    fprintf('\n');
+    for r = 1:n_regions
+        p = region_polys{r};
+        m_raw = poly2mask(p(:,1), p(:,2), nrows, ncols);
+        region_px_raw(r) = sum(m_raw(:));
 
-    if region_px_final(r) == 0
-        warning('Region "%s" has 0 px after clipping — check polygon placement.', region_names{r});
-    elseif min_region_px > 0 && region_px_final(r) < min_region_px
-        warning('Region "%s" has only %d px (< min_region_px = %d).', ...
-                region_names{r}, region_px_final(r), min_region_px);
+        if restrict_to_grain_mask
+            m = m_raw & grain_mask;
+        else
+            m = m_raw;
+        end
+        region_px_outside_grain(r) = region_px_raw(r) - sum(m(:));
+        region_masks{r}    = m;
+        region_px_final(r) = sum(m(:));
+        region_area_um2(r) = region_px_final(r) * epma_pixel_um^2;
+
+        fprintf('  %-20s  %6d px  (%.1f µm²)', region_names{r}, region_px_final(r), region_area_um2(r));
+        if region_px_outside_grain(r) > 0
+            fprintf('   [%d px clipped outside grain mask]', region_px_outside_grain(r));
+        end
+        fprintf('\n');
+
+        if region_px_final(r) == 0
+            warning('Region "%s" has 0 px after clipping — check polygon placement.', region_names{r});
+        elseif min_region_px > 0 && region_px_final(r) < min_region_px
+            warning('Region "%s" has only %d px (< min_region_px = %d).', ...
+                    region_names{r}, region_px_final(r), min_region_px);
+        end
     end
 end
 
@@ -478,14 +753,27 @@ lprintf('\n--- REGIONS ---\n');
 lprintf('  Source:  %s\n', regions_source);
 lprintf('  Count:   %d region(s)\n', n_regions);
 lprintf('  Restrict to grain mask: %s\n', mat2str(restrict_to_grain_mask));
-lprintf('\n  %-20s  %-10s  %-10s  %-14s  %-12s  %-12s\n', ...
-        'Region', 'Vertices', 'Px_raw', 'Px_outside_GM', 'Px_final', 'Area_um2');
-lprintf('  %-20s  %-10s  %-10s  %-14s  %-12s  %-12s\n', ...
-        repmat('-',1,20), repmat('-',1,10), repmat('-',1,10), repmat('-',1,14), repmat('-',1,12), repmat('-',1,12));
-for r = 1:n_regions
-    lprintf('  %-20s  %-10d  %-10d  %-14d  %-12d  %-12.2f\n', ...
-            region_names{r}, size(region_polys{r},1), region_px_raw(r), ...
-            region_px_outside_grain(r), region_px_final(r), region_area_um2(r));
+if classification_mode
+    lprintf('\n  %-20s  %-12s  %-10s  %-12s  %-12s\n', ...
+            'DomainID', 'Class', 'Vertices', 'Px_final', 'Area_um2');
+    lprintf('  %-20s  %-12s  %-10s  %-12s  %-12s\n', ...
+            repmat('-',1,20), repmat('-',1,12), repmat('-',1,10), repmat('-',1,12), repmat('-',1,12));
+    for r = 1:n_regions
+        n_vertices = 0;
+        if ~isempty(region_polys{r}), n_vertices = size(region_polys{r},1); end
+        lprintf('  %-20s  %-12s  %-10d  %-12d  %-12.2f\n', ...
+                region_names{r}, domain_classes{r}, n_vertices, region_px_final(r), region_area_um2(r));
+    end
+else
+    lprintf('\n  %-20s  %-10s  %-10s  %-14s  %-12s  %-12s\n', ...
+            'Region', 'Vertices', 'Px_raw', 'Px_outside_GM', 'Px_final', 'Area_um2');
+    lprintf('  %-20s  %-10s  %-10s  %-14s  %-12s  %-12s\n', ...
+            repmat('-',1,20), repmat('-',1,10), repmat('-',1,10), repmat('-',1,14), repmat('-',1,12), repmat('-',1,12));
+    for r = 1:n_regions
+        lprintf('  %-20s  %-10d  %-10d  %-14d  %-12d  %-12.2f\n', ...
+                region_names{r}, size(region_polys{r},1), region_px_raw(r), ...
+                region_px_outside_grain(r), region_px_final(r), region_area_um2(r));
+    end
 end
 if n_overlap_px > 0
     lprintf('\n  ** NOTE: %d px are claimed by more than one region (overlapping polygons) **\n', n_overlap_px);
@@ -495,9 +783,16 @@ lprintf(SEC);
 % ---- Visualize regions on the CL image ------------------------------------
 fig_ov = figure('Name', 'Region overlay', 'Position', [100 100 700 700]);
 imshow(cl_disp); hold on;
-colors = lines(max(n_regions, 7));
+if ~classification_mode
+    colors = lines(max(n_regions, 7));
+end
 for r = 1:n_regions
-    visboundaries(region_masks{r}, 'Color', colors(r,:), 'LineWidth', 1.5);
+    if classification_mode
+        this_color = TEXTURE_CLASS_COLORS(domain_classes{r});
+    else
+        this_color = colors(r,:);
+    end
+    visboundaries(region_masks{r}, 'Color', this_color, 'LineWidth', 1.5);
     [rr_idx, cc_idx] = find(region_masks{r});
     if ~isempty(rr_idx)
         text(mean(cc_idx), mean(rr_idx), region_names{r}, ...
@@ -505,9 +800,22 @@ for r = 1:n_regions
              'HorizontalAlignment', 'center');
     end
 end
+if classification_mode
+    legend_classes  = [TEXTURE_CLASSES, {'Unclassified'}];
+    legend_handles  = gobjects(1, numel(legend_classes));
+    for c = 1:numel(legend_classes)
+        legend_handles(c) = plot(nan, nan, '-', 'Color', TEXTURE_CLASS_COLORS(legend_classes{c}), 'LineWidth', 3);
+    end
+    legend(legend_handles, legend_classes, 'Location', 'bestoutside');
+end
 title(sprintf('%s — %d region(s)', grain_id, n_regions), 'Interpreter', 'none');
-saveas(fig_ov, fullfile(output_dir, [grain_id '_regions_overlay.png']));
-fprintf('  Region overlay saved to: %s\n', fullfile(output_dir, [grain_id '_regions_overlay.png']));
+if classification_mode
+    overlay_file = fullfile(output_dir, [grain_id '_texture_domains_overlay.png']);
+else
+    overlay_file = fullfile(output_dir, [grain_id '_regions_overlay.png']);
+end
+saveas(fig_ov, overlay_file);
+fprintf('  Region overlay saved to: %s\n', overlay_file);
 
 % =========================================================================
 %% SECTION 6: EXTRACT PER-PIXEL DATA
@@ -517,14 +825,16 @@ fprintf('\n--- EXTRACTING PIXEL DATA ---\n');
 
 col_names = [{'CL'}, epma_labels];
 
-all_cl     = [];
-all_epma   = [];
-all_region = {};
+all_cl        = [];
+all_epma      = [];
+all_region    = {};
+all_domain_id = {};   % classification_mode only — per-polygon instance id
 
 % Parallel columns for the summary table (kept separate, rather than one
 % mixed-type cell array, so unequal-length region/channel name strings
 % don't trip up table construction).
-sum_region = {};
+sum_region    = {};
+sum_domain_id = {};   % classification_mode only
 sum_channel = {};
 sum_n = [];
 sum_mean = [];
@@ -546,14 +856,26 @@ for r = 1:n_regions
         end
     end
 
-    all_cl     = [all_cl;     cl_r];                                       %#ok<AGROW>
-    all_epma   = [all_epma;   epma_r];                                     %#ok<AGROW>
-    all_region = [all_region; repmat({region_names{r}}, numel(cl_r), 1)];  %#ok<AGROW>
+    % Region column: texture class in classification mode (what downstream
+    % scripts group/plot CL-vs-element by), else the region's own name —
+    % unchanged from prior versions of this script.
+    if classification_mode
+        region_label = domain_classes{r};
+    else
+        region_label = region_names{r};
+    end
+
+    all_cl     = [all_cl;     cl_r];                                     %#ok<AGROW>
+    all_epma   = [all_epma;   epma_r];                                   %#ok<AGROW>
+    all_region = [all_region; repmat({region_label}, numel(cl_r), 1)];   %#ok<AGROW>
+    if classification_mode
+        all_domain_id = [all_domain_id; repmat({region_names{r}}, numel(cl_r), 1)];  %#ok<AGROW>
+    end
 
     region_data = [cl_r, epma_r];
     for c = 1:numel(col_names)
         v = region_data(:, c);
-        sum_region{end+1,1}  = region_names{r};  %#ok<AGROW>
+        sum_region{end+1,1}  = region_label;     %#ok<AGROW>
         sum_channel{end+1,1} = col_names{c};      %#ok<AGROW>
         sum_n(end+1,1)      = numel(v);          %#ok<AGROW>
         sum_mean(end+1,1)   = mean(v);           %#ok<AGROW>
@@ -561,6 +883,9 @@ for r = 1:n_regions
         sum_std(end+1,1)    = std(v);            %#ok<AGROW>
         sum_min(end+1,1)    = min(v);            %#ok<AGROW>
         sum_max(end+1,1)    = max(v);            %#ok<AGROW>
+        if classification_mode
+            sum_domain_id{end+1,1} = region_names{r};  %#ok<AGROW>
+        end
     end
 end
 
@@ -575,21 +900,53 @@ else
 end
 
 % ---- Save combined pixel data ---------------------------------------------
+% NOTE: this filename/the 'Region' column are kept identical in both modes —
+% kyanite_figures.py / kyanite_pca_rf.py / kyanite_sample_size_convergence.py
+% glob '*_pixel_data.csv' and group on 'Region'. Running classification mode
+% for a grain that already has default-mode pixel data (or vice versa) will
+% overwrite it; warn rather than silently clobber.
 mat_file = fullfile(output_dir, [grain_id '_region_pixel_data.mat']);
-save(mat_file, 'data_matrix', 'col_names', 'all_region', 'region_names', ...
-     'region_masks', 'grain_id', 'epma_pixel_um', 'normalize_epma');
+if exist(mat_file, 'file')
+    prior_vars = who('-file', mat_file);
+    prior_is_classification = ismember('domain_classes', prior_vars);
+    if prior_is_classification ~= classification_mode
+        warning(['%s already exists from a %s run — it will be overwritten with %s output. ' ...
+                 'Rename/move it first if you want to keep both.'], mat_file, ...
+                ternary_label(prior_is_classification), ternary_label(classification_mode));
+        lprintf('\n  ** WARNING: %s existed from a %s run and was overwritten with %s output **\n', ...
+                mat_file, ternary_label(prior_is_classification), ternary_label(classification_mode));
+    end
+end
+
+if classification_mode
+    save(mat_file, 'data_matrix', 'col_names', 'all_region', 'all_domain_id', 'region_names', ...
+         'domain_classes', 'TEXTURE_CLASSES', 'TEXTURE_CLASS_COLORS', 'classification_mode', ...
+         'region_masks', 'grain_id', 'epma_pixel_um', 'normalize_epma');
+else
+    save(mat_file, 'data_matrix', 'col_names', 'all_region', 'region_names', ...
+         'region_masks', 'grain_id', 'epma_pixel_um', 'normalize_epma');
+end
 fprintf('  Pixel data saved to: %s\n', mat_file);
 
 csv_file = fullfile(output_dir, [grain_id '_region_pixel_data.csv']);
 Tbl = array2table(data_matrix, 'VariableNames', col_names);
 Tbl = addvars(Tbl, all_region, 'Before', 1, 'NewVariableNames', {'Region'});
+if classification_mode
+    Tbl = addvars(Tbl, all_domain_id, 'After', 'Region', 'NewVariableNames', {'DomainID'});
+end
 writetable(Tbl, csv_file);
 fprintf('  Pixel data CSV saved to: %s\n', csv_file);
 
 % ---- Save per-region summary statistics ------------------------------------
-summary_T = table(sum_region, sum_channel, sum_n, sum_mean, sum_median, sum_std, sum_min, sum_max, ...
-    'VariableNames', {'Region', 'Channel', 'N', 'Mean', 'Median', 'Std', 'Min', 'Max'});
-summary_csv = fullfile(output_dir, [grain_id '_region_summary.csv']);
+if classification_mode
+    summary_T = table(sum_region, sum_domain_id, sum_channel, sum_n, sum_mean, sum_median, sum_std, sum_min, sum_max, ...
+        'VariableNames', {'Region', 'DomainID', 'Channel', 'N', 'Mean', 'Median', 'Std', 'Min', 'Max'});
+    summary_csv = fullfile(output_dir, [grain_id '_texture_domain_summary.csv']);
+else
+    summary_T = table(sum_region, sum_channel, sum_n, sum_mean, sum_median, sum_std, sum_min, sum_max, ...
+        'VariableNames', {'Region', 'Channel', 'N', 'Mean', 'Median', 'Std', 'Min', 'Max'});
+    summary_csv = fullfile(output_dir, [grain_id '_region_summary.csv']);
+end
 writetable(summary_T, summary_csv);
 fprintf('  Region summary CSV saved to: %s\n', summary_csv);
 
@@ -604,14 +961,27 @@ else
     lprintf('  EPMA normalisation: none — raw pixel counts preserved\n');
 end
 lprintf('\n  Per-region, per-channel statistics:\n');
-lprintf('  %-20s  %-10s  %-8s  %-10s  %-10s  %-10s  %-10s  %-10s\n', ...
-        'Region', 'Channel', 'N', 'Mean', 'Median', 'Std', 'Min', 'Max');
-lprintf('  %-20s  %-10s  %-8s  %-10s  %-10s  %-10s  %-10s  %-10s\n', ...
-        repmat('-',1,20), repmat('-',1,10), repmat('-',1,8), repmat('-',1,10), ...
-        repmat('-',1,10), repmat('-',1,10), repmat('-',1,10), repmat('-',1,10));
-for i = 1:numel(sum_region)
-    lprintf('  %-20s  %-10s  %-8d  %-10.4f  %-10.4f  %-10.4f  %-10.4f  %-10.4f\n', ...
-            sum_region{i}, sum_channel{i}, sum_n(i), sum_mean(i), sum_median(i), sum_std(i), sum_min(i), sum_max(i));
+if classification_mode
+    lprintf('  %-14s  %-14s  %-10s  %-8s  %-10s  %-10s  %-10s  %-10s  %-10s\n', ...
+            'Region(Class)', 'DomainID', 'Channel', 'N', 'Mean', 'Median', 'Std', 'Min', 'Max');
+    lprintf('  %-14s  %-14s  %-10s  %-8s  %-10s  %-10s  %-10s  %-10s  %-10s\n', ...
+            repmat('-',1,14), repmat('-',1,14), repmat('-',1,10), repmat('-',1,8), ...
+            repmat('-',1,10), repmat('-',1,10), repmat('-',1,10), repmat('-',1,10), repmat('-',1,10));
+    for i = 1:numel(sum_region)
+        lprintf('  %-14s  %-14s  %-10s  %-8d  %-10.4f  %-10.4f  %-10.4f  %-10.4f  %-10.4f\n', ...
+                sum_region{i}, sum_domain_id{i}, sum_channel{i}, sum_n(i), sum_mean(i), sum_median(i), ...
+                sum_std(i), sum_min(i), sum_max(i));
+    end
+else
+    lprintf('  %-20s  %-10s  %-8s  %-10s  %-10s  %-10s  %-10s  %-10s\n', ...
+            'Region', 'Channel', 'N', 'Mean', 'Median', 'Std', 'Min', 'Max');
+    lprintf('  %-20s  %-10s  %-8s  %-10s  %-10s  %-10s  %-10s  %-10s\n', ...
+            repmat('-',1,20), repmat('-',1,10), repmat('-',1,8), repmat('-',1,10), ...
+            repmat('-',1,10), repmat('-',1,10), repmat('-',1,10), repmat('-',1,10));
+    for i = 1:numel(sum_region)
+        lprintf('  %-20s  %-10s  %-8d  %-10.4f  %-10.4f  %-10.4f  %-10.4f  %-10.4f\n', ...
+                sum_region{i}, sum_channel{i}, sum_n(i), sum_mean(i), sum_median(i), sum_std(i), sum_min(i), sum_max(i));
+    end
 end
 lprintf(SEC);
 
@@ -638,29 +1008,99 @@ for m = 1:n_maps
     end
     hold on;
     for r = 1:n_regions
-        visboundaries(region_masks{r}, 'Color', colors(r,:), 'LineWidth', 0.8);
+        if classification_mode
+            this_color = TEXTURE_CLASS_COLORS(domain_classes{r});
+        else
+            this_color = colors(r,:);
+        end
+        visboundaries(region_masks{r}, 'Color', this_color, 'LineWidth', 0.8);
     end
     title(all_labels{m}, 'FontSize', 9);
 end
 
 sgtitle(sprintf('%s — All maps with region boundaries', grain_id), 'Interpreter', 'none');
-qc_file = fullfile(output_dir, [grain_id '_regions_all_maps_QC.png']);
+if classification_mode
+    qc_file = fullfile(output_dir, [grain_id '_texture_domains_all_maps_QC.png']);
+else
+    qc_file = fullfile(output_dir, [grain_id '_regions_all_maps_QC.png']);
+end
 saveas(fig_qc, qc_file);
 fprintf('  QC figure saved to: %s\n', qc_file);
+
+% =========================================================================
+%% SECTION 7B: TEXTURE CLASS LABEL MAP  (classification_mode only)
+% =========================================================================
+
+if classification_mode
+    fprintf('\n--- SAVING TEXTURE CLASS LABEL MAP ---\n');
+
+    % uint8 class-index raster: 0 = outside grain mask, 1..numel(TEXTURE_CLASSES)
+    % = index into TEXTURE_CLASSES (fixed vocabulary order, stable across
+    % grains), numel(TEXTURE_CLASSES)+1 = Unclassified.
+    all_class_names = [TEXTURE_CLASSES, {'Unclassified'}];
+    class_map = zeros(nrows, ncols, 'uint8');
+    for r = 1:n_regions
+        class_idx = find(strcmp(all_class_names, domain_classes{r}), 1);
+        class_map(region_masks{r}) = class_idx;
+    end
+
+    class_map_tif = fullfile(output_dir, [grain_id '_texture_class_map.tif']);
+    imwrite(class_map, class_map_tif);
+    log_file_info(log_fid, class_map_tif, 'Texture class label map (uint8 index-coded)');
+    fprintf('  Texture class label map (TIFF) saved to: %s\n', class_map_tif);
+
+    fig_cm = figure('Name', 'Texture class map', 'Position', [100 100 700 700]);
+    rgb_map = zeros(nrows, ncols, 3);
+    for c = 1:numel(all_class_names)
+        color = TEXTURE_CLASS_COLORS(all_class_names{c});
+        sel = (class_map == c);
+        for ch = 1:3
+            layer = rgb_map(:,:,ch);
+            layer(sel) = color(ch);
+            rgb_map(:,:,ch) = layer;
+        end
+    end
+    imshow(rgb_map); hold on;
+    legend_handles = gobjects(1, numel(all_class_names));
+    for c = 1:numel(all_class_names)
+        legend_handles(c) = plot(nan, nan, 's', 'MarkerFaceColor', TEXTURE_CLASS_COLORS(all_class_names{c}), ...
+                                  'MarkerEdgeColor', 'none', 'MarkerSize', 12);
+    end
+    legend(legend_handles, all_class_names, 'Location', 'bestoutside');
+    title(sprintf('%s — texture class map', grain_id), 'Interpreter', 'none');
+
+    class_map_png = fullfile(output_dir, [grain_id '_texture_class_map.png']);
+    saveas(fig_cm, class_map_png);
+    fprintf('  Texture class map (PNG) saved to: %s\n', class_map_png);
+end
 
 % =========================================================================
 %% DONE — write log footer and close
 % =========================================================================
 
-all_outputs = { ...
-    regions_savefile,  'Region polygons + names (.mat)'; ...
-    mat_file,          'Region pixel data (.mat)'; ...
-    csv_file,          'Region pixel data (.csv)'; ...
-    summary_csv,       'Per-region summary statistics (.csv)'; ...
-    fullfile(output_dir, [grain_id '_regions_overlay.png']),       'Region overlay on CL (PNG)'; ...
-    qc_file,           'All-maps QC figure with regions (PNG)'; ...
-    log_file,          'Analysis log (this file)'; ...
-};
+if classification_mode
+    all_outputs = { ...
+        regions_savefile,  'Texture domain definitions (.mat)'; ...
+        mat_file,          'Region pixel data (.mat)'; ...
+        csv_file,          'Region pixel data (.csv)'; ...
+        summary_csv,       'Per-class/per-instance summary statistics (.csv)'; ...
+        overlay_file,      'Texture domain overlay on CL (PNG)'; ...
+        qc_file,           'All-maps QC figure with texture domains (PNG)'; ...
+        class_map_tif,     'Full-grain texture class label map (TIFF)'; ...
+        class_map_png,     'Full-grain texture class map (PNG)'; ...
+        log_file,          'Analysis log (this file)'; ...
+    };
+else
+    all_outputs = { ...
+        regions_savefile,  'Region polygons + names (.mat)'; ...
+        mat_file,          'Region pixel data (.mat)'; ...
+        csv_file,          'Region pixel data (.csv)'; ...
+        summary_csv,       'Per-region summary statistics (.csv)'; ...
+        overlay_file,      'Region overlay on CL (PNG)'; ...
+        qc_file,           'All-maps QC figure with regions (PNG)'; ...
+        log_file,          'Analysis log (this file)'; ...
+    };
+end
 
 lprintf('\n--- OUTPUT FILE INVENTORY ---\n');
 lprintf('  %-40s  %-12s  %s\n', 'Description', 'Size (bytes)', 'Path');
@@ -686,11 +1126,20 @@ fprintf('\n=== COMPLETE ===\n');
 fprintf('All outputs written to: %s\n', output_dir);
 fprintf('Key files:\n');
 fprintf('  %s_region_analysis_log.txt   — comprehensive run record\n', grain_id);
-fprintf('  %s_regions.mat                — region polygons (reusable)\n', grain_id);
-fprintf('  %s_region_pixel_data.csv/.mat — per-pixel data, all regions\n', grain_id);
-fprintf('  %s_region_summary.csv         — per-region/per-channel statistics\n', grain_id);
-fprintf('  %s_regions_overlay.png\n', grain_id);
-fprintf('  %s_regions_all_maps_QC.png\n\n', grain_id);
+if classification_mode
+    fprintf('  %s_texture_domains.mat          — texture domain definitions (reusable)\n', grain_id);
+    fprintf('  %s_region_pixel_data.csv/.mat   — per-pixel data, all domains (Region=class, DomainID=instance)\n', grain_id);
+    fprintf('  %s_texture_domain_summary.csv   — per-class/per-instance statistics\n', grain_id);
+    fprintf('  %s_texture_domains_overlay.png\n', grain_id);
+    fprintf('  %s_texture_domains_all_maps_QC.png\n', grain_id);
+    fprintf('  %s_texture_class_map.tif/.png   — full-grain texture classification\n\n', grain_id);
+else
+    fprintf('  %s_regions.mat                — region polygons (reusable)\n', grain_id);
+    fprintf('  %s_region_pixel_data.csv/.mat — per-pixel data, all regions\n', grain_id);
+    fprintf('  %s_region_summary.csv         — per-region/per-channel statistics\n', grain_id);
+    fprintf('  %s_regions_overlay.png\n', grain_id);
+    fprintf('  %s_regions_all_maps_QC.png\n\n', grain_id);
+end
 
 % =========================================================================
 %% LOCAL FUNCTIONS
@@ -752,5 +1201,14 @@ function log_file_info(fid, fpath, label)
         else
             fprintf(fid, '    (imfinfo failed; file may not exist yet)\n');
         end
+    end
+end
+
+function s = ternary_label(is_classification)
+% Short label for the pixel-data overwrite warning.
+    if is_classification
+        s = 'classification-mode';
+    else
+        s = 'default-mode';
     end
 end
