@@ -19,6 +19,11 @@
 #   - a labeled spot-location map per grain: the registered CL image with
 #     each spot plotted at its pixel location, colored by XANES class and
 #     labeled with its spot number
+#   - a PCA scatter (PC1 vs PC2) over a chosen element list (PCA_ELEMENTS),
+#     pooling spots from all input grains, colored by XANES class ('Bad
+#     data' / unclassified spots ARE included, as grey points, same as the
+#     CL vs. element scatter) — spots missing any PCA_ELEMENTS value are
+#     dropped
 #
 # CSV_INPUT may be a single CSV or a directory; all *_spot_geochemistry.csv
 # files in a directory are processed. Note: as of this writing, the real
@@ -31,6 +36,9 @@ import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
 import tifffile
 from pathlib import Path
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+from scipy.spatial import ConvexHull, QhullError
 
 # =============================================================================
 # PARAMETERS — edit this section for each run
@@ -40,11 +48,26 @@ CSV_INPUT = '/Users/mstein/bin/kyanite/figs/xanes'   # file or directory of *_sp
 FIGS_DIR  = '/Users/mstein/bin/kyanite/figs'         # where <grain_id>_CL_registered.tif live
 OUT_DIR   = '/Users/mstein/bin/kyanite/figs/spot_analysis'
 
-ANALYSES = ['pie', 'scatter', 'box', 'map']   # 'pie', 'scatter', 'box', 'map', 'all', or a list of these
+ANALYSES = ['pca']   # 'pie', 'scatter', 'box', 'map', 'pca', 'all', or a list of these
 
 # Columns to make a pooled "CL vs element" scatter plot for.
 # None = auto-detect every element ROI column present in the union of all input files.
 SCATTER_ELEMENTS = ['Cr_Ka', 'Fe_Ka', 'V_Ka', 'Mn_Ka', 'Ti_Ka']
+
+# Element columns considered by the PCA scatter (independent of SCATTER_ELEMENTS —
+# PCA is sensitive to which variables are included, so this is chosen deliberately
+# rather than reusing the scatter/box list).
+PCA_ELEMENTS = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Ti_Ka', 'Mn_Ka']
+PCA_LOG_TRANSFORM = True   # log10-transform elements before z-scoring/PCA, same as kyanite_pca_rf.py
+PCA_N_PCS_SCREE = None     # number of PCs shown on the scree plot; None = all (len(PCA_ELEMENTS))
+PCA_LOADING_THRESHOLD = 0.3   # |loading| >= this is highlighted on the loadings plot
+
+# Convex-hull outline around each class's points on the PC1-vs-PC2 scatter, so the
+# footprint each class occupies in PC space is easy to compare at a glance.
+PCA_CLUSTER_OUTLINES = True
+PCA_CLUSTER_CLASSES  = None   # which category_label values get an outline; None = CATEGORY_ORDER
+                               # (i.e. skip 'Bad data'/unclassified — not a real class to contour)
+PCA_CLUSTER_ALPHA    = 0.12   # hull fill alpha (edge is drawn solid at full class color)
 
 SAVE_FIG   = True
 SHOW_TITLE = True
@@ -250,7 +273,171 @@ def plot_element_boxplot(combined, element):
 
 
 # =============================================================================
-# ANALYSIS 4 — per-grain spot-location map
+# ANALYSIS 4 — PCA (scatter, scree, biplot, loadings) by XANES class
+# =============================================================================
+
+def prepare_pca_data(combined, elements, log_transform):
+    """Rows with a value for every PCA element, optionally log10-transformed.
+    Returns (sub, X) with matching row order/index."""
+    cols = list(elements)
+    sub = combined[cols + ['category_label']].dropna(subset=cols).copy()
+    X = sub[cols].astype(float)
+    if log_transform:
+        X = np.log10(X)
+    valid = np.isfinite(X.values).all(axis=1)
+    return sub.loc[valid], X.loc[valid]
+
+
+def compute_pca(X):
+    """Fit PCA on all components (not just PC1/PC2) so the scree plot can show
+    the full variance spectrum; scatter/biplot/loadings then just slice PC1/PC2
+    out of the same fit instead of re-running PCA per plot."""
+    X_scaled = StandardScaler().fit_transform(X.values)
+    pca = PCA()
+    scores = pca.fit_transform(X_scaled)
+    explained = pca.explained_variance_ratio_ * 100
+    loadings = pca.components_.T   # elements x components
+    return scores, explained, loadings
+
+
+def _class_masks(sub):
+    """category_label -> (label, boolean mask, color, legend label), in
+    LEGEND_ORDER, shared by every PCA plot that colors points/classes."""
+    out = []
+    for label in LEGEND_ORDER:
+        if label == 'Bad data':
+            mask = (sub['category_label'].isna() | (sub['category_label'] == 'Bad data')).values
+            color, leg_label = GREY, 'Bad data / unclassified'
+        else:
+            mask = (sub['category_label'] == label).values
+            color, leg_label = CATEGORY_COLORS[label], label
+        out.append((label, mask, color, leg_label))
+    return out
+
+
+def _draw_hull(ax, points, color, alpha):
+    """Convex-hull outline over a class's 2D points; silently skipped if the
+    points are too few or degenerate (collinear) to form a hull at all."""
+    if len(points) < 3:
+        return
+    try:
+        hull = ConvexHull(points)
+    except QhullError:
+        return
+    ax.add_patch(plt.Polygon(points[hull.vertices], closed=True, facecolor=color,
+                              edgecolor=color, alpha=alpha, linewidth=1.5, zorder=1))
+
+
+def plot_pca_scatter(sub, scores, explained, elements):
+    hull_classes = CATEGORY_ORDER if PCA_CLUSTER_CLASSES is None else PCA_CLUSTER_CLASSES
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    for label, mask, color, leg_label in _class_masks(sub):
+        if not mask.any():
+            continue
+        if PCA_CLUSTER_OUTLINES and label in hull_classes:
+            _draw_hull(ax, scores[mask][:, :2], color, PCA_CLUSTER_ALPHA)
+        ax.scatter(scores[mask, 0], scores[mask, 1], s=18, alpha=0.7,
+                   color=color, edgecolors='none', label=leg_label, zorder=2)
+
+    ax.axhline(0, color='0.7', lw=0.5, zorder=0)
+    ax.axvline(0, color='0.7', lw=0.5, zorder=0)
+    ax.set_xlabel(f'PC1 ({explained[0]:.1f}% var.)')
+    ax.set_ylabel(f'PC2 ({explained[1]:.1f}% var.)')
+    ax.legend(fontsize=8, loc='best')
+    ax.grid(True, alpha=0.25, linewidth=0.5)
+    if SHOW_TITLE:
+        ax.set_title(f'PCA of {", ".join(elements)} (n={len(sub):,})', fontsize=11)
+    plt.tight_layout()
+    return fig
+
+
+def plot_pca_scree(explained, n_pcs=None):
+    n = len(explained) if n_pcs is None else min(n_pcs, len(explained))
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.bar(range(1, n + 1), explained[:n], color='#3B9BDD')
+    ax.plot(range(1, n + 1), np.cumsum(explained[:n]), 'o-', color='#D85B30', lw=1.5)
+    ax.set_xticks(range(1, n + 1))
+    ax.set_xlabel('Principal Component')
+    ax.set_ylabel('Variance Explained (%)')
+    ax.grid(True, alpha=0.25, linewidth=0.5)
+    if SHOW_TITLE:
+        ax.set_title('PCA scree plot', fontsize=11)
+    plt.tight_layout()
+    return fig
+
+
+def plot_pca_loadings(loadings, elements, pcs=(1, 2), threshold=0.3):
+    fig, axes = plt.subplots(1, len(pcs), figsize=(5 * len(pcs), 4.5), squeeze=False)
+    axes = axes.ravel()
+    for ax, pc in zip(axes, pcs):
+        vals = loadings[:, pc - 1]
+        order = np.argsort(vals)[::-1]
+        sorted_vals = vals[order]
+        sorted_names = [elements[i] for i in order]
+        colors = ['#3B9BDD' if abs(v) >= threshold else '0.8' for v in sorted_vals]
+
+        ax.bar(range(len(sorted_vals)), sorted_vals, color=colors)
+        ax.axhline(0, color='k', lw=1)
+        ax.axhline(threshold, color='k', ls='--', lw=0.5)
+        ax.axhline(-threshold, color='k', ls='--', lw=0.5)
+        ax.set_xticks(range(len(sorted_names)))
+        ax.set_xticklabels(sorted_names, rotation=40, ha='right', fontsize=8)
+        ax.set_ylabel(f'Loading on PC{pc}')
+        ax.grid(True, axis='y', alpha=0.25, linewidth=0.5)
+
+    if SHOW_TITLE:
+        fig.suptitle('PCA loadings', fontsize=11)
+    plt.tight_layout()
+    return fig
+
+
+def plot_pca_biplot(sub, scores, loadings, explained, elements):
+    fig, ax = plt.subplots(figsize=(8.5, 6.5))
+    for label, mask, color, leg_label in _class_masks(sub):
+        if mask.any():
+            ax.scatter(scores[mask, 0], scores[mask, 1], s=16, alpha=0.5,
+                       color=color, edgecolors='none', label=leg_label, zorder=2)
+
+    # Fix the view to the score cloud's own extent *before* drawing arrows —
+    # otherwise matplotlib autoscales to include the arrows/labels too, which
+    # (since loadings are unit-norm per component, much larger in relative
+    # terms than the scores along one axis) can balloon the axes and shrink
+    # the score cloud down to a sliver.
+    x_max = np.max(np.abs(scores[:, 0])) if len(scores) else 1.0
+    y_max = np.max(np.abs(scores[:, 1])) if len(scores) else 1.0
+    xlim, ylim = x_max * 1.15, y_max * 1.15
+    ax.set_xlim(-xlim, xlim)
+    ax.set_ylim(-ylim, ylim)
+
+    # Scale every loading vector by the same factor (preserves relative loading
+    # magnitudes) so the longest arrow reaches ~85% of the tighter of the two
+    # fixed axis half-ranges.
+    loading_len = np.sqrt((loadings[:, :2] ** 2).sum(axis=1))
+    max_loading_len = loading_len.max() if loading_len.size else 1.0
+    scale = 0.85 * min(xlim, ylim) / max_loading_len if max_loading_len > 0 else 1.0
+
+    for i, element in enumerate(elements):
+        x, y = loadings[i, 0] * scale, loadings[i, 1] * scale
+        ax.annotate('', xy=(x, y), xytext=(0, 0),
+                    arrowprops=dict(arrowstyle='->', color='black', lw=1.2), zorder=3)
+        ax.text(x * 1.1, y * 1.1, element, fontsize=9, color='black',
+                ha='center', va='center', zorder=4)
+
+    ax.axhline(0, color='0.7', lw=0.5, zorder=0)
+    ax.axvline(0, color='0.7', lw=0.5, zorder=0)
+    ax.set_xlabel(f'PC1 ({explained[0]:.1f}% var.)')
+    ax.set_ylabel(f'PC2 ({explained[1]:.1f}% var.)')
+    ax.legend(fontsize=8, loc='upper left', bbox_to_anchor=(1.02, 1), borderaxespad=0)
+    ax.grid(True, alpha=0.25, linewidth=0.5)
+    if SHOW_TITLE:
+        ax.set_title(f'PCA biplot (n={len(sub):,})', fontsize=11)
+    plt.tight_layout()
+    return fig
+
+
+# =============================================================================
+# ANALYSIS 5 — per-grain spot-location map
 # =============================================================================
 
 def load_cl_background(grain_id):
@@ -297,7 +484,7 @@ def plot_spot_map(grain_id, df, cl_img):
 # RUN
 # =============================================================================
 
-ALL_ANALYSES = ['pie', 'scatter', 'box', 'map']
+ALL_ANALYSES = ['pie', 'scatter', 'box', 'map', 'pca']
 if ANALYSES == 'all':
     analyses = ALL_ANALYSES
 elif isinstance(ANALYSES, (list, tuple)):
@@ -358,6 +545,52 @@ if 'box' in analyses:
             out = out_dir / f'{element}_by_class_boxplot.png'
             fig.savefig(out, dpi=200, bbox_inches='tight')
             print(f'  Saved: {out.name}')
+
+if 'pca' in analyses:
+    print(f'\n--- PCA: {PCA_ELEMENTS} ---')
+    pca_elements = [e for e in PCA_ELEMENTS if e in combined.columns]
+    missing_entirely = [e for e in PCA_ELEMENTS if e not in combined.columns]
+    if missing_entirely:
+        print(f"  WARNING: {missing_entirely} not found in any input file — excluded from PCA.")
+    for element in pca_elements:
+        have, missing = element_availability(grain_frames, element)
+        if missing:
+            print(f"  WARNING: '{element}' not present in {len(missing)} grain CSV(s) — "
+                  f"spots from those grains are dropped from the PCA: {missing}")
+    if len(pca_elements) < 2:
+        print('  WARNING: fewer than 2 elements available — skipping PCA.')
+    else:
+        sub, X = prepare_pca_data(combined, pca_elements, PCA_LOG_TRANSFORM)
+        if len(sub) < 2:
+            print('  WARNING: fewer than 2 spots with complete data across all PCA elements — skipping.')
+        else:
+            scores, explained, loadings = compute_pca(X)
+            print(f'  n={len(sub):,} spot(s) with complete data across {len(pca_elements)} element(s); '
+                  f'PC1={explained[0]:.1f}%, PC2={explained[1]:.1f}% var.')
+
+            fig = plot_pca_scatter(sub, scores, explained, pca_elements)
+            if SAVE_FIG:
+                out = out_dir / 'pca_pc1_pc2_scatter.png'
+                fig.savefig(out, dpi=200, bbox_inches='tight')
+                print(f'  Saved: {out.name}')
+
+            fig = plot_pca_scree(explained, PCA_N_PCS_SCREE)
+            if SAVE_FIG:
+                out = out_dir / 'pca_scree.png'
+                fig.savefig(out, dpi=200, bbox_inches='tight')
+                print(f'  Saved: {out.name}')
+
+            fig = plot_pca_loadings(loadings, pca_elements, pcs=(1, 2), threshold=PCA_LOADING_THRESHOLD)
+            if SAVE_FIG:
+                out = out_dir / 'pca_loadings_pc1_pc2.png'
+                fig.savefig(out, dpi=200, bbox_inches='tight')
+                print(f'  Saved: {out.name}')
+
+            fig = plot_pca_biplot(sub, scores, loadings, explained, pca_elements)
+            if SAVE_FIG:
+                out = out_dir / 'pca_biplot.png'
+                fig.savefig(out, dpi=200, bbox_inches='tight')
+                print(f'  Saved: {out.name}')
 
 if 'map' in analyses:
     print(f'\n--- spot location maps ({len(grain_frames)} grain(s)) ---')

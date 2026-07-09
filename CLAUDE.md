@@ -25,7 +25,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | `kyanite_figures.py` | Python | Standalone figure generation from exported CSV pixel data |
 | `kyanite_pca_rf.py` | Python | PCA and cross-validated Random Forest analysis of CL vs. trace elements from exported CSV pixel data |
 | `kyanite_sample_size_convergence.py` | Python | Diagnostic: sweeps RF/SHAP over a range of pixel subsample sizes for one grain to check whether importance estimates have converged below `kyanite_pca_rf.py`'s `MAX_SAMPLES`/`SHAP_SAMPLES`, or would still change with more data |
-| `kyanite_spot_analysis.py` | Python | Batch analysis of `<grain_id>_spot_geochemistry.csv` files: XANES class distribution pie-chart grid, pooled CL-vs-element scatter plots colored by class, and per-grain labeled spot-location maps on the registered CL image |
+| `kyanite_spot_analysis.py` | Python | Batch analysis of `<grain_id>_spot_geochemistry.csv` files: XANES class distribution pie-chart grid, pooled CL-vs-element scatter plots colored by class, element-by-class box plots, PCA (PC1/PC2 scatter, scree, loadings, biplot) colored by class, and per-grain labeled spot-location maps on the registered CL image |
 | `xrf_display.m` | MATLAB | Visualize XRF element-map TIFFs with grain mask overlay |
 | `sum_epma_maps.m` | MATLAB | Sum two or more element maps into a combined TIFF (e.g. Zr_La + Zr_Lb) |
 
@@ -107,11 +107,31 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
   (CL-vs-element, one figure per element, pooling spots from every input grain —
   `'Bad data'`/unclassified spots ARE included here, as grey points/markers, for
   QC context), `map` (per-grain spot-location map on the registered CL image,
-  labeled by spot number)
+  labeled by spot number), `pca` (one PCA fit over `PCA_ELEMENTS`, pooling spots
+  from every input grain, producing four figures — PC1-vs-PC2 scatter, scree plot,
+  PC1/PC2 loadings bar charts, and a PC1-vs-PC2 biplot with loading vectors — all
+  colored by XANES class the same way as `scatter` — `'Bad data'`/unclassified
+  spots ARE included as grey points; spots missing any `PCA_ELEMENTS` value are
+  dropped)
 - `SCATTER_ELEMENTS` (default `None`) auto-detects every element column present in
   the union of input files; an element missing from some grains' CSVs (ROI lists
   vary slightly, e.g. LLF6-01 has extra REE lines) is pooled from whichever grains
   do have it, with a warning listing which grains were excluded from that plot
+- `PCA_ELEMENTS` — element list the PCA considers, independent of `SCATTER_ELEMENTS`
+  (defaults to the same Cr/V/Fe/Ti/Mn set, but chosen deliberately since PCA is
+  sensitive to which variables are included); `PCA_LOG_TRANSFORM` log10-transforms
+  elements before z-scoring/PCA, matching `kyanite_pca_rf.py`'s convention;
+  `PCA_N_PCS_SCREE` caps how many PCs the scree plot shows (`None` = all);
+  `PCA_LOADING_THRESHOLD` highlights `|loading| >=` this value on the loadings bars
+- `PCA_CLUSTER_OUTLINES` draws a convex-hull outline (filled at `PCA_CLUSTER_ALPHA`)
+  around each class's points on the PC1-vs-PC2 scatter, so the footprint each class
+  occupies in PC space is easy to compare; `PCA_CLUSTER_CLASSES` (default `None` =
+  `CATEGORY_ORDER`) controls which classes get one — `'Bad data'`/unclassified is
+  excluded by default since it isn't a real class to contour
+- The PCA biplot fixes its axes to the PC1/PC2 score cloud's own extent before
+  drawing loading-vector arrows, then scales all vectors by one shared factor —
+  drawing arrows first would let matplotlib autoscale around the (unit-norm,
+  disproportionately long) loadings and shrink the score cloud to a sliver
 - `CATEGORY_COLORS` reuses `xanes_plot.py`'s hex values, re-keyed to this file's
   real `category_label` strings (`'Bad data'`, not `'Ambiguous'`)
 - Spot maps plot directly at `row_px_tiff`/`col_px_tiff` on
@@ -134,7 +154,9 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 - Spot geochemistry/CL/XANES-class exports: `figs/<grain_id>_spot_geochemistry.csv`
   (currently on disk in `figs/xanes/` for all 8 processed grains)
 - Spot analysis figures saved to `figs/spot_analysis/`: `xanes_class_pie_grid.png`,
-  `CL_vs_<element>_scatter.png`, `<grain_id>_spot_map.png`
+  `CL_vs_<element>_scatter.png`, `<element>_by_class_boxplot.png`,
+  `pca_pc1_pc2_scatter.png`, `pca_scree.png`, `pca_loadings_pc1_pc2.png`,
+  `pca_biplot.png`, `<grain_id>_spot_map.png`
 
 ## Key parameters (set per-grain at top of each script)
 
@@ -193,8 +215,12 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 **`kyanite_spot_analysis.py`**
 - `CSV_INPUT` — file/directory of `*_spot_geochemistry.csv` (defaults to `figs/xanes/`)
 - `FIGS_DIR`, `OUT_DIR` — where to find `<grain_id>_CL_registered.tif` / save figures
-- `ANALYSES` — `pie`, `scatter`, `map`, `all`, or a list of these
-- `SCATTER_ELEMENTS` — element columns for the CL-vs-element plots (`None` = auto-detect all)
+- `ANALYSES` — `pie`, `scatter`, `box`, `map`, `pca`, `all`, or a list of these
+- `SCATTER_ELEMENTS` — element columns for the CL-vs-element and by-class box plots (`None` = auto-detect all)
+- `PCA_ELEMENTS`, `PCA_LOG_TRANSFORM` — element list for the PCA scatter/scree/loadings/biplot, and
+  whether to log10-transform elements before z-scoring/PCA (independent of `SCATTER_ELEMENTS`)
+- `PCA_N_PCS_SCREE`, `PCA_LOADING_THRESHOLD` — how many PCs the scree plot shows (`None` = all), and
+  the `|loading|` cutoff highlighted on the PC1/PC2 loadings bars
 - `CATEGORY_ORDER` / `CATEGORY_COLORS` — fixed XANES class order/coloring, shared across all figures
 
 ## Requirements
