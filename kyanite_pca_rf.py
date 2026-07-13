@@ -54,7 +54,7 @@ import shap
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data/NA-GS-P84-06_pixel_data.csv'   # file or directory
+CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data'   # file or directory
 ELEMENTS  = None      # list of CSV column names to include; None = all columns except CL/Region
 
 ANALYSES = ['pca', 'rf', 'shap']   # 'pca', 'rf', 'shap', 'all', or a list of these
@@ -71,16 +71,19 @@ PC_TO_PLOT        = [1, 2, 3, 4, 5]   # which PC(s) to scatter against CL / show
 LOADING_THRESHOLD = 0.3         # |loading| >= this is highlighted as a significant contributor
 
 # --- Random Forest ---
-N_ESTIMATORS         = 200
+N_ESTIMATORS         = 100
 MIN_SAMPLES_LEAF     = 5
+MAX_DEPTH            = 10     # cap tree depth; keeps fit/permutation-importance/SHAP-interaction cost
+                               # tractable at large N (same knob as kyanite_sample_size_convergence.py's
+                               # MAX_DEPTH); None = unbounded
 CV_FOLDS             = 10
 N_PERMUTATIONS       = 10     # repeats per fold for permutation importance
 IMPORTANCE_SIG_RATIO = 1.0    # element flagged "significant" if mean/std of importance exceeds this
-MAX_SAMPLES          = 100000  # subsample pixels before RF/permutation importance for speed; None = use all
+MAX_SAMPLES          = 50000  # subsample pixels before RF/permutation importance for speed; None = use all
 RANDOM_STATE         = 42
 
 # --- SHAP ---
-SHAP_SAMPLES         = 1000   # pixels used to fit the SHAP explainer model; interaction values are
+SHAP_SAMPLES         = 500    # pixels used to fit the SHAP explainer model; interaction values are
                                # O(n * n_features^2), so keep this well below MAX_SAMPLES
 SHAP_INTERACTIONS    = True   # also compute pairwise SHAP interaction values (slower); False = importance only
 SHAP_DEPENDENCE_PLOTS = True  # element value vs. its own SHAP value, one panel per element;
@@ -147,7 +150,7 @@ def prepare_data(df, elements):
     if LOG_TRANSFORM:
         X = np.log10(X)
 
-    valid = X.notna().all(axis=1) & np.isfinite(y)
+    valid = np.isfinite(X).all(axis=1) & np.isfinite(y)
     return X[valid], y[valid], kept, dropped
 
 
@@ -236,7 +239,7 @@ def run_rf_cv(X, y, elements, log_lines):
 
     for i, (train_idx, test_idx) in enumerate(kf.split(X)):
         rf = RandomForestRegressor(n_estimators=N_ESTIMATORS,
-                                    min_samples_leaf=MIN_SAMPLES_LEAF,
+                                    min_samples_leaf=MIN_SAMPLES_LEAF, max_depth=MAX_DEPTH,
                                     random_state=RANDOM_STATE, n_jobs=1)
         rf.fit(X[train_idx], y[train_idx])
         y_pred = rf.predict(X[test_idx])
@@ -302,7 +305,7 @@ def run_shap(X_df, y, elements):
     X_vals, y_vals = subsample(X_df.values, y, SHAP_SAMPLES)
 
     rf = RandomForestRegressor(n_estimators=N_ESTIMATORS,
-                                min_samples_leaf=MIN_SAMPLES_LEAF,
+                                min_samples_leaf=MIN_SAMPLES_LEAF, max_depth=MAX_DEPTH,
                                 random_state=RANDOM_STATE, n_jobs=1)
     rf.fit(X_vals, y_vals)
 
@@ -430,6 +433,7 @@ def build_log_header(label, csv_path, requested, missing, kept, dropped, n_valid
         lines += [
             f'  N_ESTIMATORS: {N_ESTIMATORS}',
             f'  MIN_SAMPLES_LEAF: {MIN_SAMPLES_LEAF}',
+            f'  MAX_DEPTH: {MAX_DEPTH}',
             f'  CV_FOLDS: {CV_FOLDS}',
             f'  N_PERMUTATIONS: {N_PERMUTATIONS}',
             f'  IMPORTANCE_SIG_RATIO: {IMPORTANCE_SIG_RATIO}',
