@@ -80,7 +80,7 @@ set(0, 'DefaultLegendInterpreter',      'none');
 %% SECTION 1: PARAMETERS  — edit this section for each new grain / region set
 % =========================================================================
 
-grain_id = 'NA-GS-P84-06';
+grain_id = 'NA-CM-G12B7-01';
 
 % Directory containing the outputs of CL_EPMA_registration.m for this grain
 % (registered CL TIFFs and the grain mask TIFF).
@@ -106,7 +106,7 @@ epma_dir = ['/Users/mstein/bin/kyanite/inputs/maps/', grain_id];
 output_dir = '/Users/mstein/bin/kyanite/figs/regions';
 
 % --- Spatial calibration --------------------------------------------------
-epma_pixel_um = 2.0;     % µm per pixel — must match the value used during registration
+epma_pixel_um = 1.0;     % µm per pixel — must match the value used during registration
 
 % --- Region parameters -----------------------------------------------------
 % Intersect every drawn polygon with the grain mask, so stray clicks outside
@@ -126,7 +126,7 @@ min_region_px = 25;
 %   prior domain, so domains can never overlap. Any grain-mask pixels left
 %   over when you stop drawing are auto-bucketed into a reserved
 %   'Unclassified' class, so the output always covers the full grain mask.
-classification_mode = true;
+classification_mode = false;
 
 % Fixed vocabulary of CL textural classes (classification_mode only) — mirrors
 % kyanite_spot_analysis.py's CATEGORY_ORDER/CATEGORY_COLORS pattern so a class
@@ -136,7 +136,7 @@ classification_mode = true;
 TEXTURE_CLASSES = {'sector', 'oscillatory', 'feathered', 'homogenous'};
 TEXTURE_CLASS_COLORS = containers.Map( ...
     [TEXTURE_CLASSES, {'Unclassified'}], ...
-    { [0.85 0.33 0.10], [0.30 0.60 0.45], [0.47 0.32 0.58], [0.40 0.40 0.40], ...
+    { [0.85 0.33 0.10], [0.30 0.60 0.45], [0.47 0.32 0.58], [0.20 0.45 0.75], ...
       [0.60 0.60 0.60] });
 
 % --- Element map normalization ---------------------------------------------
@@ -448,8 +448,7 @@ if ~skip_drawing && classification_mode
         title(sprintf('Domain %d: click vertices, double-click to close  (%d px remain unclassified)', ...
               domain_num, remaining_now), 'FontSize', 11);
 
-        h_poly = drawpolygon();
-        wait(h_poly);
+        h_poly = draw_polygon_with_zoom();
 
         % Read Position before closing the figure — closing deletes the
         % underlying ROI object, which invalidates any later access to it.
@@ -458,7 +457,15 @@ if ~skip_drawing && classification_mode
             fprintf('  No valid polygon drawn (need at least 3 vertices).\n');
             resp = input('  Try again? (y/n): ', 's');
             domain_num = domain_num - 1;
-            if strcmpi(strtrim(resp), 'y'), continue; else, break; end
+            if strcmpi(strtrim(resp), 'y')
+                continue;
+            elseif isempty(domain_ids)
+                fprintf('  ** No domains have been accepted yet — stopping now will leave the ENTIRE grain "Unclassified". **\n');
+                confirm_resp = strtrim(input('  Stop anyway with zero accepted domains? (y/n): ', 's'));
+                if strcmpi(confirm_resp, 'y'), break; else, continue; end
+            else
+                break;
+            end
         end
 
         pos = h_poly.Position;   % Nx2: [x (col), y (row)]
@@ -525,6 +532,14 @@ if ~skip_drawing && classification_mode
                     domain_id, chosen_class, sum(new_domain_mask(:)), remaining_after, ...
                     100 * remaining_after / max(grain_px_total, 1));
         elseif strcmp(resp, 's')
+            if isempty(domain_ids)
+                fprintf('  ** No domains have been accepted yet — stopping now will leave the ENTIRE grain "Unclassified". **\n');
+                confirm_resp = strtrim(input('  Stop anyway with zero accepted domains? (y/n): ', 's'));
+                if ~strcmpi(confirm_resp, 'y')
+                    domain_num = domain_num - 1;   % give this attempt back — don't consume the domain number
+                    continue;
+                end
+            end
             keep_drawing = false;
         else
             domain_num = domain_num - 1;   % redraw — don't consume the domain number
@@ -593,8 +608,7 @@ elseif ~skip_drawing
         end
         title(sprintf('Region %d: click vertices, double-click to close', region_num), 'FontSize', 11);
 
-        h_poly = drawpolygon();
-        wait(h_poly);
+        h_poly = draw_polygon_with_zoom();
 
         % Read Position before closing the figure — closing deletes the
         % underlying ROI object, which invalidates any later access to it.
@@ -1148,6 +1162,20 @@ end
 % =========================================================================
 %% LOCAL FUNCTIONS
 % =========================================================================
+
+function h_poly = draw_polygon_with_zoom()
+% Lets the user zoom/pan the current axes to magnify small features before
+% placing vertices. Must happen before drawpolygon() is called, since once
+% it starts capturing clicks, they place vertices instead of zooming/panning.
+    ax = gca;
+    enableDefaultInteractivity(ax);
+    axtoolbar(ax, {'zoomin', 'zoomout', 'restoreview', 'pan'});
+    fprintf('  Zoom in on the area first if needed: scroll wheel to zoom, click+drag to\n');
+    fprintf('  pan, or use the buttons in the axes'' top-right toolbar (restore view resets).\n');
+    input('  Press Enter here when ready to start drawing vertices: ', 's');
+    h_poly = drawpolygon();
+    wait(h_poly);
+end
 
 function img_norm = normalize_image(img_raw)
 % Accepts any bit-depth image and returns double in [0, 1].
