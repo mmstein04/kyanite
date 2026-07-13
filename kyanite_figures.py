@@ -27,6 +27,16 @@
 # CSV_INPUT at one or the other only picks up that kind — but the glob would
 # also match *_region_pixel_data.csv if the two were ever mixed into one
 # directory, since it shares the same suffix.
+#
+# When processing a region CSV with 'scatter' among PLOT_TYPE, an additional
+# per-element figure overlays the region pixels (colored by region) on top
+# of the whole grain's own CL-vs-element scatter (gray) — see
+# REGION_HIGHLIGHT_ON_WHOLE_GRAIN below. This looks up the companion
+# whole-grain *_pixel_data.csv by grain_id rather than joining on pixel
+# identity (neither CSV carries pixel coordinates), so it draws the full
+# grain population underneath and the region's own points on top — visually
+# equivalent to excluding region pixels from the gray layer, without needing
+# an exact per-pixel join.
 # =============================================================================
 
 import numpy as np
@@ -40,7 +50,7 @@ from scipy.stats import gaussian_kde
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data/RH-XA-57081P-05_pixel_data.csv'   # file or directory
+CSV_INPUT = '/Users/mstein/bin/kyanite/figs/regions'   # file or directory
 ELEMENTS  = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Mn_Ka', 'Ti_Ka']          # CSV column names
 PLOT_TYPE = 'all'      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix', 'all', or a list of these
 
@@ -84,6 +94,33 @@ SHOW_TITLE = True      # True to add a grain/element/plot-type title
 
 BLUE  = '#3B9BDD'
 ORANG = '#D85B30'
+
+# Region CSVs only: also draw each region's points, colored by region, on
+# top of the whole grain's gray CL-vs-element scatter (one figure per
+# element). Requires 'scatter' in PLOT_TYPE and the companion whole-grain
+# *_pixel_data.csv to be found; skipped (with a warning) otherwise.
+REGION_HIGHLIGHT_ON_WHOLE_GRAIN = True
+
+# Where to look for the companion whole-grain *_pixel_data.csv for a given
+# region CSV. None = sibling 'data' folder next to the region CSV's parent
+# (i.e. figs/data/ when the region CSV is in figs/regions/, matching the
+# project's default layout).
+WHOLE_GRAIN_DATA_DIR = None
+
+REGION_PALETTE = 'tab10'   # qualitative colormap for region-highlight figures
+
+# Region CSVs only: for the plot types listed in AXIS_MATCH_PLOT_TYPES, give
+# every region's subplot in the *_<pt>_by_region.png small-multiples figure
+# the same x/y axis limits as the companion whole-grain plot (rather than
+# each autoscaling to its own region's data), so the panels can be
+# overlaid/compared 1:1. For 'contour'/'heatmap' this only clips the
+# displayed view to match — the KDE itself is still estimated from each
+# region's own (local) data, so density fields aren't recomputed over the
+# wider shared window. Falls back to independent per-region autoscaling
+# (with a warning) if the companion whole-grain CSV or the element column
+# can't be found.
+MATCH_REGION_AXES_TO_WHOLE_GRAIN = True
+AXIS_MATCH_PLOT_TYPES = ['scatter', 'contour', 'heatmap']
 
 # =============================================================================
 # RESOLVE INPUT → list of CSV paths
@@ -244,6 +281,20 @@ def plot_heatmap(ax, x, y, element):
     ax.set_ylabel('CL intensity (norm.)')
 
 
+def plot_region_highlight(ax, x_all, y_all, region_xy, element):
+    # Whole-grain population underneath, in gray; each region's own points
+    # on top, colored — the region points are already a subset of the gray
+    # cloud, so no exact pixel-level join is needed to get the right picture.
+    ax.scatter(x_all, y_all, s=4, alpha=0.05, color='0.6', linewidths=0, zorder=1)
+    palette = sns.color_palette(REGION_PALETTE, n_colors=len(region_xy))
+    for (region, (x_r, y_r)), color in zip(region_xy.items(), palette):
+        ax.scatter(x_r, y_r, s=6, alpha=0.35, color=color, linewidths=0,
+                   zorder=2, label=f'{region} (n={len(x_r):,})')
+    ax.legend(loc='best', fontsize=7, markerscale=2, framealpha=0.8)
+    ax.set_xlabel(element)
+    ax.set_ylabel('CL intensity (norm.)')
+
+
 PLOT_FUNCS = {'scatter': plot_scatter, 'violin': plot_violin, 'boxplot': plot_boxplot,
               'contour': plot_contour, 'heatmap': plot_heatmap}
 
@@ -383,6 +434,19 @@ for csv_path in csv_files:
         grain_id = csv_path.stem.replace('_region_pixel_data', '')
         regions  = list(df['Region'].drop_duplicates())
         print(f'\n--- {grain_id} ({len(df):,} px, {len(regions)} region(s): {", ".join(regions)}) ---')
+
+        whole_grain_df = None
+        needs_whole_grain = ((REGION_HIGHLIGHT_ON_WHOLE_GRAIN and 'scatter' in plot_types)
+                              or (MATCH_REGION_AXES_TO_WHOLE_GRAIN
+                                  and any(pt in plot_types for pt in AXIS_MATCH_PLOT_TYPES)))
+        if needs_whole_grain:
+            wg_dir  = Path(WHOLE_GRAIN_DATA_DIR) if WHOLE_GRAIN_DATA_DIR else csv_path.parent.parent / 'data'
+            wg_path = wg_dir / f'{grain_id}_pixel_data.csv'
+            if wg_path.exists():
+                whole_grain_df = pd.read_csv(wg_path)
+            else:
+                print(f'  WARNING: companion whole-grain CSV not found at {wg_path} — '
+                      f'skipping region-highlight figure(s) and region-axis matching')
     else:
         grain_id = csv_path.stem.replace('_pixel_data', '')
         print(f'\n--- {grain_id} ({len(df):,} px) ---')
@@ -401,6 +465,22 @@ for csv_path in csv_files:
             for pt in element_plot_types:
                 fig, axes = plt.subplots(1, n_r, figsize=(5 * n_r, 5), sharey=True)
                 axes = np.atleast_1d(axes)
+
+                # Whole-grain filtered range for this element, computed once and
+                # reused both to pin every region subplot's axes to it (so the
+                # panels overlay 1:1) and as the background layer for the
+                # region-highlight figure below.
+                x_all = y_all = None
+                needs_x_all = whole_grain_df is not None and (
+                    pt == 'scatter' or (pt in AXIS_MATCH_PLOT_TYPES and MATCH_REGION_AXES_TO_WHOLE_GRAIN))
+                if needs_x_all:
+                    if element in whole_grain_df.columns:
+                        x_all, y_all, _ = filtered_xy(whole_grain_df, element)
+                    else:
+                        print(f'  WARNING: {element} not in companion whole-grain CSV — falling back to '
+                              f'independent per-region axis scaling / skipping region-highlight figure')
+                match_axes = pt in AXIS_MATCH_PLOT_TYPES and MATCH_REGION_AXES_TO_WHOLE_GRAIN and x_all is not None
+
                 for ax, region in zip(axes, regions):
                     sub = df[df['Region'] == region]
                     x, y, n_removed = filtered_xy(sub, element)
@@ -408,10 +488,13 @@ for csv_path in csv_files:
                         ax.text(0.5, 0.5, 'insufficient data', ha='center', va='center',
                                 transform=ax.transAxes, fontsize=9, color='gray')
                         ax.set_title(region, fontsize=10)
-                        continue
-                    render_plot(ax, pt, element, x, y)
-                    ax.set_title(region, fontsize=10)
-                    print(f'  [{region}] {element} ({pt}): {len(x):,} px ({n_removed:,} removed)')
+                    else:
+                        render_plot(ax, pt, element, x, y)
+                        ax.set_title(region, fontsize=10)
+                        print(f'  [{region}] {element} ({pt}): {len(x):,} px ({n_removed:,} removed)')
+                    if match_axes:
+                        ax.set_xlim(x_all.min(), x_all.max())
+                        ax.set_ylim(y_all.min(), y_all.max())
 
                 if SHOW_TITLE:
                     fig.suptitle(f'{grain_id} — {element} ({pt}) by region', fontsize=12)
@@ -421,6 +504,29 @@ for csv_path in csv_files:
                     out = out_dir / f'{grain_id}_{element}_{pt}_by_region.png'
                     fig.savefig(out, dpi=200, bbox_inches='tight')
                     print(f'  Saved: {out.name}')
+
+                if pt == 'scatter' and REGION_HIGHLIGHT_ON_WHOLE_GRAIN and x_all is not None:
+                    region_xy = {}
+                    for region in regions:
+                        sub = df[df['Region'] == region]
+                        x_r, y_r, _ = filtered_xy(sub, element)
+                        if len(x_r) == 0:
+                            continue
+                        region_xy[region] = (x_r, y_r)
+
+                    if region_xy:
+                        fig_h, ax_h = plt.subplots(figsize=(7, 6))
+                        plot_region_highlight(ax_h, x_all, y_all, region_xy, element)
+                        ax_h.grid(True, alpha=0.25, linewidth=0.5)
+                        sns.despine(ax=ax_h)
+                        if SHOW_TITLE:
+                            ax_h.set_title(f'{grain_id} — {element}: regions on whole-grain scatter', fontsize=11)
+                        plt.tight_layout()
+
+                        if SAVE_FIG:
+                            out_h = out_dir / f'{grain_id}_{element}_scatter_regions_highlight.png'
+                            fig_h.savefig(out_h, dpi=200, bbox_inches='tight')
+                            print(f'  Saved: {out_h.name}')
 
         else:
             x, y, n_removed = filtered_xy(df, element)
