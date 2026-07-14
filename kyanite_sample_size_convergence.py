@@ -40,6 +40,11 @@ import shap
 CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data/NA-GS-P84-06_pixel_data.csv'   # a single grain's *_pixel_data.csv
 ELEMENTS  = None      # list of CSV column names to include; None = all columns except CL/Region
 
+# Where output is saved — independent of CSV_INPUT, so pointing CSV_INPUT at
+# figs/data/ (where the pixel-data CSV actually lives) never dumps results in
+# among the reusable data files.
+OUTPUT_DIR = '/Users/mstein/bin/kyanite/figs/sample_size_convergence'
+
 # --- Data cleaning, same conventions as kyanite_pca_rf.py ---
 BELOW_DETECTION          = None   # values <= this are treated as below detection limit; None to disable
 MAX_BELOW_DETECTION_FRAC = 0.2    # drop an element if more than this fraction of pixels are below detection
@@ -83,7 +88,8 @@ COLORS = ['#3B9BDD', '#D85B30', '#4C9F70', '#9B5DE5', '#F2B134', '#EF476F', '#11
 csv_path = Path(CSV_INPUT)
 df = pd.read_csv(csv_path)
 label = csv_path.stem.replace('_pixel_data', '').replace('_region_pixel_data', '')
-out_dir = csv_path.parent
+out_dir = Path(OUTPUT_DIR)
+out_dir.mkdir(parents=True, exist_ok=True)
 
 exclude = {'CL', 'Region', 'DomainID'}
 elements = ELEMENTS or [c for c in df.columns if c not in exclude]

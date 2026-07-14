@@ -26,8 +26,8 @@
 #     dropped
 #
 # CSV_INPUT may be a single CSV or a directory; all *_spot_geochemistry.csv
-# files in a directory are processed. Note: as of this writing, the real
-# per-spot CSVs live in figs/xanes/, not figs/ directly.
+# files in a directory are processed. Per-spot CSVs are reusable data (also
+# read by xanes_rf_classifier.py) and live in figs/data/.
 # =============================================================================
 
 import numpy as np
@@ -44,7 +44,7 @@ from scipy.spatial import ConvexHull, QhullError
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs/xanes'   # file or directory of *_spot_geochemistry.csv
+CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data'    # file or directory of *_spot_geochemistry.csv
 FIGS_DIR  = '/Users/mstein/bin/kyanite/figs'         # where <grain_id>_CL_registered.tif live
 OUT_DIR   = '/Users/mstein/bin/kyanite/figs/spot_analysis'
 

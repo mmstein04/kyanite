@@ -22,23 +22,25 @@
 %   4. Derive per-pixel slope and Pearson r maps for every element from
 %      those sums; mask out pixels outside the grain or with too few valid
 %      neighbors in the window.
-%   5. Save maps (.mat + long-format .csv) and QC figures (slope map grid,
-%      R map grid, window-coverage map).
+%   5. Save maps (.mat + long-format .csv, in data/) and QC figures (slope
+%      map grid, R map grid, window-coverage map, in diagnostics/); the one
+%      true analysis-result figure (Cr R-vs-CL) is saved directly in
+%      output_dir.
 %
 % INPUTS (set in PARAMETERS section below):
 %   - Registered CL image + grain mask (outputs of CL_EPMA_registration.m)
 %   - Folder of EPMA/XRF element map TIFFs for the same grain
 %
 % OUTPUTS:
-%   - [grain_id]_local_regression.mat            — slope/R/n maps + metadata
-%   - [grain_id]_local_regression_pixel_data.csv — long-format per-pixel table
-%   - [grain_id]_local_regression_slope_QC.png   — slope map, all elements
-%   - [grain_id]_local_regression_R_QC.png       — R map, all elements
+%   - data/[grain_id]_local_regression.mat            — slope/R/n maps + metadata
+%   - data/[grain_id]_local_regression_pixel_data.csv — long-format per-pixel table
+%   - diagnostics/[grain_id]_local_regression_slope_QC.png — slope map, all elements
+%   - diagnostics/[grain_id]_local_regression_R_QC.png     — R map, all elements
 %   - [grain_id]_local_regression_R_Cr_vs_CL.png — CL image next to the Cr R map
 %     (skipped with a warning if no Cr map is found among the discovered
 %     EPMA/XRF maps)
-%   - [grain_id]_local_regression_n_map.png      — window coverage map
-%   - [grain_id]_local_regression_analysis_log.txt — comprehensive run record
+%   - diagnostics/[grain_id]_local_regression_n_map.png    — window coverage map
+%   - diagnostics/[grain_id]_local_regression_analysis_log.txt — comprehensive run record
 %
 % REQUIREMENTS:
 %   - MATLAB Image Processing Toolbox (for imread of TIFFs, visboundaries)
@@ -82,6 +84,12 @@ use_color_display = true;
 % CL_EPMA_registration.m for this grain). All *.tif files auto-discovered.
 epma_dir = ['/Users/mstein/bin/kyanite/inputs/maps/', grain_id];
 
+% Reusable data (.mat/.csv) goes in data_dir (figs/data/), alongside
+% CL_EPMA_registration.m's own data outputs. QC-only figures (slope/R
+% grids, window-coverage map) and the log go in diagnostics_dir
+% (figs/diagnostics/). output_dir itself holds only the true
+% analysis-result figure (the Cr R-vs-CL comparison).
+diagnostics_dir = fullfile(input_dir, 'diagnostics');
 output_dir = '/Users/mstein/bin/kyanite/figs/local_regression';
 
 % --- Spatial calibration --------------------------------------------------
@@ -113,6 +121,8 @@ display_pct = [0, 97];
 % =========================================================================
 
 if ~exist(output_dir, 'dir'), mkdir(output_dir); end
+if ~exist(data_dir, 'dir'), mkdir(data_dir); end
+if ~exist(diagnostics_dir, 'dir'), mkdir(diagnostics_dir); end
 
 % --- Auto-discover EPMA maps from epma_dir --------------------------------
 tif_listing = dir(fullfile(epma_dir, '*.tif'));
@@ -156,7 +166,7 @@ fprintf('Auto-discovered %d EPMA maps in: %s\n', n_elements, epma_dir);
 fprintf('=== CL Local Regression Map: %s ===\n\n', grain_id);
 
 % ---- Open analysis log ---------------------------------------------------
-log_file = fullfile(output_dir, [grain_id '_local_regression_analysis_log.txt']);
+log_file = fullfile(diagnostics_dir, [grain_id '_local_regression_analysis_log.txt']);
 log_fid  = fopen(log_file, 'w');
 if log_fid == -1
     error('Cannot open log file for writing: %s', log_file);
@@ -190,6 +200,8 @@ lprintf('\n--- PARAMETERS ---\n');
 lprintf('  Grain ID:              %s\n', grain_id);
 lprintf('  Input directory:       %s\n', input_dir);
 lprintf('  EPMA directory:        %s\n', epma_dir);
+lprintf('  Data directory:        %s\n', data_dir);
+lprintf('  Diagnostics directory: %s\n', diagnostics_dir);
 lprintf('  Output directory:      %s\n', output_dir);
 lprintf('  Registered CL (gray):  %s\n', cl_filename);
 lprintf('  Registered CL (color): %s  (display: %s)\n', cl_color_filename, mat2str(use_color_display));
@@ -430,7 +442,7 @@ lprintf(SEC);
 
 fprintf('\n--- SAVING OUTPUTS ---\n');
 
-mat_file = fullfile(output_dir, [grain_id '_local_regression.mat']);
+mat_file = fullfile(data_dir, [grain_id '_local_regression.mat']);
 save(mat_file, 'slope_maps', 'r_maps', 'n_map', 'epma_labels', 'grain_mask', ...
      'window_radius_px', 'window_radius_um', 'min_window_px', 'normalize_epma', ...
      'epma_pixel_um', 'grain_id');
@@ -463,7 +475,7 @@ end
 
 pixel_T = table(csv_row, csv_col, csv_elem, csv_n, csv_slope, csv_r, ...
     'VariableNames', {'RowIdx', 'ColIdx', 'Element', 'N', 'Slope', 'R'});
-csv_file = fullfile(output_dir, [grain_id '_local_regression_pixel_data.csv']);
+csv_file = fullfile(data_dir, [grain_id '_local_regression_pixel_data.csv']);
 writetable(pixel_T, csv_file);
 fprintf('  Pixel data CSV saved to: %s  (%d rows)\n', csv_file, size(pixel_T,1));
 
@@ -509,7 +521,7 @@ for e = 1:n_elements
     title(sprintf('%s (slope)', epma_labels{e}), 'FontSize', 9);
 end
 sgtitle(sprintf('%s — local CL-vs-element slope (r = %.1f um)', grain_id, window_radius_um), 'Interpreter', 'none');
-slope_qc_file = fullfile(output_dir, [grain_id '_local_regression_slope_QC.png']);
+slope_qc_file = fullfile(diagnostics_dir, [grain_id '_local_regression_slope_QC.png']);
 saveas(fig_slope, slope_qc_file);
 fprintf('  Slope QC figure saved to: %s\n', slope_qc_file);
 
@@ -528,7 +540,7 @@ for e = 1:n_elements
     title(sprintf('%s (R)', epma_labels{e}), 'FontSize', 9);
 end
 sgtitle(sprintf('%s — local CL-vs-element Pearson R (r = %.1f um)', grain_id, window_radius_um), 'Interpreter', 'none');
-r_qc_file = fullfile(output_dir, [grain_id '_local_regression_R_QC.png']);
+r_qc_file = fullfile(diagnostics_dir, [grain_id '_local_regression_R_QC.png']);
 saveas(fig_r, r_qc_file);
 fprintf('  R QC figure saved to: %s\n', r_qc_file);
 
@@ -597,7 +609,7 @@ set(gca, 'Color', [0.85 0.85 0.85]);
 colorbar;
 title(sprintf('%s — window coverage (n, radius = %.1f um) | min valid = %d', ...
       grain_id, window_radius_um, min_window_px), 'FontSize', 10, 'Interpreter', 'none');
-n_map_file = fullfile(output_dir, [grain_id '_local_regression_n_map.png']);
+n_map_file = fullfile(diagnostics_dir, [grain_id '_local_regression_n_map.png']);
 saveas(fig_n, n_map_file);
 fprintf('  Window coverage figure saved to: %s\n', n_map_file);
 
@@ -638,17 +650,18 @@ lprintf(DIV);
 fclose(log_fid);
 
 fprintf('\n=== COMPLETE ===\n');
-fprintf('All outputs written to: %s\n', output_dir);
+fprintf('All outputs written to: %s (figures), %s (data), %s (diagnostics)\n', ...
+        output_dir, data_dir, diagnostics_dir);
 fprintf('Key files:\n');
-fprintf('  %s_local_regression_analysis_log.txt   — comprehensive run record\n', grain_id);
-fprintf('  %s_local_regression.mat                — slope/R/n maps + metadata\n', grain_id);
-fprintf('  %s_local_regression_pixel_data.csv     — long-format per-pixel table\n', grain_id);
-fprintf('  %s_local_regression_slope_QC.png\n', grain_id);
-fprintf('  %s_local_regression_R_QC.png\n', grain_id);
+fprintf('  diagnostics/%s_local_regression_analysis_log.txt   — comprehensive run record\n', grain_id);
+fprintf('  data/%s_local_regression.mat                — slope/R/n maps + metadata\n', grain_id);
+fprintf('  data/%s_local_regression_pixel_data.csv     — long-format per-pixel table\n', grain_id);
+fprintf('  diagnostics/%s_local_regression_slope_QC.png\n', grain_id);
+fprintf('  diagnostics/%s_local_regression_R_QC.png\n', grain_id);
 if ~isempty(cr_cl_r_file)
     fprintf('  %s_local_regression_R_Cr_vs_CL.png\n', grain_id);
 end
-fprintf('  %s_local_regression_n_map.png\n\n', grain_id);
+fprintf('  diagnostics/%s_local_regression_n_map.png\n\n', grain_id);
 
 % =========================================================================
 %% LOCAL FUNCTIONS

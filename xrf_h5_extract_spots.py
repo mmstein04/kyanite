@@ -79,7 +79,11 @@ GRAIN_ID = 'NVD3-01'   # drives figs/data/<GRAIN_ID>_mask.tif, figs/<GRAIN_ID>_C
 FIGS_DIR           = '/Users/mstein/bin/kyanite/figs'
 CLASSIFICATION_DIR = '/Users/mstein/bin/kyanite/inputs/xanes_classification'
 
-OUTPUT_CSV = f'/Users/mstein/bin/kyanite/figs/{GRAIN_ID}_spot_geochemistry.csv'
+
+# Reusable data — read back by kyanite_spot_analysis.py and
+# xanes_rf_classifier.py, so it lives in figs/data/ alongside the rest of
+# the project's reusable per-grain data files, not among any figures.
+OUTPUT_CSV = f'/Users/mstein/bin/kyanite/figs/data/{GRAIN_ID}_spot_geochemistry.csv'
 
 # Only include areas whose name matches this regex (case-insensitive).
 # Set to None to include every area in xrmmap/areas (drawn regions included).

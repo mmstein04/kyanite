@@ -22,11 +22,13 @@
 #     compared side by side.
 #
 # CSV_INPUT may be a single CSV file or a directory; all *_pixel_data.csv
-# files found in a directory are processed automatically. Whole-grain CSVs
-# live in figs/data/ and region CSVs in figs/regions/ by default, so pointing
-# CSV_INPUT at one or the other only picks up that kind — but the glob would
-# also match *_region_pixel_data.csv if the two were ever mixed into one
-# directory, since it shares the same suffix.
+# files found in a directory are processed automatically. Whole-grain and
+# region CSVs both live in figs/data/ — the 'Region' column (checked after
+# loading, not the filename) decides which code path a given file takes, so
+# pointing CSV_INPUT at figs/data/ processes both kinds in one run. Figures
+# are saved to WHOLE_GRAIN_OUTPUT_DIR / REGION_OUTPUT_DIR below, independent
+# of wherever CSV_INPUT pointed — pointing CSV_INPUT elsewhere (e.g. a
+# one-off copy of a CSV) does not change where figures land.
 #
 # When processing a region CSV with 'scatter' among PLOT_TYPE, an additional
 # per-element figure overlays the region pixels (colored by region) on top
@@ -50,9 +52,17 @@ from scipy.stats import gaussian_kde
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs/regions'   # file or directory
+CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data'   # file or directory
 ELEMENTS  = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Mn_Ka', 'Ti_Ka']          # CSV column names
 PLOT_TYPE = 'all'      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix', 'all', or a list of these
+
+# Where figures are saved — independent of CSV_INPUT, so pointing CSV_INPUT
+# at figs/data/ (where the pixel-data CSVs actually live) never dumps PNGs
+# in among the reusable data files. Whole-grain CSVs' figures go to
+# WHOLE_GRAIN_OUTPUT_DIR; region CSVs' (has a 'Region' column) to
+# REGION_OUTPUT_DIR. Both are created if missing.
+WHOLE_GRAIN_OUTPUT_DIR = '/Users/mstein/bin/kyanite/figs/whole_grain'
+REGION_OUTPUT_DIR      = '/Users/mstein/bin/kyanite/figs/regions'
 
 # 'corrmatrix' ignores the per-element looping above and instead builds one
 # grid per grain (or per region) from every ordered pair of elements in
@@ -102,9 +112,9 @@ ORANG = '#D85B30'
 REGION_HIGHLIGHT_ON_WHOLE_GRAIN = True
 
 # Where to look for the companion whole-grain *_pixel_data.csv for a given
-# region CSV. None = sibling 'data' folder next to the region CSV's parent
-# (i.e. figs/data/ when the region CSV is in figs/regions/, matching the
-# project's default layout).
+# region CSV. None = same directory as the region CSV itself (i.e.
+# figs/data/, since whole-grain and region CSVs are colocated there by
+# default).
 WHOLE_GRAIN_DATA_DIR = None
 
 REGION_PALETTE = 'tab10'   # qualitative colormap for region-highlight figures
@@ -428,7 +438,8 @@ def plot_element_highlights(elements, df, rdf, grain_id, out_dir):
 for csv_path in csv_files:
     df = pd.read_csv(csv_path)
     region_mode = 'Region' in df.columns
-    out_dir = csv_path.parent
+    out_dir = Path(REGION_OUTPUT_DIR) if region_mode else Path(WHOLE_GRAIN_OUTPUT_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     if region_mode:
         grain_id = csv_path.stem.replace('_region_pixel_data', '')
@@ -440,7 +451,7 @@ for csv_path in csv_files:
                               or (MATCH_REGION_AXES_TO_WHOLE_GRAIN
                                   and any(pt in plot_types for pt in AXIS_MATCH_PLOT_TYPES)))
         if needs_whole_grain:
-            wg_dir  = Path(WHOLE_GRAIN_DATA_DIR) if WHOLE_GRAIN_DATA_DIR else csv_path.parent.parent / 'data'
+            wg_dir  = Path(WHOLE_GRAIN_DATA_DIR) if WHOLE_GRAIN_DATA_DIR else csv_path.parent
             wg_path = wg_dir / f'{grain_id}_pixel_data.csv'
             if wg_path.exists():
                 whole_grain_df = pd.read_csv(wg_path)

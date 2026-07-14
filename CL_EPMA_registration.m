@@ -4,8 +4,10 @@
 % PURPOSE:
 %   register a cathodoluminescence (CL) image to one or more EPMA element
 %   maps of the same grain, create a grain mask from the registered CL
-%   image, extract per-pixel chemistry and CL intensity data, and produce
-%   exploratory scatter plots of CL vs. element concentrations.
+%   image, extract per-pixel chemistry and CL intensity data, and compute
+%   CL vs. element Pearson correlations as an immediate registration-quality
+%   check (exploratory scatter/violin/contour/etc. figures are generated
+%   downstream by kyanite_figures.py from the exported pixel data CSV).
 %
 % WORKFLOW:
 %   1. Load CL and EPMA images (handyles 8-, 16-, and 32-bit TIFFs)
@@ -13,7 +15,7 @@
 %   3. Evaluate registration quality (RMSE in pixels and microns)
 %   4. Build a binary grain mask from the registered CL image
 %   5. Apply mask to extract pixel vectors for all maps
-%   6. Scatter plot CL vs. each element; compute Pearson r
+%   6. Compute Pearson r and a linear fit, CL vs. each element
 %   7. Run shift-sensitivity analysis to quantify alignment error impact
 %   8. Write comprehensive analysis log throughout
 %
@@ -104,8 +106,8 @@ mask_image_file = '';   % e.g., 'NA-GS-P84-06_Al_EDS.tif'
 % --- Registration parameters ----------------------------------------------
 transform_type = 'affine';
 
-% Percentile range used to contrast-stretch element maps in all figures.
-% Does not affect registration, scatter plot data, or any outputs — display only.
+% Percentile range used to contrast-stretch element maps in QC figures.
+% Does not affect registration, extracted pixel data, or any outputs — display only.
 % Tighten (e.g. [5, 95]) for maps with many low-signal pixels; widen for
 % already-uniform images.  Set to [0, 100] to disable stretching.
 display_pct = [0, 97];
@@ -114,8 +116,8 @@ display_pct = [0, 97];
 shift_range   = -30:1:30;
 
 % --- Outlier removal ------------------------------------------------------
-% Percentile cutoffs applied per-element on the x-axis in scatter plots and
-% for Pearson r. Set pct_lo_cut = 0 and pct_hi_cut = 100 to disable.
+% Percentile cutoffs applied per-element when computing Pearson r and the
+% linear fit. Set pct_lo_cut = 0 and pct_hi_cut = 100 to disable.
 pct_lo_cut =  0;   % lower cutoff: exclude bottom pct_lo_cut % of element values
 pct_hi_cut = 99;   % upper cutoff: exclude top (100 - pct_hi_cut) % of element values
 
@@ -1103,15 +1105,14 @@ end
 lprintf(SEC);
 
 % =========================================================================
-%% SECTION 7: SCATTER PLOTS — CL vs. each element
+%% SECTION 7: PEARSON CORRELATIONS — CL vs. each element
 % =========================================================================
+% Exploratory figures (scatter/violin/contour/heatmap/corrmatrix) are
+% generated downstream by kyanite_figures.py from the exported pixel data
+% CSV — this section only computes the r/fit numbers for an immediate,
+% in-MATLAB registration-quality check.
 
-fprintf('\n--- GENERATING SCATTER PLOTS ---\n');
-
-n_cols = 3;
-n_rows = ceil(n_elements / n_cols);
-figure('Name', 'CL vs. element maps', ...
-       'Position', [100, 100, 400*n_cols, 350*n_rows]);
+fprintf('\n--- COMPUTING PEARSON CORRELATIONS ---\n');
 
 r_vals     = zeros(1, n_elements);
 pfit       = zeros(n_elements, 2);   % linear fit [slope, intercept] for each element
@@ -1132,57 +1133,9 @@ for e = 1:n_elements
     y_e = cl_px(keep);
     n_levels(e) = numel(unique(epma_px(:,e)));   % count on full (unclipped) column
 
-    subplot(n_rows, n_cols, e);
-    scatter(x_e, y_e, 8, 'filled', ...
-            'MarkerFaceAlpha', 0.08, 'MarkerFaceColor', [0.2 0.2 0.2]);
-    if normalize_epma
-        xlabel([epma_labels{e}, ' (norm.)'], 'FontSize', 10);
-    else
-        xlabel(epma_labels{e}, 'FontSize', 10);
-    end
-    ylabel('CL intensity (norm.)', 'FontSize', 10);
     pfit(e,:) = polyfit(x_e, y_e, 1);
-    xfit = linspace(min(x_e), max(x_e), 200);
-    hold on;
-    plot(xfit, polyval(pfit(e,:), xfit), 'k-', 'LineWidth', 1.5);
     r_vals(e) = corr(x_e, y_e);
-
-    % Place annotations in the emptiest corner of the scatter plot.
-    % Check point density in each of the four corners (30% of x-range,
-    % 30% of y-range), then anchor all text lines there.
-    xl     = xlim;
-    xspan  = xl(2) - xl(1);
-    cdense = [
-        sum(x_e < xl(1)+0.3*xspan & y_e > 0.7),   % top-left
-        sum(x_e > xl(2)-0.3*xspan & y_e > 0.7),   % top-right
-        sum(x_e < xl(1)+0.3*xspan & y_e < 0.3),   % bottom-left
-        sum(x_e > xl(2)-0.3*xspan & y_e < 0.3)    % bottom-right
-    ];
-    [~, bc] = min(cdense);
-    tx = [0.05 0.95 0.05 0.95];
-    ty = [0.95 0.95 0.12 0.12];
-    ha = {'left','right','left','right'};
-    va = {'top','top','bottom','bottom'};
-    dy = [-0.10 -0.10 0.10 0.10];
-
-    text(tx(bc), ty(bc), sprintf('r = %.3f', r_vals(e)), ...
-         'Units', 'normalized', 'FontSize', 9, 'Color', 'k', ...
-         'HorizontalAlignment', ha{bc}, 'VerticalAlignment', va{bc});
-    text(tx(bc), ty(bc)+dy(bc), sprintf('n = %d', numel(x_e)), ...
-         'Units', 'normalized', 'FontSize', 8, 'Color', [0.4 0.4 0.4], ...
-         'HorizontalAlignment', ha{bc}, 'VerticalAlignment', va{bc});
-    if n_outliers(e) > 0
-        text(tx(bc), ty(bc)+2*dy(bc), sprintf('%d px outside %g–%gth pct', n_outliers(e), pct_lo_cut, pct_hi_cut), ...
-             'Units', 'normalized', 'FontSize', 7, 'Color', [0.7 0.2 0.2], ...
-             'HorizontalAlignment', ha{bc}, 'VerticalAlignment', va{bc});
-    end
-    title(sprintf('CL vs. %s', epma_labels{e}));
-    ylim([0 1]); grid on; box on;
 end
-
-sgtitle(sprintf('%s — CL vs. element maps (RMSE: %.2f px = %.2f µm)', ...
-        grain_id, RMSE_px, RMSE_um), 'FontSize', 12);
-saveas(gcf, fullfile(output_dir, [grain_id '_CL_vs_elements.png']));
 
 fprintf('\n  Pearson r summary:\n');
 fprintf('  %-8s  %8s\n', 'Element', 'r');
@@ -1357,7 +1310,6 @@ all_outputs = { ...
     cp_savefile,                                                   'Control points — CL (.mat)'; ...
     mat_file,                                                      'Pixel data (.mat)'; ...
     csv_file,                                                      'Pixel data (.csv)'; ...
-    fullfile(output_dir, [grain_id '_CL_vs_elements.png']),        'Scatter plots (PNG)'; ...
     fullfile(diagnostics_dir, [grain_id '_shift_sensitivity.png']),     'Shift sensitivity (PNG)'; ...
     fullfile(diagnostics_dir, [grain_id '_all_maps_QC.png']),           'All-maps QC figure (PNG)'; ...
     fullfile(diagnostics_dir, [grain_id '_registration_overlay.png']),  'Registration overlay (PNG)'; ...
@@ -1404,7 +1356,6 @@ fprintf('  %s_CL_registered.tif\n', grain_id);
 fprintf('  %s_CL_registered_color.tif\n', grain_id);
 fprintf('  data/%s_mask.tif\n', grain_id);
 fprintf('  data/%s_pixel_data.mat/.csv      — main analysis data\n', grain_id);
-fprintf('  %s_CL_vs_elements.png\n', grain_id);
 fprintf('  diagnostics/%s_shift_sensitivity.png\n', grain_id);
 fprintf('  diagnostics/%s_all_maps_QC.png\n\n', grain_id);
 

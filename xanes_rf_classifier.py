@@ -49,8 +49,10 @@ from sklearn.metrics import (accuracy_score, balanced_accuracy_score, f1_score,
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT    = '/Users/mstein/bin/kyanite/figs/xanes'   # file or directory of *_spot_geochemistry.csv
-OUT_DIR      = '/Users/mstein/bin/kyanite/figs/spot_analysis'
+CSV_INPUT    = '/Users/mstein/bin/kyanite/figs/data'    # file or directory of *_spot_geochemistry.csv
+OUT_DIR      = '/Users/mstein/bin/kyanite/figs/xanes_rf_classifier'   # kept separate from
+               # figs/spot_analysis/ (kyanite_spot_analysis.py's output) — a different
+               # analysis (XANES-class classifier vs. pooled scatter/pie/box/PCA figures)
 OUTPUT_LABEL = 'all_grains'   # prefix for all output files (pooled analysis; no per-grain run)
 
 ELEMENTS = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Ti_Ka', 'Mn_Ka']   # None = auto-detect (present in every input CSV)

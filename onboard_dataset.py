@@ -292,8 +292,9 @@ def main():
         for dst in skipped:
             print(f"  {dst}")
 
-    log_path = project_root / f"{grain_id}_onboarding_log.txt"
+    log_path = project_root / 'inputs' / f"{grain_id}_onboarding_log.txt"
     if not DRY_RUN:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
         write_log(log_path, grain_id, all_ops, all_warnings, DRY_RUN)
         print(f"\nLog written to {log_path}")
 

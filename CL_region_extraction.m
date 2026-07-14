@@ -80,7 +80,7 @@ set(0, 'DefaultLegendInterpreter',      'none');
 %% SECTION 1: PARAMETERS  — edit this section for each new grain / region set
 % =========================================================================
 
-grain_id = 'NA-CM-G12B7-01';
+grain_id = 'NA-GS-P84-03';
 
 % Directory containing the outputs of CL_EPMA_registration.m for this grain
 % (registered CL TIFFs and the grain mask TIFF).
@@ -103,6 +103,16 @@ use_color_display = true;
 % CL_EPMA_registration.m for this grain). All *.tif files auto-discovered.
 epma_dir = ['/Users/mstein/bin/kyanite/inputs/maps/', grain_id];
 
+% Reusable data (region polygons, pixel data, texture class raster) is
+% written into data_dir (figs/data/), alongside CL_EPMA_registration.m's own
+% data outputs, so kyanite_figures.py / kyanite_pca_rf.py find whole-grain
+% and region pixel data in one place. QC-only outputs (overlay, all-maps QC,
+% log) go in diagnostics_dir (figs/diagnostics/), matching
+% CL_EPMA_registration.m's split. output_dir itself holds only the
+% remaining true analysis-result outputs (region summary stats, texture
+% class map PNG) — kyanite_figures.py / kyanite_pca_rf.py also save their
+% region-mode figures here.
+diagnostics_dir = fullfile(input_dir, 'diagnostics');
 output_dir = '/Users/mstein/bin/kyanite/figs/regions';
 
 % --- Spatial calibration --------------------------------------------------
@@ -160,6 +170,8 @@ if classification_mode && ~restrict_to_grain_mask
 end
 
 if ~exist(output_dir, 'dir'), mkdir(output_dir); end
+if ~exist(data_dir, 'dir'), mkdir(data_dir); end
+if ~exist(diagnostics_dir, 'dir'), mkdir(diagnostics_dir); end
 
 % --- Auto-discover EPMA maps from epma_dir --------------------------------
 tif_listing = dir(fullfile(epma_dir, '*.tif'));
@@ -203,7 +215,7 @@ fprintf('Auto-discovered %d EPMA maps in: %s\n', n_elements, epma_dir);
 fprintf('=== CL Region Extraction: %s ===\n\n', grain_id);
 
 % ---- Open analysis log ---------------------------------------------------
-log_file = fullfile(output_dir, [grain_id '_region_analysis_log.txt']);
+log_file = fullfile(diagnostics_dir, [grain_id '_region_analysis_log.txt']);
 log_fid  = fopen(log_file, 'w');
 if log_fid == -1
     error('Cannot open log file for writing: %s', log_file);
@@ -237,6 +249,8 @@ lprintf('\n--- PARAMETERS ---\n');
 lprintf('  Grain ID:              %s\n', grain_id);
 lprintf('  Input directory:       %s\n', input_dir);
 lprintf('  EPMA directory:        %s\n', epma_dir);
+lprintf('  Data directory:        %s\n', data_dir);
+lprintf('  Diagnostics directory: %s\n', diagnostics_dir);
 lprintf('  Output directory:      %s\n', output_dir);
 lprintf('  Registered CL (gray):  %s\n', cl_filename);
 lprintf('  Registered CL (color): %s  (display: %s)\n', cl_color_filename, mat2str(use_color_display));
@@ -373,9 +387,9 @@ end
 % =========================================================================
 
 if classification_mode
-    regions_savefile = fullfile(output_dir, [grain_id '_texture_domains.mat']);
+    regions_savefile = fullfile(data_dir, [grain_id '_texture_domains.mat']);
 else
-    regions_savefile = fullfile(output_dir, [grain_id '_regions.mat']);
+    regions_savefile = fullfile(data_dir, [grain_id '_regions.mat']);
 end
 regions_source   = 'newly drawn';
 skip_drawing     = false;
@@ -828,9 +842,9 @@ if classification_mode
 end
 title(sprintf('%s — %d region(s)', grain_id, n_regions), 'Interpreter', 'none');
 if classification_mode
-    overlay_file = fullfile(output_dir, [grain_id '_texture_domains_overlay.png']);
+    overlay_file = fullfile(diagnostics_dir, [grain_id '_texture_domains_overlay.png']);
 else
-    overlay_file = fullfile(output_dir, [grain_id '_regions_overlay.png']);
+    overlay_file = fullfile(diagnostics_dir, [grain_id '_regions_overlay.png']);
 end
 saveas(fig_ov, overlay_file);
 fprintf('  Region overlay saved to: %s\n', overlay_file);
@@ -923,7 +937,7 @@ end
 % glob '*_pixel_data.csv' and group on 'Region'. Running classification mode
 % for a grain that already has default-mode pixel data (or vice versa) will
 % overwrite it; warn rather than silently clobber.
-mat_file = fullfile(output_dir, [grain_id '_region_pixel_data.mat']);
+mat_file = fullfile(data_dir, [grain_id '_region_pixel_data.mat']);
 if exist(mat_file, 'file')
     prior_vars = who('-file', mat_file);
     prior_is_classification = ismember('domain_classes', prior_vars);
@@ -946,7 +960,7 @@ else
 end
 fprintf('  Pixel data saved to: %s\n', mat_file);
 
-csv_file = fullfile(output_dir, [grain_id '_region_pixel_data.csv']);
+csv_file = fullfile(data_dir, [grain_id '_region_pixel_data.csv']);
 Tbl = array2table(data_matrix, 'VariableNames', col_names);
 Tbl = addvars(Tbl, all_region, 'Before', 1, 'NewVariableNames', {'Region'});
 if classification_mode
@@ -1038,9 +1052,9 @@ end
 
 sgtitle(sprintf('%s — All maps with region boundaries', grain_id), 'Interpreter', 'none');
 if classification_mode
-    qc_file = fullfile(output_dir, [grain_id '_texture_domains_all_maps_QC.png']);
+    qc_file = fullfile(diagnostics_dir, [grain_id '_texture_domains_all_maps_QC.png']);
 else
-    qc_file = fullfile(output_dir, [grain_id '_regions_all_maps_QC.png']);
+    qc_file = fullfile(diagnostics_dir, [grain_id '_regions_all_maps_QC.png']);
 end
 saveas(fig_qc, qc_file);
 fprintf('  QC figure saved to: %s\n', qc_file);
@@ -1062,7 +1076,7 @@ if classification_mode
         class_map(region_masks{r}) = class_idx;
     end
 
-    class_map_tif = fullfile(output_dir, [grain_id '_texture_class_map.tif']);
+    class_map_tif = fullfile(data_dir, [grain_id '_texture_class_map.tif']);
     imwrite(class_map, class_map_tif);
     log_file_info(log_fid, class_map_tif, 'Texture class label map (uint8 index-coded)');
     fprintf('  Texture class label map (TIFF) saved to: %s\n', class_map_tif);
@@ -1141,7 +1155,8 @@ lprintf(DIV);
 fclose(log_fid);
 
 fprintf('\n=== COMPLETE ===\n');
-fprintf('All outputs written to: %s\n', output_dir);
+fprintf('All outputs written to: %s (figures), %s (data), %s (diagnostics)\n', ...
+        output_dir, data_dir, diagnostics_dir);
 fprintf('Key files:\n');
 fprintf('  %s_region_analysis_log.txt   — comprehensive run record\n', grain_id);
 if classification_mode

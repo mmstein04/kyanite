@@ -20,9 +20,11 @@
 %      (close / min-object / fill-holes).
 %   5. Re-extract per-pixel CL + element vectors under the new mask and
 %      overwrite <grain_id>_pixel_data.csv/.mat in place.
-%   6. Regenerate the CL-vs-element scatter plots, shift-sensitivity
-%      analysis, and QC figures so every downstream figure matches the
-%      corrected mask.
+%   6. Regenerate the CL-vs-element Pearson correlations, shift-sensitivity
+%      analysis, and QC figures so every downstream figure/log matches the
+%      corrected mask. (Exploratory scatter/violin/contour/etc. figures are
+%      generated downstream by kyanite_figures.py from the pixel data CSV,
+%      not here.)
 %   7. Save a cumulative edit history (<grain_id>_mask_edits.mat) and an
 %      edit-run log.
 %
@@ -34,7 +36,6 @@
 % OUTPUTS:
 %   - data/<grain_id>_mask.tif              — overwritten with the edited mask
 %   - data/<grain_id>_pixel_data.csv / .mat — overwritten, re-extracted under new mask
-%   - <grain_id>_CL_vs_elements.png        — overwritten
 %   - diagnostics/<grain_id>_shift_sensitivity.png  — overwritten (not for publishing)
 %   - diagnostics/<grain_id>_all_maps_QC.png        — overwritten (not for publishing)
 %   - diagnostics/<grain_id>_mask_check.png         — overwritten (not for publishing)
@@ -96,10 +97,10 @@ close_radius_px = 1;    % morphological closing radius (px); 0 = disabled
 
 % --- Downstream re-derivation ----------------------------------------------
 % true (default, matches this project's convention): after saving the edited
-% mask, fully re-run pixel extraction, scatter plots, and shift-sensitivity
-% analysis so every figure in figs/ matches the corrected mask, not just the
-% CSV. Set false to touch only the mask TIFF + edit history and leave
-% pixel_data/plots for a separate manual re-run.
+% mask, fully re-run pixel extraction, Pearson correlations, and
+% shift-sensitivity analysis so every figure/log in figs/ matches the
+% corrected mask, not just the CSV. Set false to touch only the mask TIFF +
+% edit history and leave pixel_data/plots for a separate manual re-run.
 regenerate_downstream = true;
 
 % Element map normalization — must match normalize_epma used in
@@ -107,7 +108,7 @@ regenerate_downstream = true;
 % comparable to the original run.
 normalize_epma = false;
 
-% Percentile cutoffs for scatter plots / Pearson r (only used if
+% Percentile cutoffs for Pearson r (only used if
 % regenerate_downstream = true) — match the original registration run.
 pct_lo_cut =  0;
 pct_hi_cut = 99;
@@ -335,7 +336,6 @@ files_to_backup = { ...
     mask_filename,                        data_dir; ...
     [grain_id '_pixel_data.csv'],         data_dir; ...
     [grain_id '_pixel_data.mat'],         data_dir; ...
-    [grain_id '_CL_vs_elements.png'],     input_dir; ...
     [grain_id '_shift_sensitivity.png'],  diagnostics_dir; ...
     [grain_id '_all_maps_QC.png'],        diagnostics_dir; ...
     [grain_id '_mask_check.png'],         diagnostics_dir; ...
@@ -521,7 +521,7 @@ sgtitle(sprintf('%s — Mask (edited, %d px)', grain_id, n_grain_px));
 saveas(fig_check, fullfile(diagnostics_dir, [grain_id '_mask_check.png']));
 
 if ~regenerate_downstream
-    lprintf('\nregenerate_downstream = false — pixel data and scatter/shift plots NOT re-derived.\n');
+    lprintf('\nregenerate_downstream = false — pixel data, correlations, and shift plots NOT re-derived.\n');
     lprintf(DIV);
     lprintf('END OF LOG\n');
     lprintf(DIV);
@@ -574,14 +574,14 @@ lprintf('  RMSE carried forward from prior registration: %.6f px (%.4f µm)\n', 
 lprintf(SEC);
 
 % =========================================================================
-%% SECTION 8: SCATTER PLOTS — CL vs. each element
+%% SECTION 8: PEARSON CORRELATIONS — CL vs. each element
 % =========================================================================
+% Exploratory figures (scatter/violin/contour/heatmap/corrmatrix) are
+% generated downstream by kyanite_figures.py from the re-extracted pixel
+% data CSV — this section only recomputes the r/fit numbers for an
+% immediate, in-MATLAB post-edit sanity check.
 
-fprintf('\n--- REGENERATING SCATTER PLOTS ---\n');
-
-n_cols_sp = 3;
-n_rows_sp = ceil(n_elements / n_cols_sp);
-figure('Name', 'CL vs. element maps', 'Position', [100, 100, 400*n_cols_sp, 350*n_rows_sp]);
+fprintf('\n--- RECOMPUTING PEARSON CORRELATIONS ---\n');
 
 r_vals = zeros(1, n_elements);
 pfit   = zeros(n_elements, 2);
@@ -599,27 +599,9 @@ for e = 1:n_elements
     x_e = epma_px(keep, e);
     y_e = cl_px(keep);
 
-    subplot(n_rows_sp, n_cols_sp, e);
-    scatter(x_e, y_e, 8, 'filled', 'MarkerFaceAlpha', 0.08, 'MarkerFaceColor', [0.2 0.2 0.2]);
-    if normalize_epma
-        xlabel([epma_labels{e}, ' (norm.)'], 'FontSize', 10);
-    else
-        xlabel(epma_labels{e}, 'FontSize', 10);
-    end
-    ylabel('CL intensity (norm.)', 'FontSize', 10);
     pfit(e,:) = polyfit(x_e, y_e, 1);
-    xfit = linspace(min(x_e), max(x_e), 200);
-    hold on;
-    plot(xfit, polyval(pfit(e,:), xfit), 'k-', 'LineWidth', 1.5);
     r_vals(e) = corr(x_e, y_e);
-
-    text(0.05, 0.95, sprintf('r = %.3f', r_vals(e)), 'Units', 'normalized', ...
-         'FontSize', 9, 'HorizontalAlignment', 'left', 'VerticalAlignment', 'top');
-    title(sprintf('CL vs. %s', epma_labels{e}));
-    ylim([0 1]); grid on; box on;
 end
-sgtitle(sprintf('%s — CL vs. element maps (mask edited, %d edits)', grain_id, n_edits), 'FontSize', 12);
-saveas(gcf, fullfile(output_dir, [grain_id '_CL_vs_elements.png']));
 
 lprintf('\n--- PEARSON CORRELATIONS  (CL vs. element, per pixel, post-edit) ---\n');
 lprintf('  %-10s  %-12s  %-10s  %-10s\n', 'Element', 'r', 'n_used', 'n_removed');
@@ -726,7 +708,6 @@ all_outputs = { ...
     mask_path,                                                    'Grain mask (edited, 8-bit TIFF)'; ...
     mat_file,                                                      'Pixel data (.mat, re-extracted)'; ...
     csv_file,                                                      'Pixel data (.csv, re-extracted)'; ...
-    fullfile(output_dir, [grain_id '_CL_vs_elements.png']),        'Scatter plots (PNG, regenerated)'; ...
     fullfile(diagnostics_dir, [grain_id '_shift_sensitivity.png']),     'Shift sensitivity (PNG, regenerated)'; ...
     fullfile(diagnostics_dir, [grain_id '_all_maps_QC.png']),           'All-maps QC figure (PNG, regenerated)'; ...
     fullfile(diagnostics_dir, [grain_id '_mask_check.png']),       'Mask check figure (PNG, regenerated)'; ...

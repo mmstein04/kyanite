@@ -19,15 +19,19 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | Script | Language | Purpose |
 |---|---|---|
 | `onboard_dataset.py` | Python | Optional first step for a new (e.g. external collaborator's) dataset: stage a grain's arbitrarily-named raw files (CL image, element-map TIFFs, XANES classification CSV, XRF HDF5) into this project's exact file/folder conventions, driven by a per-grain YAML manifest |
+| `xanes_classification_split.py` | Python | Split a combined hand-classification CSV (`GrainID`, `Spot`, `Class`) into one `<grain_id>_pre_edge_classification.csv` per grain, matching the naming `xrf_h5_extract_spots.py` expects |
+| `xanes_plot.py` | Python | Plot each spot's XANES pre-edge µ(E) spectrum for visual Type 1/2/3 classification, with an optional automatic classifier (relative Fe²⁺/Fe³⁺ peak height) as a starting point |
 | `xrf_h5_to_tiff.py` | Python | Extract XRF element maps from a Larch/GSECARS HDF5 file; export as 32-bit float TIFFs + metadata sidecars |
 | `xrf_h5_extract_spots.py` | Python | Build a per-spot CSV: pixel + physical coordinates of XANES spot locations (`xrmmap/areas`), mean element concentrations and CL brightness over a small grain-mask-restricted circular zone around each spot, and the joined XANES pre-edge classification |
 | `CL_EPMA_registration.m` | MATLAB | Full registration + analysis pipeline (see workflow below) |
 | `CL_region_extraction.m` | MATLAB | Draw named sub-grain polygon regions on an already-registered CL image and extract per-pixel CL + element data per region (no re-registration) |
 | `CL_mask_edit.m` | MATLAB | After-the-fact touch-up of a grain mask already produced by `CL_EPMA_registration.m` (e.g. an inclusion was masked-in, or real grain was masked-out weeks earlier) — draw add/remove polygons on the already-registered CL image, then re-derive pixel data and downstream figures under the corrected mask |
+| `CL_local_regression_map.m` | MATLAB | Slide a circular window across an already-registered grain and run a per-pixel CL-vs-element linear regression inside each window, producing continuous slope/R maps that complement `CL_region_extraction.m`'s fixed polygon regions |
 | `kyanite_figures.py` | Python | Standalone figure generation from exported CSV pixel data |
 | `kyanite_pca_rf.py` | Python | PCA and cross-validated Random Forest analysis of CL vs. trace elements from whole-grain CSV pixel data; for region CSVs, instead fits one shared PCA pooled across regions (scree, loadings, PC1/PC2-by-region scatter, biplot) to test whether hand-drawn regions separate in PC space — no per-region PCA/RF/SHAP |
 | `kyanite_sample_size_convergence.py` | Python | Diagnostic: sweeps RF/SHAP over a range of pixel subsample sizes for one grain to check whether importance estimates have converged below `kyanite_pca_rf.py`'s `MAX_SAMPLES`/`SHAP_SAMPLES`, or would still change with more data |
 | `kyanite_spot_analysis.py` | Python | Batch analysis of `<grain_id>_spot_geochemistry.csv` files: XANES class distribution pie-chart grid, pooled CL-vs-element scatter plots colored by class, element-by-class box plots, PCA (PC1/PC2 scatter, scree, loadings, biplot) colored by class, and per-grain labeled spot-location maps on the registered CL image |
+| `xanes_rf_classifier.py` | Python | Cross-validated Random Forest classification of XANES pre-edge class (Type 1/2/3) from per-spot trace-element geochemistry, pooled across grains — the classification analog of `kyanite_pca_rf.py` |
 | `xrf_display.m` | MATLAB | Visualize XRF element-map TIFFs with grain mask overlay |
 | `sum_epma_maps.m` | MATLAB | Sum two or more element maps into a combined TIFF (e.g. Zr_La + Zr_Lb) |
 
@@ -37,7 +41,10 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 3. Evaluate registration quality (RMSE in pixels and µm)
 4. Build binary grain mask — methods: `otsu`, `manual`, `interactive`, `polygon`, `activecontour`
 5. Apply mask; extract per-pixel CL and element concentration vectors
-6. Scatter plot CL vs. each element; compute Pearson r
+6. Compute Pearson r and a linear fit, CL vs. each element, as an immediate
+   registration-quality check (exploratory scatter/violin/contour/etc. figures
+   are generated downstream by `kyanite_figures.py` from the exported pixel
+   data CSV, not here)
 7. Shift-sensitivity analysis to quantify alignment-error impact on correlations
 8. Write analysis log, save registered CL TIFFs (grayscale 16-bit + original color), mask TIFF, pixel data `.mat` / `.csv`
 
@@ -50,8 +57,8 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 3. Intersect each region with the grain mask (optional, default on)
 4. Extract per-pixel CL and element vectors per region into a combined long-format
    table with a `Region` column
-5. Save per-region/per-channel summary statistics and QC figures (region boundaries
-   on the CL image and on every element map)
+5. Save per-region/per-channel summary statistics (`figs/regions/`) and QC figures
+   (region boundaries on the CL image and on every element map, `figs/diagnostics/`)
 
 `classification_mode = true` switches to a different workflow: subdividing the WHOLE
 grain into non-overlapping CL textural classification domains (e.g. sector,
@@ -78,13 +85,17 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 - Produces an additional full-grain texture class label map
   (`<grain_id>_texture_class_map.tif`, a uint8 index raster in `TEXTURE_CLASSES`
   order + Unclassified, and a matching colored/legend PNG)
+- Output folders mirror default mode: reusable data (`_texture_domains.mat`,
+  `_region_pixel_data.csv`/`.mat`, `_texture_class_map.tif`) in `figs/data/`;
+  QC (`_texture_domains_overlay.png`, `_texture_domains_all_maps_QC.png`) in
+  `figs/diagnostics/`; the summary CSV and the class-map PNG in `figs/regions/`
 
 ### `CL_mask_edit.m` workflow
 1. Load the registered CL image, EPMA/XRF maps, and current grain mask already
    produced by `CL_EPMA_registration.m` for this grain — no control points,
    warping, or from-scratch mask generation here
 2. Back up every mask-dependent output file this run is about to overwrite
-   (mask TIFF, pixel data, scatter/shift-sensitivity/QC PNGs, prior edit
+   (mask TIFF, pixel data, shift-sensitivity/QC PNGs, prior edit
    history) into `mask_edit_backups/<grain_id>_<timestamp>/` before touching
    anything
 3. Interactive add/remove loop: draw a polygon, tag it add or remove, see it
@@ -97,10 +108,12 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
    `data/<grain_id>_mask.tif`
 5. `regenerate_downstream` (default `true`): re-extracts per-pixel CL +
    element vectors under the corrected mask and overwrites
-   `data/<grain_id>_pixel_data.csv`/`.mat`, then regenerates the CL-vs-element
-   scatter plots, shift-sensitivity analysis, and all-maps/mask-check QC
-   figures — so every figure in `figs/` matches the corrected mask, not just
-   the CSV. Registration-quality fields (`RMSE_px`/`RMSE_um`) are carried
+   `data/<grain_id>_pixel_data.csv`/`.mat`, then recomputes the CL-vs-element
+   Pearson correlations, shift-sensitivity analysis, and all-maps/mask-check QC
+   figures — so every figure/log in `figs/` matches the corrected mask, not just
+   the CSV. (Exploratory scatter/violin/contour/etc. figures are regenerated
+   downstream by `kyanite_figures.py` from the CSV, not by this script.)
+   Registration-quality fields (`RMSE_px`/`RMSE_um`) are carried
    forward unchanged from the prior `data/pixel_data.mat` since no re-registration
    happens here. Set `false` to touch only the mask TIFF + edit history.
 6. Saves a cumulative `data/<grain_id>_mask_edits.mat` (every add/remove polygon
@@ -130,7 +143,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   instead of the h5 file itself being touched
 - All operations are copies or symlinks of originals — nothing is moved, renamed, or
   modified in place
-- Writes `<grain_id>_onboarding_log.txt` (skipped in dry-run mode) recording every
+- Writes `inputs/<grain_id>_onboarding_log.txt` (skipped in dry-run mode) recording every
   planned source → destination mapping and warning, for audit purposes
 
 ### `xrf_h5_to_tiff.py` details
@@ -175,9 +188,9 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   with exported XANES spot CSVs or `GRAIN_ID` (e.g. h5 area `LLF6-Area2-spot01` vs.
   grain `LLF6-01`) — everything joins on the trailing spot number + `GRAIN_ID`, not
   the h5 area's own name
-- Note: the 8 real `*_spot_geochemistry.csv` files currently on disk live in
-  `figs/xanes/`, not directly in `figs/` as `OUTPUT_CSV`'s own default implies —
-  `kyanite_spot_analysis.py`'s `CSV_INPUT` default points at the real location
+- `OUTPUT_CSV` defaults to `figs/data/<GRAIN_ID>_spot_geochemistry.csv` — reusable
+  data, read back by both `kyanite_spot_analysis.py` and `xanes_rf_classifier.py`,
+  whose `CSV_INPUT` defaults point at the same location
 
 ### `kyanite_spot_analysis.py` details
 - Input: `<grain_id>_spot_geochemistry.csv` files (see above), one per grain;
@@ -243,16 +256,46 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `<grain_id>_analysis_log.txt`, `<grain_id>_all_maps_QC.png`,
   `<grain_id>_mask_image_registration.png`, `<grain_id>_registration_overlay.png`,
   `<grain_id>_shift_sensitivity.png`, `<grain_id>_mask_check.png`,
-  `<grain_id>_mask_edit_diff.png`, `<grain_id>_mask_edit_log.txt`
+  `<grain_id>_mask_edit_diff.png`, `<grain_id>_mask_edit_log.txt`. Same idea
+  for `CL_region_extraction.m`'s region-mode QC: `<grain_id>_region_analysis_log.txt`,
+  `<grain_id>_regions_overlay.png`, `<grain_id>_regions_all_maps_QC.png` (or the
+  `_texture_domains_*` equivalents in `classification_mode`). Same idea again for
+  `CL_local_regression_map.m`: `<grain_id>_local_regression_analysis_log.txt`,
+  `<grain_id>_local_regression_slope_QC.png`, `<grain_id>_local_regression_R_QC.png`,
+  `<grain_id>_local_regression_n_map.png`
+- Whole-grain analysis figures from `kyanite_figures.py` and `kyanite_pca_rf.py`
+  (`WHOLE_GRAIN_OUTPUT_DIR`, default `figs/whole_grain/`) and region-mode
+  figures from the same two scripts plus `CL_region_extraction.m`'s own
+  region-summary/texture-class-map outputs (`REGION_OUTPUT_DIR`/`output_dir`,
+  default `figs/regions/`) are kept separate from `figs/data/` and
+  `figs/diagnostics/` — output location for the two Python scripts is an
+  explicit parameter, independent of wherever `CSV_INPUT` happens to point.
+  Same principle for the other analysis-family folders: `kyanite_sample_size_convergence.py`
+  → `figs/sample_size_convergence/`, `CL_local_regression_map.m`'s one true result
+  figure (`<grain_id>_local_regression_R_Cr_vs_CL.png`) → `figs/local_regression/`,
+  `kyanite_spot_analysis.py` → `figs/spot_analysis/`, `xanes_rf_classifier.py` →
+  `figs/xanes_rf_classifier/` (kept separate from `figs/spot_analysis/` even though
+  both pool the same per-spot CSVs, since they're different analyses), `xanes_plot.py`
+  → `figs/xanes/`
 - Reusable data files read back in by other scripts go in `figs/data/`
   rather than directly in `figs/`: grain mask (`<grain_id>_mask.tif`), pixel
   data exports (`<grain_id>_pixel_data.csv` and `.mat`), control-point MATs
   (`<grain_id>_controlpoints.mat`, `<grain_id>_mask_image_controlpoints.mat`),
-  and `CL_mask_edit.m`'s cumulative edit history (`<grain_id>_mask_edits.mat`)
-- Region polygons (reusable): `<grain_id>_regions.mat`
-- Region pixel data exports: `<grain_id>_region_pixel_data.csv` and `.mat` (long-format, `Region` column)
-- Region summary stats: `<grain_id>_region_summary.csv`
-- Region analysis log: `<grain_id>_region_analysis_log.txt`
+  `CL_mask_edit.m`'s cumulative edit history (`<grain_id>_mask_edits.mat`),
+  region polygons (`<grain_id>_regions.mat`), region pixel data exports
+  (`<grain_id>_region_pixel_data.csv` and `.mat`, long-format, `Region`
+  column), `CL_local_regression_map.m`'s slope/R/n maps (`<grain_id>_local_regression.mat`)
+  and long-format table (`<grain_id>_local_regression_pixel_data.csv`), and
+  per-spot geochemistry exports (`<grain_id>_spot_geochemistry.csv`, read by both
+  `kyanite_spot_analysis.py` and `xanes_rf_classifier.py`) — whole-grain and region
+  pixel-data CSVs are colocated here so `kyanite_figures.py`/`kyanite_pca_rf.py`
+  can point `CSV_INPUT` at one directory and pick up both (routed by the presence
+  of a `Region` column,
+  not by folder)
+- Region summary stats: `<grain_id>_region_summary.csv` (in `figs/regions/`,
+  alongside that grain's region figures — not reloaded by any script, so it
+  doesn't live in `figs/data/`)
+- Region analysis log: `<grain_id>_region_analysis_log.txt` (in `figs/diagnostics/`)
 - Texture classification mode (`classification_mode = true` in `CL_region_extraction.m`)
   outputs, per grain: `<grain_id>_texture_domains.mat` (domain polygons + classes,
   reusable), `<grain_id>_region_pixel_data.csv`/`.mat` (same filename as default mode —
@@ -265,16 +308,28 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `diagnostics/<grain_id>_mask_edit_log.txt` (per-run record); pre-edit copies of every
   file `CL_mask_edit.m` is about to overwrite are saved to
   `figs/mask_edit_backups/<grain_id>_<timestamp>/` before each run
+- Local regression outputs (`CL_local_regression_map.m`): `data/<grain_id>_local_regression.mat`,
+  `data/<grain_id>_local_regression_pixel_data.csv`, `diagnostics/<grain_id>_local_regression_analysis_log.txt`,
+  `diagnostics/<grain_id>_local_regression_{slope,R}_QC.png`, `diagnostics/<grain_id>_local_regression_n_map.png`,
+  and the one true result figure, `<grain_id>_local_regression_R_Cr_vs_CL.png`, directly in `figs/local_regression/`
 - Spot coordinate exports: `<grain_id>_spot_coordinates.csv`
-- Spot geochemistry/CL/XANES-class exports: `figs/<grain_id>_spot_geochemistry.csv`
-  (currently on disk in `figs/xanes/` for all 8 processed grains)
+- Spot geochemistry/CL/XANES-class exports: `figs/data/<grain_id>_spot_geochemistry.csv`
+  (reusable — read back by `kyanite_spot_analysis.py` and `xanes_rf_classifier.py`)
 - Spot analysis figures saved to `figs/spot_analysis/`: `xanes_class_pie_grid.png`,
   `CL_vs_<element>_scatter.png`, `<element>_by_class_boxplot.png`,
   `pca_pc1_pc2_scatter.png`, `pca_scree.png`, `pca_loadings_pc1_pc2.png`,
   `pca_biplot.png`, `<grain_id>_spot_map.png`
+- XANES pre-edge classification figures saved to `figs/xanes/` (`xanes_plot.py`):
+  `<grain_id>_pre_edge_grid.png`, `<grain_id>_pre_edge_overlay.png`, `<grain_id>_xanes_overlay.png`
+- XANES RF classifier outputs saved to `figs/xanes_rf_classifier/` (`xanes_rf_classifier.py`,
+  all prefixed with `OUTPUT_LABEL`, default `all_grains_`): `_confusion_matrix.png`, `_importance.csv`/`.png`,
+  `_log.txt`, `_predictions.csv`
+- Sample-size convergence diagnostic outputs saved to `figs/sample_size_convergence/`
+  (`kyanite_sample_size_convergence.py`): `<label>_convergence_raw.csv`, `<label>_convergence_{rmse,r2,
+  perm_importance,shap_importance}.png`, `<label>_convergence_log.txt`
 - Onboarding manifest (per new dataset, hand-written from `dataset_manifest.example.yaml`):
   `dataset_manifest.yaml` (or any name — set in `onboard_dataset.py`'s `MANIFEST_FILE`)
-- Onboarding audit log: `<grain_id>_onboarding_log.txt` (written by `onboard_dataset.py`,
+- Onboarding audit log: `inputs/<grain_id>_onboarding_log.txt` (written by `onboard_dataset.py`,
   only on a non-dry-run execution)
 
 ## Key parameters (set per-grain at top of each script)
@@ -296,7 +351,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 - `epma_ref_file` — reference map for control point picking (choose highest contrast)
 - `epma_pixel_um` — pixel size in µm (spatial calibration)
 - `mask_method` — grain segmentation method
-- `pct_lo_cut` / `pct_hi_cut` — outlier percentile bounds for scatter plots
+- `pct_lo_cut` / `pct_hi_cut` — outlier percentile bounds for the Pearson r/fit computation
 
 **`CL_region_extraction.m`**
 - `grain_id` — must match a grain already processed by `CL_EPMA_registration.m`
@@ -322,8 +377,17 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 - `close_radius_px` / `min_object_px` / `fill_holes` — post-edit mask cleanup,
   same knobs as `CL_EPMA_registration.m`'s `SECTION 5`
 - `regenerate_downstream` — `true` (default): re-extract pixel data and
-  regenerate scatter/shift-sensitivity/QC figures after saving the edited mask;
-  `false`: touch only the mask TIFF + edit history
+  recompute Pearson correlations/shift-sensitivity/QC figures after saving the
+  edited mask; `false`: touch only the mask TIFF + edit history
+
+**`CL_local_regression_map.m`**
+- `grain_id` — must match a grain already processed by `CL_EPMA_registration.m`
+- `input_dir` — folder holding that grain's registered CL TIFFs + mask TIFF
+- `epma_dir` — same EPMA/XRF map folder used during registration
+- `window_radius_um` — physical radius of the circular regression window;
+  `min_window_px` (derived, half the disk area by default) — minimum in-mask
+  pixels required inside a window before a regression is computed there
+- `normalize_epma` — match the value used in `CL_EPMA_registration.m` for comparable values
 
 **`xrf_h5_to_tiff.py`**
 - `H5_FILE` — raw XRF HDF5 file, default location `inputs/xrf/`
@@ -337,7 +401,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   a warning is printed if `GRAIN_ID` isn't a substring of `H5_FILE`'s filename
 - `FIGS_DIR`, `CLASSIFICATION_DIR` — where to look up the mask/CL TIFFs and classification CSV
   (default `inputs/xanes_classification/`)
-- `OUTPUT_CSV` — defaults to `figs/<GRAIN_ID>_spot_geochemistry.csv`; set to `None` for console-only
+- `OUTPUT_CSV` — defaults to `figs/data/<GRAIN_ID>_spot_geochemistry.csv`; set to `None` for console-only
 - `NAME_FILTER` — regex to select which `xrmmap/areas` entries count as spots (default `'spot'`)
 - `ZONE_RADIUS_UM` — physical radius (µm) of the circular sampling zone around each spot
 - `ELEMENTS` / `EXCLUDE_ROIS` — element ROIs to extract (`None` = all except known scaler channels)
@@ -345,11 +409,17 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   exported maps, for comparable units
 
 **`kyanite_figures.py`**
-- `CSV_FILE`, `ELEMENT`, `PLOT_TYPE` (`scatter`, `violin`, `boxplot`, or `all`)
+- `CSV_INPUT`, `ELEMENTS`, `PLOT_TYPE` (`scatter`, `violin`, `boxplot`, `contour`,
+  `heatmap`, `corrmatrix`, `all`, or a list of these)
+- `WHOLE_GRAIN_OUTPUT_DIR` / `REGION_OUTPUT_DIR` — where figures are saved
+  (default `figs/whole_grain/` / `figs/regions/`), independent of `CSV_INPUT`
 - `N_BINS` / `BIN_EDGES`, `PCT_LO` / `PCT_HI`
 
 **`kyanite_pca_rf.py`**
 - `CSV_INPUT`, `ELEMENTS` — file/directory and columns to include (defaults to all element columns)
+- `WHOLE_GRAIN_OUTPUT_DIR` / `REGION_OUTPUT_DIR` — where output (figures,
+  tables, logs) is saved (default `figs/whole_grain/` / `figs/regions/`),
+  independent of `CSV_INPUT`
 - `ANALYSES` — `pca`, `rf`, `shap`, `all`, or a list of these — for whole-grain CSVs.
   Region CSVs only ever run the pooled region-PCA analysis below (skipped entirely,
   with a warning, if `'pca'` isn't in `ANALYSES`); `rf`/`shap` never run per-region
@@ -382,6 +452,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 
 **`kyanite_sample_size_convergence.py`**
 - `CSV_INPUT` — a single grain's `*_pixel_data.csv` (not batch)
+- `OUTPUT_DIR` — where output is saved (default `figs/sample_size_convergence/`), independent of `CSV_INPUT`
 - `SAMPLE_SIZES`, `N_REPEATS` — sizes to sweep and independent random subsamples per size; the true full-grain pixel count is always appended as the last point
 - `MAX_DEPTH` — caps RF tree depth so TreeSHAP stays tractable at large sample sizes (unrestricted depth at 300k+ px made a single `shap_values()` call ~60s vs. ~2s capped) and keeps model complexity comparable across the sweep
 - `SHAP_EXPLAIN_SAMPLES` — cap on held-out points explained by SHAP per repeat, so SHAP cost doesn't grow with sample size
@@ -389,7 +460,8 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 - Output: importance/RMSE/R2 vs. sample size plots with repeat-to-repeat spread as a shaded band, raw results CSV, and a log noting the convergence size per element/metric
 
 **`kyanite_spot_analysis.py`**
-- `CSV_INPUT` — file/directory of `*_spot_geochemistry.csv` (defaults to `figs/xanes/`)
+- `CSV_INPUT` — file/directory of `*_spot_geochemistry.csv` (defaults to `figs/data/`,
+  where `xrf_h5_extract_spots.py` writes it as reusable data)
 - `FIGS_DIR`, `OUT_DIR` — where to find `<grain_id>_CL_registered.tif` / save figures
 - `ANALYSES` — `pie`, `scatter`, `box`, `map`, `pca`, `all`, or a list of these
 - `SCATTER_ELEMENTS` — element columns for the CL-vs-element and by-class box plots (`None` = auto-detect all)
@@ -398,6 +470,29 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 - `PCA_N_PCS_SCREE`, `PCA_LOADING_THRESHOLD` — how many PCs the scree plot shows (`None` = all), and
   the `|loading|` cutoff highlighted on the PC1/PC2 loadings bars
 - `CATEGORY_ORDER` / `CATEGORY_COLORS` — fixed XANES class order/coloring, shared across all figures
+
+**`xanes_rf_classifier.py`**
+- `CSV_INPUT` — file/directory of `*_spot_geochemistry.csv` (defaults to `figs/data/`, same as `kyanite_spot_analysis.py`)
+- `OUT_DIR` — default `figs/xanes_rf_classifier/`, kept separate from `kyanite_spot_analysis.py`'s
+  `figs/spot_analysis/` since it's a different analysis (classifier vs. pooled scatter/pie/box/PCA figures)
+- `OUTPUT_LABEL` — filename prefix for all outputs (pooled analysis; no per-grain run)
+- `ELEMENTS` — element list restricted to columns present in *every* input CSV (`None` = auto-detect)
+- `CATEGORY_ORDER` — fixed XANES class order, `'Bad data'`/NaN excluded (matches `kyanite_spot_analysis.py`)
+- `CV_STRATEGY` — `'grouped'` (default, `StratifiedGroupKFold` by `grain_id`: no grain's spots span
+  train/test) or `'stratified'` (`StratifiedKFold` ignoring grain identity)
+
+**`xanes_plot.py`**
+- `XANES_INPUT` — file/directory of raw per-spot XANES spectra (`inputs/xanes/<grain_id>_spotNN.csv`)
+- `OUT_DIR` — default `figs/xanes/`
+- `CLASSIFY` — off by default (automatic classification isn't reliable enough across all grains yet);
+  when enabled, classifies each spot's pre-edge doublet by relative Fe²⁺/Fe³⁺ peak height (see script
+  header for the full method) as a starting point for hand classification, writing a CSV in the same
+  `<grain_id>_pre_edge_classification.csv` convention as `xanes_classification_split.py`
+
+**`xanes_classification_split.py`**
+- `INPUT_CSV` — combined hand-classification CSV (`GrainID`, `Spot`, `Class` columns)
+- `OUTPUT_DIR` — default `inputs/xanes_classification/`, matching where `xrf_h5_extract_spots.py` looks
+  for `<grain_id>_pre_edge_classification.csv`
 
 ## Requirements
 - MATLAB with Image Processing Toolbox (for `cpselect`, `imwarp`, `imread`, etc.)

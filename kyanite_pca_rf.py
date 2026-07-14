@@ -38,11 +38,12 @@
 #     meaningful question region-by-region here.
 #
 # CSV_INPUT may be a single CSV file or a directory; all *_pixel_data.csv
-# files found in a directory are processed. Whole-grain CSVs live in
-# figs/data/ and region CSVs in figs/regions/ by default, so pointing
-# CSV_INPUT at one or the other only picks up that kind — but the glob would
-# also match *_region_pixel_data.csv if the two were ever mixed into one
-# directory, since it shares the same suffix.
+# files found in a directory are processed. Whole-grain and region CSVs both
+# live in figs/data/ — the 'Region' column (checked after loading, not the
+# filename) decides which code path a given file takes, so pointing
+# CSV_INPUT at figs/data/ processes both kinds in one run. Output (PCA/RF/
+# SHAP figures, tables, and logs) is saved to WHOLE_GRAIN_OUTPUT_DIR /
+# REGION_OUTPUT_DIR below, independent of wherever CSV_INPUT pointed.
 # =============================================================================
 
 import numpy as np
@@ -66,6 +67,14 @@ import shap
 
 CSV_INPUT = '/Users/mstein/bin/kyanite/figs/regions/NA-GS-P84-03_region_pixel_data.csv'   # file or directory
 ELEMENTS  = None      # list of CSV column names to include; None = all columns except CL/Region
+
+# Where output (figures, tables, logs) is saved — independent of CSV_INPUT,
+# so pointing CSV_INPUT at figs/data/ (where the pixel-data CSVs actually
+# live) never dumps results in among the reusable data files. Whole-grain
+# CSVs' output goes to WHOLE_GRAIN_OUTPUT_DIR; region CSVs' (has a 'Region'
+# column) to REGION_OUTPUT_DIR. Both are created if missing.
+WHOLE_GRAIN_OUTPUT_DIR = '/Users/mstein/bin/kyanite/figs/whole_grain'
+REGION_OUTPUT_DIR      = '/Users/mstein/bin/kyanite/figs/regions'
 
 ANALYSES = 'pca'   # 'pca', 'rf', 'shap', 'all', or a list of these
 
@@ -872,7 +881,8 @@ def analyze_region_pca(df, elements, grain_id, out_dir, csv_path, missing=()):
 for csv_path in csv_files:
     df = pd.read_csv(csv_path)
     region_mode = 'Region' in df.columns
-    out_dir = csv_path.parent
+    out_dir = Path(REGION_OUTPUT_DIR) if region_mode else Path(WHOLE_GRAIN_OUTPUT_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     exclude = {'CL', 'Region', 'DomainID'}
     elements = ELEMENTS or [c for c in df.columns if c not in exclude]
