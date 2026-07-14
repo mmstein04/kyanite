@@ -716,11 +716,16 @@ end
 
 function cmap = diverging_cmap(n)
 % Blue-white-red diverging colormap, built by linear RGB interpolation.
-% Avoids a Bioinformatics Toolbox dependency (redbluecmap).
+% Avoids a Bioinformatics Toolbox dependency (redbluecmap). Anchor colors
+% are matplotlib's 'RdBu_r' at t=0/0.5/1 (see kyanite_palette.py's
+% DIVERGING_CMAP / CLAUDE.md's "Color conventions" section) — every signed,
+% zero-centered quantity in this project (correlation r, local-regression
+% slope/R here) should read the same way whether it's plotted in MATLAB or
+% Python.
     control_pos = [0, 0.5, 1];
-    control_rgb = [0.15 0.25 0.65;    % blue
-                   1.00 1.00 1.00;    % white
-                   0.70 0.10 0.15];   % red
+    control_rgb = [0.0196 0.1882 0.3804;   % blue  #053061
+                   0.9686 0.9647 0.9647;   % white #F7F6F6
+                   0.4039 0.0000 0.1216];  % red   #67001F
     t = linspace(0, 1, n)';
     cmap = [interp1(control_pos, control_rgb(:,1), t, 'linear'), ...
             interp1(control_pos, control_rgb(:,2), t, 'linear'), ...

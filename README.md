@@ -56,6 +56,9 @@ kyanite/
 ├── xanes_rf_classifier.py             Step 8.5 — RF classifying XANES class from chemistry
 ├── sum_epma_maps.m                    utility — sum element-line maps (e.g. Zr_La + Zr_Lb)
 ├── xrf_display.m                      utility — visualize element/ratio maps with mask overlay
+├── kyanite_palette.py                 shared colors (element/region/category/colormap
+│                                      conventions) — imported by the Python scripts above;
+│                                      the MATLAB scripts keep local copies of the same values
 │
 ├── inputs/                            everything the pipeline reads as input
 │   ├── xrf/                             raw synchrotron XRF scans: <grain_id>_xrf.h5
@@ -371,6 +374,22 @@ Steps 3–7:
 6. If XANES spectra are also available for spots on this grain, run that
    track in parallel (Step 8 above) and combine with the rest at the
    `kyanite_spot_analysis.py`/`xanes_rf_classifier.py` stage.
+
+## Color conventions
+
+Every figure-generating script draws from one canonical color spec, so the
+same element, region, or XANES class renders in the same color no matter
+which grain or script produced the figure — this is what makes it possible
+to flip between two grains' figures and compare them directly, rather than
+each grain's figures using whatever colors happened to fall out that run.
+Python scripts import the spec from `kyanite_palette.py`; the MATLAB
+scripts carry local functions with the identical values (MATLAB can't
+import a Python module). See `CLAUDE.md`'s "Color conventions" section for
+the full breakdown — briefly: a fixed color per core element (Cr/Fe/Ti/V/Mn),
+a fixed color per XANES class (Type 1/2/3), regions colored deterministically
+by sorted name (there's no fixed region vocabulary — today's names are
+generic `roi_1`/`roi_2`/...), and one canonical diverging/sequential
+colormap for signed and continuous-intensity quantities respectively.
 
 ## Common pitfalls
 

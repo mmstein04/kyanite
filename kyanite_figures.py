@@ -47,6 +47,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 from scipy.stats import gaussian_kde
+from kyanite_palette import BLUE, ORANG, DIVERGING_CMAP, SEQUENTIAL_CMAP, region_colors
 
 # =============================================================================
 # PARAMETERS — edit this section for each run
@@ -67,7 +68,7 @@ REGION_OUTPUT_DIR      = '/Users/mstein/bin/kyanite/figs/regions'
 # 'corrmatrix' ignores the per-element looping above and instead builds one
 # grid per grain (or per region) from every ordered pair of elements in
 # ELEMENTS — set ELEMENTS to the full list of columns to compare (needs >=2).
-CORRMATRIX_CMAP = 'RdBu_r'   # diverging colormap, centered at r = 0
+CORRMATRIX_CMAP = DIVERGING_CMAP   # diverging colormap, centered at r = 0 (see kyanite_palette.py)
 
 # A ratio's highlight figure (see plot_element_highlights) requires beating
 # both raw component elements' |r| AND clearing this absolute floor, so
@@ -102,9 +103,6 @@ PCT_HI = 99
 SAVE_FIG   = True      # False to display only
 SHOW_TITLE = True      # True to add a grain/element/plot-type title
 
-BLUE  = '#3B9BDD'
-ORANG = '#D85B30'
-
 # Region CSVs only: also draw each region's points, colored by region, on
 # top of the whole grain's gray CL-vs-element scatter (one figure per
 # element). Requires 'scatter' in PLOT_TYPE and the companion whole-grain
@@ -116,8 +114,6 @@ REGION_HIGHLIGHT_ON_WHOLE_GRAIN = True
 # figs/data/, since whole-grain and region CSVs are colocated there by
 # default).
 WHOLE_GRAIN_DATA_DIR = None
-
-REGION_PALETTE = 'tab10'   # qualitative colormap for region-highlight figures
 
 # Region CSVs only: for the plot types listed in AXIS_MATCH_PLOT_TYPES, give
 # every region's subplot in the *_<pt>_by_region.png small-multiples figure
@@ -284,7 +280,7 @@ def plot_heatmap(ax, x, y, element):
     # Same KDE field as 'contour', filled with many levels instead of drawn
     # as lines over a scatter — a smooth density heatmap with a colorbar.
     xx, yy, zz = kde_grid(x, y)
-    cs = ax.contourf(xx, yy, zz, levels=HEATMAP_LEVELS, cmap='inferno')
+    cs = ax.contourf(xx, yy, zz, levels=HEATMAP_LEVELS, cmap=SEQUENTIAL_CMAP)
     ax.figure.colorbar(cs, ax=ax, label='density')
     add_fit_and_r(ax, x, y, line_color='c', text_color='white', text_bg='black')
     ax.set_xlabel(element)
@@ -296,9 +292,9 @@ def plot_region_highlight(ax, x_all, y_all, region_xy, element):
     # on top, colored — the region points are already a subset of the gray
     # cloud, so no exact pixel-level join is needed to get the right picture.
     ax.scatter(x_all, y_all, s=4, alpha=0.05, color='0.6', linewidths=0, zorder=1)
-    palette = sns.color_palette(REGION_PALETTE, n_colors=len(region_xy))
-    for (region, (x_r, y_r)), color in zip(region_xy.items(), palette):
-        ax.scatter(x_r, y_r, s=6, alpha=0.35, color=color, linewidths=0,
+    colors = region_colors(region_xy.keys())
+    for region, (x_r, y_r) in region_xy.items():
+        ax.scatter(x_r, y_r, s=6, alpha=0.35, color=colors[region], linewidths=0,
                    zorder=2, label=f'{region} (n={len(x_r):,})')
     ax.legend(loc='best', fontsize=7, markerscale=2, framealpha=0.8)
     ax.set_xlabel(element)

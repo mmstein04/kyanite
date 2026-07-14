@@ -58,6 +58,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter, find_peaks
 from pathlib import Path
+from kyanite_palette import BLUE, GREY, CATEGORY_COLORS as _SHARED_CATEGORY_COLORS
 
 # =============================================================================
 # PARAMETERS — edit this section for each run
@@ -113,12 +114,11 @@ MIN_SCALE_ABS = 1e-6   # flag 'zero_scale' if peak-to-trough scale below this
 OUTLIER_MAD_K = 6.0     # flag 'intensity_outlier' if robust z-score of mean pre-edge
                         # intensity (vs. other spots in the sample) exceeds this many MADs
 
-CATEGORY_COLORS = {
-    'Type 1': '#D85B30',
-    'Type 2': '#4C9F70',
-    'Type 3': '#7A5195',
-    'Ambiguous': '#999999',
-}
+# Type 1/2/3 colors come from kyanite_palette (shared with
+# kyanite_spot_analysis.py's CATEGORY_COLORS, which keys its own grey
+# fallback 'Bad data' instead of 'Ambiguous' — see CLAUDE.md's "Color
+# conventions" section).
+CATEGORY_COLORS = {**_SHARED_CATEGORY_COLORS, 'Ambiguous': GREY}
 
 SPOT_NAME_RE = re.compile(r'^(.*?)[-_]spot\d+', re.IGNORECASE)
 
@@ -374,7 +374,7 @@ def plot_small_multiples(sample_id, spots, window, results=None):
 
     for i, (ax, (spot_id, energy, norm)) in enumerate(zip(axes, spots)):
         keep = window_mask(energy, window)
-        ax.plot(energy[keep], norm[keep], color='#3B9BDD', lw=1, zorder=1)
+        ax.plot(energy[keep], norm[keep], color=BLUE, lw=1, zorder=1)
         if EDGE_ENERGY is not None:
             ax.axvline(EDGE_ENERGY, color='0.6', ls='--', lw=0.6, zorder=0)
         plot_pre_edge_refs(ax, label=False)

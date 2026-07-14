@@ -1199,8 +1199,21 @@ for s = 1:n_shifts
     end
 end
 
+% Fixed element -> color (same canonical values as kyanite_palette.py's
+% ELEMENT_COLORS, so e.g. Cr_Ka is the same color here as in any Python
+% figure that overlays elements by color) rather than MATLAB's default
+% line-color cycling, which would otherwise depend on this grain's own
+% discovered element order/count.
+element_color_matrix = zeros(n_elements, 3);
+element_color_map = element_line_colors(epma_labels);
+for e = 1:n_elements
+    element_color_matrix(e,:) = element_color_map(epma_labels{e});
+end
+
 figure('Name', 'Shift sensitivity', 'Position', [100 100 900 400]);
 subplot(1,2,1);
+set(gca, 'ColorOrder', element_color_matrix);
+hold on;
 plot(shift_range, r_shift_x, '-', 'MarkerSize', 4, 'LineWidth', 1.5);
 xline(0, 'k--', 'LineWidth', 1);
 xlabel('X shift (pixels)'); ylabel('Pearson r');
@@ -1208,6 +1221,8 @@ legend(epma_labels, 'Location', 'best', 'FontSize', 8);
 title('Sensitivity to X-shift'); grid on;
 
 subplot(1,2,2);
+set(gca, 'ColorOrder', element_color_matrix);
+hold on;
 plot(shift_range, r_shift_y, '-', 'MarkerSize', 4, 'LineWidth', 1.5);
 xline(0, 'k--', 'LineWidth', 1);
 xlabel('Y shift (pixels)'); ylabel('Pearson r');
@@ -1362,6 +1377,38 @@ fprintf('  diagnostics/%s_all_maps_QC.png\n\n', grain_id);
 % =========================================================================
 %% LOCAL FUNCTIONS
 % =========================================================================
+
+function color_map = element_line_colors(labels)
+% Fixed element/line name -> RGB triple, stable across every script and
+% grain — canonical values duplicated from kyanite_palette.py's
+% ELEMENT_COLORS (Okabe-Ito colorblind-safe set; see CLAUDE.md's "Color
+% conventions" section). Any name outside the fixed 5 falls back to the two
+% extra Okabe-Ito colors below, assigned by sorted order (stable within one
+% call, e.g. one grain's shift-sensitivity plot).
+    fixed_names  = {'Cr_Ka', 'Fe_Ka', 'Ti_Ka', 'V_Ka', 'Mn_Ka'};
+    fixed_colors = [0.902 0.624 0.000;    % Cr_Ka  #E69F00
+                     0.337 0.706 0.914;   % Fe_Ka  #56B4E9
+                     0.000 0.620 0.451;   % Ti_Ka  #009E73
+                     0.941 0.894 0.259;   % V_Ka   #F0E442
+                     0.800 0.475 0.655];  % Mn_Ka  #CC79A7
+    extra_fallback = [0.000 0.447 0.698;    % #0072B2
+                       0.835 0.369 0.000];  % #D55E00
+
+    color_map = containers.Map();
+    extras = {};
+    for i = 1:numel(labels)
+        idx = find(strcmp(fixed_names, labels{i}), 1);
+        if ~isempty(idx)
+            color_map(labels{i}) = fixed_colors(idx, :);
+        elseif ~any(strcmp(extras, labels{i}))
+            extras{end+1} = labels{i}; %#ok<AGROW>
+        end
+    end
+    extras = sort(extras);
+    for i = 1:numel(extras)
+        color_map(extras{i}) = extra_fallback(mod(i-1, size(extra_fallback,1)) + 1, :);
+    end
+end
 
 function img_norm = normalize_image(img_raw)
 % Accepts any bit-depth image and returns double in [0, 1].

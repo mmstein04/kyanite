@@ -32,6 +32,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import mean_squared_error, r2_score
 import shap
+from kyanite_palette import BLUE, ORANG, element_colors
 
 # =============================================================================
 # PARAMETERS — edit this section for each run
@@ -76,10 +77,6 @@ RANDOM_STATE         = 42
 
 SAVE_FIG = True
 SAVE_CSV = True
-
-BLUE  = '#3B9BDD'
-ORANG = '#D85B30'
-COLORS = ['#3B9BDD', '#D85B30', '#4C9F70', '#9B5DE5', '#F2B134', '#EF476F', '#118AB2']
 
 # =============================================================================
 # LOAD + CLEAN
@@ -249,9 +246,10 @@ def plot_metric_vs_size(mean, std, ylabel, title):
 
 def plot_importance_vs_size(prefix, ylabel, title):
     fig, ax = plt.subplots(figsize=(8, 5))
-    for i, e in enumerate(kept):
+    colors = element_colors(kept)
+    for e in kept:
         mean, std = summarize(f'{prefix}_{e}')
-        color = COLORS[i % len(COLORS)]
+        color = colors[e]
         ax.plot(mean.index, mean.values, 'o-', color=color, lw=1.5, label=e)
         ax.fill_between(mean.index, mean.values - std.values, mean.values + std.values,
                          color=color, alpha=0.2)

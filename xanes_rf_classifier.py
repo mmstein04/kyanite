@@ -44,6 +44,7 @@ from sklearn.model_selection import StratifiedKFold, StratifiedGroupKFold
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import (accuracy_score, balanced_accuracy_score, f1_score,
                               classification_report, confusion_matrix)
+from kyanite_palette import BLUE, ORANG, CATEGORY_ORDER
 
 # =============================================================================
 # PARAMETERS — edit this section for each run
@@ -58,7 +59,7 @@ OUTPUT_LABEL = 'all_grains'   # prefix for all output files (pooled analysis; no
 ELEMENTS = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Ti_Ka', 'Mn_Ka']   # None = auto-detect (present in every input CSV)
 
 # --- Target / class filtering ---
-CATEGORY_ORDER = ['Type 1', 'Type 2', 'Type 3']   # 'Bad data'/NaN excluded, matches kyanite_spot_analysis.py
+# CATEGORY_ORDER (imported from kyanite_palette) excludes 'Bad data'/NaN, matches kyanite_spot_analysis.py
 
 # --- Data cleaning (same semantics as kyanite_pca_rf.py) ---
 BELOW_DETECTION          = None   # values <= this are treated as below detection limit; None to disable
@@ -83,9 +84,6 @@ IMPORTANCE_SIG_RATIO = 1.0   # element flagged "significant" if mean/std of impo
 SAVE_FIG   = True
 SAVE_CSV   = True
 SHOW_TITLE = True
-
-BLUE  = '#3B9BDD'
-ORANG = '#D85B30'
 
 # Non-element columns from xrf_h5_extract_spots.py's schema (same list as
 # kyanite_spot_analysis.py) — everything else in a spot CSV is an element column.

@@ -39,6 +39,8 @@ from pathlib import Path
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from scipy.spatial import ConvexHull, QhullError
+from kyanite_palette import (BLUE, ORANG, GREY, CATEGORY_ORDER, element_colors as _element_colors,
+                              CATEGORY_COLORS as _SHARED_CATEGORY_COLORS)
 
 # =============================================================================
 # PARAMETERS — edit this section for each run
@@ -72,15 +74,13 @@ PCA_CLUSTER_ALPHA    = 0.12   # hull fill alpha (edge is drawn solid at full cla
 SAVE_FIG   = True
 SHOW_TITLE = True
 
-# Fixed pie-slice order/coloring, so every grain's pie is comparable at a glance.
-CATEGORY_ORDER = ['Type 1', 'Type 2', 'Type 3']
-CATEGORY_COLORS = {
-    'Type 1': '#D85B30',
-    'Type 2': '#4C9F70',
-    'Type 3': '#7A5195',
-    'Bad data': '#999999',
-}
-GREY = '#999999'   # NaN / unmatched category_label renders identically to 'Bad data'
+# Fixed pie-slice order/coloring, so every grain's pie is comparable at a
+# glance. Type 1/2/3 colors come from kyanite_palette (shared with
+# xanes_rf_classifier.py's CATEGORY_ORDER and xanes_plot.py's CATEGORY_COLORS,
+# which keys its own grey fallback 'Ambiguous' instead of 'Bad data' — see
+# CLAUDE.md's "Color conventions" section).
+CATEGORY_COLORS = {**_SHARED_CATEGORY_COLORS, 'Bad data': GREY}
+# GREY: NaN / unmatched category_label renders identically to 'Bad data'
 
 # Non-element columns from xrf_h5_extract_spots.py's schema — everything else
 # in a spot CSV is treated as an element column.
@@ -355,8 +355,8 @@ def plot_pca_scatter(sub, scores, explained, elements):
 def plot_pca_scree(explained, n_pcs=None):
     n = len(explained) if n_pcs is None else min(n_pcs, len(explained))
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.bar(range(1, n + 1), explained[:n], color='#3B9BDD')
-    ax.plot(range(1, n + 1), np.cumsum(explained[:n]), 'o-', color='#D85B30', lw=1.5)
+    ax.bar(range(1, n + 1), explained[:n], color=BLUE)
+    ax.plot(range(1, n + 1), np.cumsum(explained[:n]), 'o-', color=ORANG, lw=1.5)
     ax.set_xticks(range(1, n + 1))
     ax.set_xlabel('Principal Component')
     ax.set_ylabel('Variance Explained (%)')
@@ -375,9 +375,16 @@ def plot_pca_loadings(loadings, elements, pcs=(1, 2), threshold=0.3):
         order = np.argsort(vals)[::-1]
         sorted_vals = vals[order]
         sorted_names = [elements[i] for i in order]
-        colors = ['#3B9BDD' if abs(v) >= threshold else '0.8' for v in sorted_vals]
+        # Fill = fixed element color (so the same element reads the same
+        # color across every PC/grain/script); border = significance,
+        # independent of element identity — a black outline if |loading|
+        # clears the threshold, no border otherwise.
+        fill_colors = _element_colors(sorted_names)
+        edge_colors = ['black' if abs(v) >= threshold else 'none' for v in sorted_vals]
+        edge_widths = [1.5 if abs(v) >= threshold else 0 for v in sorted_vals]
 
-        ax.bar(range(len(sorted_vals)), sorted_vals, color=colors)
+        ax.bar(range(len(sorted_vals)), sorted_vals, color=[fill_colors[n] for n in sorted_names],
+               edgecolor=edge_colors, linewidth=edge_widths)
         ax.axhline(0, color='k', lw=1)
         ax.axhline(threshold, color='k', ls='--', lw=0.5)
         ax.axhline(-threshold, color='k', ls='--', lw=0.5)

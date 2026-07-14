@@ -816,13 +816,13 @@ lprintf(SEC);
 fig_ov = figure('Name', 'Region overlay', 'Position', [100 100 700 700]);
 imshow(cl_disp); hold on;
 if ~classification_mode
-    colors = lines(max(n_regions, 7));
+    region_color_map = region_name_colors(region_names);
 end
 for r = 1:n_regions
     if classification_mode
         this_color = TEXTURE_CLASS_COLORS(domain_classes{r});
     else
-        this_color = colors(r,:);
+        this_color = region_color_map(region_names{r});
     end
     visboundaries(region_masks{r}, 'Color', this_color, 'LineWidth', 1.5);
     [rr_idx, cc_idx] = find(region_masks{r});
@@ -1043,7 +1043,7 @@ for m = 1:n_maps
         if classification_mode
             this_color = TEXTURE_CLASS_COLORS(domain_classes{r});
         else
-            this_color = colors(r,:);
+            this_color = region_color_map(region_names{r});
         end
         visboundaries(region_masks{r}, 'Color', this_color, 'LineWidth', 0.8);
     end
@@ -1177,6 +1177,34 @@ end
 % =========================================================================
 %% LOCAL FUNCTIONS
 % =========================================================================
+
+function color_map = region_name_colors(names)
+% Deterministic region name -> RGB triple, stable across every script and
+% grain: colors are assigned by *sorted name* (not draw order) into a fixed
+% qualitative palette (matplotlib's 'tab10', spelled out here so the values
+% match kyanite_palette.py's REGION_PALETTE / kyanite_figures.py's
+% region-highlight figures / kyanite_pca_rf.py's region-PCA plots exactly
+% — see CLAUDE.md's "Color conventions" section). Region names today are
+% generic (roi_1, roi_2, ...) rather than semantic, so this intentionally
+% does not hardcode a vocabulary — same name always gets the same color,
+% and if regions are drawn in a consistent order across grains, same
+% position ends up the same color too.
+    palette = [0.122 0.467 0.706;   % #1f77b4
+               1.000 0.498 0.055;   % #ff7f0e
+               0.173 0.627 0.173;   % #2ca02c
+               0.839 0.153 0.157;   % #d62728
+               0.580 0.404 0.741;   % #9467bd
+               0.549 0.337 0.294;   % #8c564b
+               0.890 0.467 0.761;   % #e377c2
+               0.498 0.498 0.498;   % #7f7f7f
+               0.737 0.741 0.133;   % #bcbd22
+               0.090 0.745 0.812];  % #17becf
+    uniq = sort(unique(names));
+    color_map = containers.Map();
+    for i = 1:numel(uniq)
+        color_map(uniq{i}) = palette(mod(i-1, size(palette,1)) + 1, :);
+    end
+end
 
 function h_poly = draw_polygon_with_zoom()
 % Lets the user zoom/pan the current axes to magnify small features before

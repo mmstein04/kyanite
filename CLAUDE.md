@@ -332,6 +332,78 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 - Onboarding audit log: `inputs/<grain_id>_onboarding_log.txt` (written by `onboard_dataset.py`,
   only on a non-dry-run execution)
 
+## Color conventions
+One canonical spec per color role, so the same category/element/quantity
+renders in the same color regardless of which script or which grain
+produced the figure — this is what actually makes figures comparable
+across grains, not just individually well-designed. Python scripts import
+these from `kyanite_palette.py`; MATLAB scripts (`CL_EPMA_registration.m`,
+`CL_mask_edit.m`, `CL_region_extraction.m`) can't import a Python module,
+so they carry local functions with the identical values hand-copied in —
+**if you change a value here, update both sides.**
+
+- **House palette** — general-purpose roles, not tied to any specific
+  element/region/category: `BLUE = '#3B9BDD'` (main data cloud/bar), `ORANG
+  = '#D85B30'` (fit line, highlight, or "above threshold" marker).
+- **Element → color** (`kyanite_palette.ELEMENT_COLORS` /
+  `element_colors()`; MATLAB: `element_line_colors()` in
+  `CL_EPMA_registration.m`/`CL_mask_edit.m`) — Okabe-Ito colorblind-safe
+  set, fixed for the 5 elements that recur across every grain's
+  whole-grain/region maps: `Cr_Ka #E69F00`, `Fe_Ka #56B4E9`, `Ti_Ka
+  #009E73`, `V_Ka #F0E442`, `Mn_Ka #CC79A7`. Any other element name falls
+  back to two extra Okabe-Ito colors (`#0072B2`, `#D55E00`), assigned by
+  sorted order — stable within one call/figure, not individually curated.
+  Applies wherever multiple elements are overlaid by color in one set of
+  axes (currently: the shift-sensitivity plots, and
+  `kyanite_sample_size_convergence.py`'s per-element convergence curves) —
+  most figures instead facet by subplot/filename per element and use the
+  house palette for that single element's data/fit, which doesn't need this.
+  PCA loadings bar charts (`kyanite_pca_rf.py`'s `plot_loadings`,
+  `kyanite_spot_analysis.py`'s `plot_pca_loadings`) are a related but
+  distinct case: bar *fill* is the element's fixed color (so the same
+  element reads the same color across every PC/grain/script) and bar
+  *border* separately encodes significance — a black outline (`lw=1.5`) if
+  `|loading|` clears the threshold, no border (`edgecolor='none'`)
+  otherwise — so element identity and significance are both visible at
+  once, on two different visual channels rather than one overloaded color.
+- **Region name → color** (`kyanite_palette.REGION_PALETTE` /
+  `region_colors()`; MATLAB: `region_name_colors()` in
+  `CL_region_extraction.m`) — region names are freeform and per-grain
+  (today: generic `roi_1`/`roi_2`/..., not semantic labels), so there's no
+  fixed vocabulary to hardcode. Colors are instead assigned deterministically
+  by *sorted name* into a fixed 10-color qualitative palette (matplotlib's
+  `tab10`: `#1f77b4, #ff7f0e, #2ca02c, #d62728, #9467bd, #8c564b, #e377c2,
+  #7f7f7f, #bcbd22, #17becf`, repeating past 10 distinct regions) — same
+  name always gets the same color in every script and every grain; if
+  regions are drawn in a consistent order across grains, same position
+  ends up the same color too. Used by `CL_region_extraction.m`'s freeform-mode
+  boundary overlay/QC figure, `kyanite_figures.py`'s region-highlight
+  figure, and `kyanite_pca_rf.py`'s region-PCA scatter/biplot/hulls.
+  (`classification_mode`'s texture domains are a separate, already-fixed
+  vocabulary — `TEXTURE_CLASS_COLORS` — and don't use this.)
+- **XANES pre-edge class → color** (`kyanite_palette.CATEGORY_COLORS`/
+  `CATEGORY_ORDER`) — `Type 1 #D85B30`, `Type 2 #4C9F70`, `Type 3 #7A5195`,
+  plus a grey (`GREY = '#999999'`) fallback for the unclassified/QC-failed
+  case. `kyanite_spot_analysis.py` and `xanes_rf_classifier.py` key the grey
+  fallback `'Bad data'`; `xanes_plot.py`'s own optional auto-classifier keys
+  it `'Ambiguous'` instead (different vocabulary, same color, by design —
+  each file builds its local `CATEGORY_COLORS` by spreading the shared dict
+  and adding its own grey-fallback key).
+- **Diverging colormap** (`kyanite_palette.DIVERGING_CMAP = 'RdBu_r'`) —
+  every signed, zero-centered quantity: correlation matrices
+  (`kyanite_figures.py`'s `corrmatrix`), local-regression slope/R maps
+  (`CL_local_regression_map.m`). MATLAB can't reference `'RdBu_r'`
+  directly, so `CL_local_regression_map.m`'s hand-rolled `diverging_cmap()`
+  is tuned to matplotlib's actual `RdBu_r` anchor colors at t=0/0.5/1
+  (`#053061` / `#F7F6F6` / `#67001F`) rather than an arbitrary blue-white-red.
+- **Sequential colormap** (`kyanite_palette.SEQUENTIAL_CMAP = 'inferno'`) —
+  every continuous-intensity role: KDE density (`kyanite_figures.py`'s
+  `heatmap`), SHAP interaction magnitude and dependence-plot coloring
+  (`kyanite_pca_rf.py`). `xrf_display.m`/`CL_local_regression_map.m`'s
+  spatial element-intensity/coverage maps use MATLAB's `parula` instead —
+  a different role (raw map display, not a project-wide analysis quantity),
+  left as-is.
+
 ## Key parameters (set per-grain at top of each script)
 
 **`onboard_dataset.py`**

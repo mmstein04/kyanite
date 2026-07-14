@@ -60,12 +60,14 @@ from sklearn.metrics import mean_squared_error, r2_score
 from scipy.stats import f_oneway
 from scipy.spatial import ConvexHull
 import shap
+from kyanite_palette import (BLUE, ORANG, SEQUENTIAL_CMAP, element_colors as _element_colors,
+                              region_colors as _shared_region_colors)
 
 # =============================================================================
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs/regions/NA-GS-P84-03_region_pixel_data.csv'   # file or directory
+CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data'   # file or directory
 ELEMENTS  = None      # list of CSV column names to include; None = all columns except CL/Region
 
 # Where output (figures, tables, logs) is saved — independent of CSV_INPUT,
@@ -120,9 +122,6 @@ SHAP_DEPENDENCE_PLOTS = True  # element value vs. its own SHAP value, one panel 
 SAVE_FIG   = True
 SAVE_CSV   = True
 SHOW_TITLE = True
-
-BLUE  = '#3B9BDD'
-ORANG = '#D85B30'
 
 # =============================================================================
 # RESOLVE INPUT → list of CSV paths
@@ -220,10 +219,17 @@ def plot_loadings(loadings, elements, pc):
     order = np.argsort(vals)[::-1]
     sorted_vals = vals[order]
     sorted_names = [elements[i] for i in order]
-    colors = [BLUE if abs(v) >= LOADING_THRESHOLD else '0.8' for v in sorted_vals]
+    # Fill = fixed element color (so the same element reads the same color
+    # across every PC/grain/script); border = significance, independent of
+    # element identity — a black outline if |loading| clears the threshold,
+    # no border otherwise.
+    fill_colors = _element_colors(sorted_names)
+    edge_colors = ['black' if abs(v) >= LOADING_THRESHOLD else 'none' for v in sorted_vals]
+    edge_widths = [1.5 if abs(v) >= LOADING_THRESHOLD else 0 for v in sorted_vals]
 
     fig, ax = plt.subplots(figsize=(max(6, 0.4 * len(elements)), 4))
-    ax.bar(range(len(sorted_vals)), sorted_vals, color=colors)
+    ax.bar(range(len(sorted_vals)), sorted_vals, color=[fill_colors[n] for n in sorted_names],
+           edgecolor=edge_colors, linewidth=edge_widths)
     ax.axhline(0, color='k', lw=1)
     ax.axhline(LOADING_THRESHOLD, color='k', ls='--', lw=0.5)
     ax.axhline(-LOADING_THRESHOLD, color='k', ls='--', lw=0.5)
@@ -259,10 +265,13 @@ def plot_pc_vs_cl(scores, y, pcs):
 
 
 def region_colors(regions):
-    """region label -> color, stable across all region-PCA plots for one call."""
-    unique_regions = pd.unique(regions)
-    cmap = plt.get_cmap('tab10' if len(unique_regions) <= 10 else 'tab20')
-    return unique_regions, {r: cmap(i % cmap.N) for i, r in enumerate(unique_regions)}
+    """region label -> color, stable across every region-PCA plot for every
+    grain (not just one call) — same shared, name-sorted palette as
+    kyanite_figures.py's region-highlight figures and CL_region_extraction.m's
+    boundary overlay. See kyanite_palette.region_colors()."""
+    colors = _shared_region_colors(regions)
+    unique_regions = np.array(sorted(colors))
+    return unique_regions, colors
 
 
 def _draw_region_hull(ax, pts, color, alpha=0.12):
@@ -493,7 +502,7 @@ def plot_shap_interactions(interaction_matrix, elements):
     strict_lower = np.tril(np.ones((n, n), dtype=bool), k=-1)
     vmax = interaction_matrix[strict_lower].max()
 
-    cmap = plt.cm.inferno.copy()
+    cmap = plt.colormaps[SEQUENTIAL_CMAP].copy()
     cmap.set_bad('white')   # upper triangle: left blank
 
     masked = np.ma.masked_array(interaction_matrix, mask=~strict_lower)
@@ -539,7 +548,7 @@ def plot_shap_dependence(shap_values, X_vals, elements, interaction_matrix):
             row = interaction_matrix[i].copy()
             row[i] = -np.inf
             partner = int(np.argmax(row))
-            sc = ax.scatter(x, y, c=X_vals[:, partner], cmap='viridis', s=8, alpha=0.7, linewidths=0)
+            sc = ax.scatter(x, y, c=X_vals[:, partner], cmap=SEQUENTIAL_CMAP, s=8, alpha=0.7, linewidths=0)
             fig.colorbar(sc, ax=ax, label=f'{elements[partner]}' + (' (log10)' if LOG_TRANSFORM else ''))
         else:
             ax.scatter(x, y, s=8, alpha=0.5, color=BLUE, linewidths=0)
