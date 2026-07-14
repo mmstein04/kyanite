@@ -25,9 +25,17 @@
 #
 # Two input formats are auto-detected by column name, same as
 # kyanite_figures.py:
-#   - Whole-grain CSVs (*_pixel_data.csv): one analysis per grain.
-#   - Per-region CSVs (*_region_pixel_data.csv, has a 'Region' column): one
-#     analysis per region.
+#   - Whole-grain CSVs (*_pixel_data.csv): full PCA/RF/SHAP analysis per grain,
+#     as described above.
+#   - Per-region CSVs (*_region_pixel_data.csv, has a 'Region' column): PCA
+#     only, and only once per grain — a single PCA fit pooled across ALL of
+#     the grain's regions together, with every region then projected into
+#     that one shared PC space (scree, PC loadings, PC1/PC2-by-region scatter,
+#     and a biplot), to test whether regions separate out in PC space. No
+#     per-region PCA/RF/SHAP breakdown is produced — a per-region PCA would
+#     fit its own independent PC space per region, making scores
+#     incomparable across regions, and RF/SHAP importance for CL isn't a
+#     meaningful question region-by-region here.
 #
 # CSV_INPUT may be a single CSV file or a directory; all *_pixel_data.csv
 # files found in a directory are processed. Whole-grain CSVs live in
@@ -48,16 +56,18 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import KFold
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import mean_squared_error, r2_score
+from scipy.stats import f_oneway
+from scipy.spatial import ConvexHull
 import shap
 
 # =============================================================================
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data'   # file or directory
+CSV_INPUT = '/Users/mstein/bin/kyanite/figs/regions/NA-GS-P84-03_region_pixel_data.csv'   # file or directory
 ELEMENTS  = None      # list of CSV column names to include; None = all columns except CL/Region
 
-ANALYSES = ['pca', 'rf', 'shap']   # 'pca', 'rf', 'shap', 'all', or a list of these
+ANALYSES = 'pca'   # 'pca', 'rf', 'shap', 'all', or a list of these
 
 # --- Data cleaning, shared by PCA and RF ---
 BELOW_DETECTION          = None   # values <= this are treated as below detection limit; None to disable
@@ -67,8 +77,17 @@ MIN_PIXELS               = 50    # skip a dataset/region if fewer valid pixels r
 
 # --- PCA ---
 N_PCS_SCREE       = 10          # number of PCs shown on the scree plot
-PC_TO_PLOT        = [1, 2, 3, 4, 5]   # which PC(s) to scatter against CL / show loadings for
+PC_TO_PLOT        = [1, 2, 3, 4]   # which PC(s) to scatter against CL / show loadings for
 LOADING_THRESHOLD = 0.3         # |loading| >= this is highlighted as a significant contributor
+
+# --- Region PCA (region CSVs only) ---
+# A single PCA fit pooled across ALL of a grain's regions, with every region
+# projected into that one shared PC space, so regions can be compared
+# directly on the same axes (unlike the per-region analyze() calls above,
+# which each fit their own independent PCA). Tests whether hand-drawn regions
+# (e.g. core vs. rim) separate out in PC space.
+REGION_PCA_PCS   = (1, 2)   # which two PCs to scatter regions on
+REGION_PCA_HULLS = True     # draw a convex-hull outline around each region's point cloud
 
 # --- Random Forest ---
 N_ESTIMATORS         = 100
@@ -134,7 +153,9 @@ rng = np.random.default_rng(RANDOM_STATE)
 
 def prepare_data(df, elements):
     """Drop poorly-detected elements, log-transform, and drop incomplete rows.
-    Returns (X_df, y, kept_elements, dropped_elements)."""
+    Returns (X_df, y, kept_elements, dropped_elements, valid_mask). valid_mask
+    is aligned to df's index, so e.g. df['Region'][valid] recovers the region
+    label for each surviving row."""
     X = df[elements].astype(float).copy()
     y = df['CL'].astype(float).values
 
@@ -151,7 +172,7 @@ def prepare_data(df, elements):
         X = np.log10(X)
 
     valid = np.isfinite(X).all(axis=1) & np.isfinite(y)
-    return X[valid], y[valid], kept, dropped
+    return X[valid], y[valid], kept, dropped, valid
 
 
 def subsample(X, y, max_n):
@@ -226,6 +247,124 @@ def plot_pc_vs_cl(scores, y, pcs):
     for ax in axes[n:]:
         ax.axis('off')
     return fig
+
+
+def region_colors(regions):
+    """region label -> color, stable across all region-PCA plots for one call."""
+    unique_regions = pd.unique(regions)
+    cmap = plt.get_cmap('tab10' if len(unique_regions) <= 10 else 'tab20')
+    return unique_regions, {r: cmap(i % cmap.N) for i, r in enumerate(unique_regions)}
+
+
+def _draw_region_hull(ax, pts, color, alpha=0.12):
+    """Convex-hull outline over a region's 2D points; silently skipped if too
+    few or degenerate (collinear) to form a hull."""
+    if len(pts) < 3:
+        return
+    try:
+        hull = ConvexHull(pts)
+    except Exception:
+        return
+    ax.fill(pts[hull.vertices, 0], pts[hull.vertices, 1], color=color, alpha=alpha,
+            edgecolor=color, linewidth=1.5)
+
+
+def plot_region_pca_scatter(scores, regions, pcs, hulls=True):
+    """PC_i vs. PC_j scores from a single shared PCA fit, colored by region,
+    with an optional convex-hull outline per region so each region's
+    footprint in PC space is easy to compare."""
+    pc_x, pc_y = pcs
+    x = scores[:, pc_x - 1]
+    y = scores[:, pc_y - 1]
+    unique_regions, colors = region_colors(regions)
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    for r in unique_regions:
+        mask = regions == r
+        ax.scatter(x[mask], y[mask], s=6, alpha=0.35, color=colors[r], linewidths=0,
+                   label=f'{r} (n={mask.sum():,})')
+        if hulls:
+            _draw_region_hull(ax, np.column_stack([x[mask], y[mask]]), colors[r])
+
+    ax.set_xlabel(f'PC{pc_x} score')
+    ax.set_ylabel(f'PC{pc_y} score')
+    ax.grid(True, alpha=0.25, linewidth=0.5)
+    ax.legend(fontsize=8, markerscale=2, loc='best')
+    return fig
+
+
+def plot_region_pca_biplot(scores, loadings, explained, regions, elements, pcs, hulls=True):
+    """PC_i vs. PC_j scores colored by region, overlaid with element loading
+    vectors (mirrors kyanite_spot_analysis.py's plot_pca_biplot, colored by
+    region instead of XANES class). Axes are fixed to the score cloud's own
+    extent before drawing arrows, then every loading vector is scaled by one
+    shared factor — drawing arrows first would let matplotlib autoscale
+    around the (unit-norm, disproportionately long) loadings and shrink the
+    score cloud to a sliver."""
+    pc_x, pc_y = pcs
+    ix, iy = pc_x - 1, pc_y - 1
+    x, y = scores[:, ix], scores[:, iy]
+    unique_regions, colors = region_colors(regions)
+
+    fig, ax = plt.subplots(figsize=(8.5, 6.5))
+    for r in unique_regions:
+        mask = regions == r
+        ax.scatter(x[mask], y[mask], s=10, alpha=0.35, color=colors[r], linewidths=0,
+                   label=f'{r} (n={mask.sum():,})', zorder=2)
+        if hulls:
+            _draw_region_hull(ax, np.column_stack([x[mask], y[mask]]), colors[r])
+
+    x_max = np.max(np.abs(x)) if len(x) else 1.0
+    y_max = np.max(np.abs(y)) if len(y) else 1.0
+    xlim, ylim = x_max * 1.15, y_max * 1.15
+    ax.set_xlim(-xlim, xlim)
+    ax.set_ylim(-ylim, ylim)
+
+    loading_len = np.sqrt(loadings[:, ix] ** 2 + loadings[:, iy] ** 2)
+    max_loading_len = loading_len.max() if loading_len.size else 1.0
+    scale = 0.85 * min(xlim, ylim) / max_loading_len if max_loading_len > 0 else 1.0
+
+    for i, element in enumerate(elements):
+        lx, ly = loadings[i, ix] * scale, loadings[i, iy] * scale
+        ax.annotate('', xy=(lx, ly), xytext=(0, 0),
+                    arrowprops=dict(arrowstyle='->', color='black', lw=1.2), zorder=3)
+        ax.text(lx * 1.1, ly * 1.1, element, fontsize=9, color='black',
+                ha='center', va='center', zorder=4)
+
+    ax.axhline(0, color='0.7', lw=0.5, zorder=0)
+    ax.axvline(0, color='0.7', lw=0.5, zorder=0)
+    ax.set_xlabel(f'PC{pc_x} ({explained[ix]:.1f}% var.)')
+    ax.set_ylabel(f'PC{pc_y} ({explained[iy]:.1f}% var.)')
+    ax.legend(fontsize=8, loc='upper left', bbox_to_anchor=(1.02, 1), borderaxespad=0)
+    ax.grid(True, alpha=0.25, linewidth=0.5)
+    return fig
+
+
+def region_separation_stats(scores, regions, pcs):
+    """One-way ANOVA of each PC's scores across regions, plus pairwise
+    region-centroid distances in the (pcs) subspace. Returns a list of log
+    lines and a DataFrame of pairwise centroid distances."""
+    unique_regions = pd.unique(regions)
+    idx = [p - 1 for p in pcs]
+    lines = ['Region separation in PC space:']
+
+    for pc in pcs:
+        groups = [scores[regions == r, pc - 1] for r in unique_regions]
+        if len(groups) >= 2 and all(len(g) >= 2 for g in groups):
+            F, p = f_oneway(*groups)
+            lines.append(f'  PC{pc}: one-way ANOVA across regions - F={F:.2f}, p={p:.3e}')
+        else:
+            lines.append(f'  PC{pc}: insufficient data for ANOVA')
+
+    centroids = {r: scores[regions == r][:, idx].mean(axis=0) for r in unique_regions}
+    rows = []
+    for i, r1 in enumerate(unique_regions):
+        for r2 in unique_regions[i + 1:]:
+            d = np.linalg.norm(centroids[r1] - centroids[r2])
+            lines.append(f'  centroid distance {r1} vs {r2} (PC{list(pcs)}): {d:.3f}')
+            rows.append({'region_1': r1, 'region_2': r2, 'centroid_distance': d})
+
+    return lines, pd.DataFrame(rows)
 
 # =============================================================================
 # RANDOM FOREST
@@ -460,7 +599,7 @@ def build_log_header(label, csv_path, requested, missing, kept, dropped, n_valid
 
 def analyze(df, elements, label, out_dir, csv_path, missing=()):
     print(f'\n--- {label} ({len(df):,} px) ---')
-    X_df, y, kept, dropped = prepare_data(df, elements)
+    X_df, y, kept, dropped, _valid = prepare_data(df, elements)
 
     if dropped:
         print(f'  Dropped (>{MAX_BELOW_DETECTION_FRAC:.0%} below detection): {dropped}')
@@ -618,6 +757,114 @@ def analyze(df, elements, label, out_dir, csv_path, missing=()):
     log_file.write_text('\n'.join(str(l) for l in log_lines) + '\n')
     print(f'  Log saved: {log_file.name}')
 
+
+def analyze_region_pca(df, elements, grain_id, out_dir, csv_path, missing=()):
+    """Region-CSV-only analysis: fit ONE PCA pooled across all of a grain's
+    regions, project every region into that shared PC space, and test
+    whether regions separate on REGION_PCA_PCS. Independent of the per-region
+    analyze() calls, which each fit their own PCA and so aren't comparable
+    to one another."""
+    label = f'{grain_id}_regions_pca'
+    print(f'\n--- {label} ({len(df):,} px, {df["Region"].nunique()} regions) ---')
+
+    X_df, y, kept, dropped, valid = prepare_data(df, elements)
+    regions = df['Region'].values[valid.values]
+
+    if dropped:
+        print(f'  Dropped (>{MAX_BELOW_DETECTION_FRAC:.0%} below detection): {dropped}')
+    if len(X_df) < MIN_PIXELS:
+        print(f'  WARNING: only {len(X_df)} valid pixels (< MIN_PIXELS={MIN_PIXELS}), skipping.')
+        return
+
+    log_lines = [
+        f'kyanite_pca_rf.py — {label}',
+        f'Run date: {RUN_TIMESTAMP}',
+        f'Source CSV: {csv_path}',
+        'Analysis: pooled PCA across regions (one shared PCA fit; each region projected into it)',
+        '',
+        'Parameters:',
+        f'  ELEMENTS (requested): {ELEMENTS if ELEMENTS is not None else "all (auto-detected)"}',
+        f'  BELOW_DETECTION: {BELOW_DETECTION}',
+        f'  MAX_BELOW_DETECTION_FRAC: {MAX_BELOW_DETECTION_FRAC}',
+        f'  LOG_TRANSFORM: {LOG_TRANSFORM}',
+        f'  MIN_PIXELS: {MIN_PIXELS}',
+        f'  REGION_PCA_PCS: {REGION_PCA_PCS}',
+        f'  REGION_PCA_HULLS: {REGION_PCA_HULLS}',
+        '',
+        f'Columns not found in CSV: {list(missing)}' if missing else 'Columns not found in CSV: none',
+        f'Elements used ({len(kept)}): {kept}',
+        f'Elements dropped ({len(dropped)}, >{MAX_BELOW_DETECTION_FRAC:.0%} below detection): {dropped}'
+        if BELOW_DETECTION is not None else 'Elements dropped: none (BELOW_DETECTION disabled)',
+        f'Valid pixels: {len(X_df):,} of {len(df):,} total',
+        '',
+        f'Regions ({df["Region"].nunique()}): ' +
+        ', '.join(f'{r}={int((regions == r).sum()):,}px' for r in pd.unique(regions)),
+        '',
+    ]
+
+    print('  Running pooled PCA across regions...')
+    scores, explained, loadings = run_pca(X_df)
+
+    sep_lines, centroid_df = region_separation_stats(scores, regions, REGION_PCA_PCS)
+    log_lines += [''] + sep_lines
+    for line in sep_lines:
+        print(f'  {line}')
+
+    if SAVE_CSV:
+        var_df = pd.DataFrame({
+            'PC': range(1, len(explained) + 1),
+            'explained_var_pct': explained,
+            'cumulative_pct': np.cumsum(explained),
+        })
+        var_df.to_csv(out_dir / f'{label}_pca_variance.csv', index=False)
+
+        load_df = pd.DataFrame(loadings, index=kept,
+                                columns=[f'PC{i+1}' for i in range(loadings.shape[1])])
+        load_df.to_csv(out_dir / f'{label}_pca_loadings.csv')
+
+        scores_df = pd.DataFrame(scores, columns=[f'PC{i+1}' for i in range(scores.shape[1])])
+        scores_df.insert(0, 'Region', regions)
+        scores_df.to_csv(out_dir / f'{label}_scores.csv', index=False)
+
+        centroid_df.to_csv(out_dir / f'{label}_centroid_distances.csv', index=False)
+
+    if SAVE_FIG:
+        fig = plot_scree(explained)
+        if SHOW_TITLE:
+            fig.suptitle(f'{label} — PCA scree plot')
+        fig.tight_layout()
+        fig.savefig(out_dir / f'{label}_pca_scree.png', dpi=200, bbox_inches='tight')
+
+        for pc in REGION_PCA_PCS:
+            fig = plot_loadings(loadings, kept, pc)
+            if SHOW_TITLE:
+                fig.suptitle(f'{label} — PC{pc} loadings')
+            fig.tight_layout()
+            fig.savefig(out_dir / f'{label}_pca_loadings_PC{pc}.png', dpi=200, bbox_inches='tight')
+
+        fig = plot_region_pca_scatter(scores, regions, REGION_PCA_PCS, hulls=REGION_PCA_HULLS)
+        if SHOW_TITLE:
+            fig.suptitle(f'{label} — PC{REGION_PCA_PCS[0]} vs PC{REGION_PCA_PCS[1]} by region')
+        fig.tight_layout()
+        fig.savefig(out_dir / f'{label}_pc{REGION_PCA_PCS[0]}_pc{REGION_PCA_PCS[1]}_scatter.png',
+                    dpi=200, bbox_inches='tight')
+
+        fig = plot_region_pca_biplot(scores, loadings, explained, regions, kept,
+                                      REGION_PCA_PCS, hulls=REGION_PCA_HULLS)
+        if SHOW_TITLE:
+            fig.suptitle(f'{label} — PCA biplot (n={len(X_df):,})')
+        fig.tight_layout()
+        fig.savefig(out_dir / f'{label}_pca_biplot.png', dpi=200, bbox_inches='tight')
+
+        plt.close('all')
+        log_lines.append('Saved scree, PC loadings, region scatter, and biplot figures')
+
+    print(f'  Saved region PCA outputs for {label}')
+
+    log_file = out_dir / f'{label}_log.txt'
+    log_file.write_text('\n'.join(str(l) for l in log_lines) + '\n')
+    print(f'  Log saved: {log_file.name}')
+
 # =============================================================================
 # RUN
 # =============================================================================
@@ -636,9 +883,13 @@ for csv_path in csv_files:
 
     if region_mode:
         grain_id = csv_path.stem.replace('_region_pixel_data', '')
-        for region in df['Region'].drop_duplicates():
-            analyze(df[df['Region'] == region], available, f'{grain_id}_{region}', out_dir,
-                    csv_path, missing)
+        if 'pca' not in analyses:
+            print(f'  Region CSV {csv_path.name}: only "pca" analysis applies to regions, '
+                  f'skipping (ANALYSES={ANALYSES}).')
+        elif df['Region'].nunique() < 2:
+            print(f'  WARNING: {grain_id} has fewer than 2 regions, skipping region PCA.')
+        else:
+            analyze_region_pca(df, available, grain_id, out_dir, csv_path, missing)
     else:
         grain_id = csv_path.stem.replace('_pixel_data', '')
         analyze(df, available, grain_id, out_dir, csv_path, missing)

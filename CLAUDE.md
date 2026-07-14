@@ -25,7 +25,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | `CL_region_extraction.m` | MATLAB | Draw named sub-grain polygon regions on an already-registered CL image and extract per-pixel CL + element data per region (no re-registration) |
 | `CL_mask_edit.m` | MATLAB | After-the-fact touch-up of a grain mask already produced by `CL_EPMA_registration.m` (e.g. an inclusion was masked-in, or real grain was masked-out weeks earlier) — draw add/remove polygons on the already-registered CL image, then re-derive pixel data and downstream figures under the corrected mask |
 | `kyanite_figures.py` | Python | Standalone figure generation from exported CSV pixel data |
-| `kyanite_pca_rf.py` | Python | PCA and cross-validated Random Forest analysis of CL vs. trace elements from exported CSV pixel data |
+| `kyanite_pca_rf.py` | Python | PCA and cross-validated Random Forest analysis of CL vs. trace elements from whole-grain CSV pixel data; for region CSVs, instead fits one shared PCA pooled across regions (scree, loadings, PC1/PC2-by-region scatter, biplot) to test whether hand-drawn regions separate in PC space — no per-region PCA/RF/SHAP |
 | `kyanite_sample_size_convergence.py` | Python | Diagnostic: sweeps RF/SHAP over a range of pixel subsample sizes for one grain to check whether importance estimates have converged below `kyanite_pca_rf.py`'s `MAX_SAMPLES`/`SHAP_SAMPLES`, or would still change with more data |
 | `kyanite_spot_analysis.py` | Python | Batch analysis of `<grain_id>_spot_geochemistry.csv` files: XANES class distribution pie-chart grid, pooled CL-vs-element scatter plots colored by class, element-by-class box plots, PCA (PC1/PC2 scatter, scree, loadings, biplot) colored by class, and per-grain labeled spot-location maps on the registered CL image |
 | `xrf_display.m` | MATLAB | Visualize XRF element-map TIFFs with grain mask overlay |
@@ -350,11 +350,35 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 
 **`kyanite_pca_rf.py`**
 - `CSV_INPUT`, `ELEMENTS` — file/directory and columns to include (defaults to all element columns)
-- `ANALYSES` — `pca`, `rf`, `shap`, `all`, or a list of these
+- `ANALYSES` — `pca`, `rf`, `shap`, `all`, or a list of these — for whole-grain CSVs.
+  Region CSVs only ever run the pooled region-PCA analysis below (skipped entirely,
+  with a warning, if `'pca'` isn't in `ANALYSES`); `rf`/`shap` never run per-region
 - `BELOW_DETECTION` / `MAX_BELOW_DETECTION_FRAC` — drop poorly-detected elements
 - `LOG_TRANSFORM`, `PC_TO_PLOT`, `LOADING_THRESHOLD` — PCA options
 - `CV_FOLDS`, `N_ESTIMATORS`, `MAX_SAMPLES`, `IMPORTANCE_SIG_RATIO` — Random Forest options
 - `SHAP_SAMPLES`, `SHAP_INTERACTIONS`, `SHAP_DEPENDENCE_PLOTS` — TreeSHAP importance, pairwise interaction values, and element-vs-own-SHAP-value dependence plots from a single RF fit on a subsample
+- Region CSVs (`*_region_pixel_data.csv`, has a `Region` column) get one pooled-PCA
+  analysis per grain instead of the whole-grain PCA/RF/SHAP breakdown above (skipped
+  if the grain has fewer than 2 regions): a single PCA fit across all of a grain's
+  regions together, with every region projected into that shared PC space — fitting
+  PCA independently per region would give each region its own PC space, making
+  scores incomparable across regions; this pooled fit is what actually lets you test
+  whether hand-drawn regions (e.g. core vs. rim) separate out in PC space
+- `REGION_PCA_PCS` — which two PCs regions are compared on (default PC1 vs PC2, used
+  for the scatter, biplot, and separation stats — scree and loadings still cover all
+  computed PCs/`N_PCS_SCREE` same as the whole-grain PCA); `REGION_PCA_HULLS` — draw a
+  convex-hull outline around each region's point cloud on both the scatter and biplot
+- Region separation is also tested quantitatively: one-way ANOVA of each
+  `REGION_PCA_PCS` component across regions, plus pairwise region-centroid distances
+  in that PC subspace — both written to `<grain_id>_regions_pca_log.txt` and the
+  centroid distances to `<grain_id>_regions_pca_centroid_distances.csv`
+- Region PCA outputs (alongside the region CSV): `<grain_id>_regions_pca_pca_variance.csv`,
+  `<grain_id>_regions_pca_pca_loadings.csv`, `<grain_id>_regions_pca_scores.csv`
+  (per-pixel PC scores + `Region` column), `<grain_id>_regions_pca_centroid_distances.csv`,
+  `<grain_id>_regions_pca_pca_scree.png`, `<grain_id>_regions_pca_pca_loadings_PC<n>.png`
+  (one per `REGION_PCA_PCS` component), `<grain_id>_regions_pca_pc<i>_pc<j>_scatter.png`
+  (PC scores colored by region), `<grain_id>_regions_pca_pca_biplot.png` (same scatter
+  with element loading-vector arrows overlaid), `<grain_id>_regions_pca_log.txt`
 
 **`kyanite_sample_size_convergence.py`**
 - `CSV_INPUT` — a single grain's `*_pixel_data.csv` (not batch)
