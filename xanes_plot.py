@@ -64,8 +64,13 @@ from kyanite_palette import BLUE, GREY, CATEGORY_COLORS as _SHARED_CATEGORY_COLO
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-XANES_INPUT = '/Users/mstein/bin/kyanite/inputs/xanes'   # file or directory
-OUT_DIR     = '/Users/mstein/bin/kyanite/figs/xanes'
+# Anchored to this script's own location (not a hardcoded machine-specific
+# path) so the same file runs unmodified on any machine/cluster this repo is
+# checked out on.
+_REPO_ROOT = Path(__file__).resolve().parent
+
+XANES_INPUT = _REPO_ROOT / 'inputs' / 'xanes'   # file or directory
+OUT_DIR     = _REPO_ROOT / 'figs' / 'xanes'
 
 EDGE_ENERGY      = None          # Fe K edge (eV), reference line; None to disable
 XANES_WINDOW     = (7000, 7250)    # eV, full-window overlay plot

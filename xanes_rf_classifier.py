@@ -50,8 +50,13 @@ from kyanite_palette import BLUE, ORANG, CATEGORY_ORDER
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT    = '/Users/mstein/bin/kyanite/figs/data'    # file or directory of *_spot_geochemistry.csv
-OUT_DIR      = '/Users/mstein/bin/kyanite/figs/xanes_rf_classifier'   # kept separate from
+# Anchored to this script's own location (not a hardcoded machine-specific
+# path) so the same file runs unmodified on any machine/cluster this repo is
+# checked out on.
+_REPO_ROOT = Path(__file__).resolve().parent
+
+CSV_INPUT    = _REPO_ROOT / 'figs' / 'data'    # file or directory of *_spot_geochemistry.csv
+OUT_DIR      = _REPO_ROOT / 'figs' / 'xanes_rf_classifier'   # kept separate from
                # figs/spot_analysis/ (kyanite_spot_analysis.py's output) — a different
                # analysis (XANES-class classifier vs. pooled scatter/pie/box/PCA figures)
 OUTPUT_LABEL = 'all_grains'   # prefix for all output files (pooled analysis; no per-grain run)

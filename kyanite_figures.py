@@ -86,7 +86,12 @@ from kyanite_palette import BLUE, ORANG, DIVERGING_CMAP, SEQUENTIAL_CMAP, region
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data'   # file or directory
+# Anchored to this script's own location (not a hardcoded machine-specific
+# path) so the same file runs unmodified on any machine/cluster this repo is
+# checked out on.
+_REPO_ROOT = Path(__file__).resolve().parent
+
+CSV_INPUT = _REPO_ROOT / 'figs' / 'data'   # file or directory
 ELEMENTS  = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Mn_Ka', 'Ti_Ka']          # CSV column names
 PLOT_TYPE = 'scatter'      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix', 'summary', 'distributions', 'all', or a list of these
 
@@ -95,8 +100,8 @@ PLOT_TYPE = 'scatter'      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap
 # in among the reusable data files. Whole-grain CSVs' figures go to
 # WHOLE_GRAIN_OUTPUT_DIR; region CSVs' (has a 'Region' column) to
 # REGION_OUTPUT_DIR. Both are created if missing.
-WHOLE_GRAIN_OUTPUT_DIR = '/Users/mstein/bin/kyanite/figs/whole_grain'
-REGION_OUTPUT_DIR      = '/Users/mstein/bin/kyanite/figs/regions'
+WHOLE_GRAIN_OUTPUT_DIR = _REPO_ROOT / 'figs' / 'whole_grain'
+REGION_OUTPUT_DIR      = _REPO_ROOT / 'figs' / 'regions'
 
 # 'summary' output — None (default) saves alongside WHOLE_GRAIN_OUTPUT_DIR,
 # since it's still a whole-grain-CSV-derived figure, just pooled across
@@ -181,9 +186,9 @@ SATURATION_MIN_COUNT = 5        # ...and at least this many pixels, so tiny grai
 # epma_dir convention (<grain_id>/ subfolder per grain), MASK_DIR mirrors
 # where the mask TIFF is always written (figs/data/).
 OUTLIER_SPATIAL_QC   = True
-MAPS_DIR             = '/Users/mstein/bin/kyanite/inputs/maps'
-MASK_DIR             = '/Users/mstein/bin/kyanite/figs/data'
-OUTLIER_QC_DIR       = '/Users/mstein/bin/kyanite/figs/diagnostics'
+MAPS_DIR             = _REPO_ROOT / 'inputs' / 'maps'
+MASK_DIR             = _REPO_ROOT / 'figs' / 'data'
+OUTLIER_QC_DIR       = _REPO_ROOT / 'figs' / 'diagnostics'
 SATURATION_QC_COLOR  = '#8B0000'   # dark red — saturation/clipping exclusion (ORANG below is reused for the statistical-trim exclusion, matching its existing "above-threshold" role elsewhere in this file)
 
 # 'distributions' (see header comment) — None (default) saves alongside

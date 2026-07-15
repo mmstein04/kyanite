@@ -46,9 +46,14 @@ from kyanite_palette import (BLUE, ORANG, GREY, CATEGORY_ORDER, element_colors a
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data'    # file or directory of *_spot_geochemistry.csv
-FIGS_DIR  = '/Users/mstein/bin/kyanite/figs'         # where <grain_id>_CL_registered.tif live
-OUT_DIR   = '/Users/mstein/bin/kyanite/figs/spot_analysis'
+# Anchored to this script's own location (not a hardcoded machine-specific
+# path) so the same file runs unmodified on any machine/cluster this repo is
+# checked out on.
+_REPO_ROOT = Path(__file__).resolve().parent
+
+CSV_INPUT = _REPO_ROOT / 'figs' / 'data'    # file or directory of *_spot_geochemistry.csv
+FIGS_DIR  = _REPO_ROOT / 'figs'             # where <grain_id>_CL_registered.tif live
+OUT_DIR   = _REPO_ROOT / 'figs' / 'spot_analysis'
 
 ANALYSES = ['pca']   # 'pie', 'scatter', 'box', 'map', 'pca', 'all', or a list of these
 

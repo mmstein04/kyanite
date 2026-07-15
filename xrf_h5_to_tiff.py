@@ -20,8 +20,13 @@ from pathlib import Path
 # PARAMETERS — edit this section for each use
 # =============================================================================
 
-H5_FILE   = '/Users/mstein/bin/kyanite/inputs/xrf/MW609-01_xrf.h5'
-OUTPUT_DIR = '/Users/mstein/bin/kyanite/inputs/maps'
+# Anchored to this script's own location (not a hardcoded machine-specific
+# path) so the same file runs unmodified on any machine/cluster this repo is
+# checked out on.
+_REPO_ROOT = Path(__file__).resolve().parent
+
+H5_FILE   = _REPO_ROOT / 'inputs' / 'xrf' / 'MW609-01_xrf.h5'
+OUTPUT_DIR = _REPO_ROOT / 'inputs' / 'maps'
 
 # Grain ID prefix used in output filenames.
 GRAIN_ID = 'MW609-01'

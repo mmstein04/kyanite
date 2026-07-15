@@ -63,11 +63,16 @@ set(0, 'DefaultLegendInterpreter',      'none');
 %% SECTION 1: PARAMETERS  — edit this section for each grain / edit session
 % =========================================================================
 
+% Anchored to this script's own location (not a hardcoded machine-specific
+% path) so the same file runs unmodified on any machine this repo is
+% checked out on.
+repo_root = fileparts(mfilename('fullpath'));
+
 grain_id = 'RH-XA-57081P-05';
 
 % Directory holding the outputs of CL_EPMA_registration.m for this grain.
 % This script reads from and writes back into the same folder (in place).
-input_dir  = '/Users/mstein/bin/kyanite/figs';
+input_dir  = fullfile(repo_root, 'figs');
 output_dir = input_dir;
 
 cl_filename       = [grain_id, '_CL_registered.tif'];         % 16-bit grayscale
@@ -81,7 +86,7 @@ use_color_display = true;
 
 % Folder containing EPMA/XRF element map TIFFs (same folder used by
 % CL_EPMA_registration.m for this grain). All *.tif files auto-discovered.
-epma_dir = ['/Users/mstein/bin/kyanite/inputs/maps/', grain_id];
+epma_dir = fullfile(repo_root, 'inputs', 'maps', grain_id);
 
 % --- Spatial calibration --------------------------------------------------
 % Must match the value used in CL_EPMA_registration.m for this grain.

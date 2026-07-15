@@ -18,8 +18,13 @@ from pathlib import Path
 # PARAMETERS
 # =============================================================================
 
-INPUT_CSV  = '/Users/mstein/bin/kyanite/inputs/xanes_classification/xanes_classification.csv'
-OUTPUT_DIR = '/Users/mstein/bin/kyanite/inputs/xanes_classification'
+# Anchored to this script's own location (not a hardcoded machine-specific
+# path) so the same file runs unmodified on any machine/cluster this repo is
+# checked out on.
+_REPO_ROOT = Path(__file__).resolve().parent
+
+INPUT_CSV  = _REPO_ROOT / 'inputs' / 'xanes_classification' / 'xanes_classification.csv'
+OUTPUT_DIR = _REPO_ROOT / 'inputs' / 'xanes_classification'
 
 CATEGORY_LABELS = {1: 'Type 1', 2: 'Type 2', 3: 'Type 3', 4: 'Bad data'}
 

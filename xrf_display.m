@@ -33,9 +33,12 @@ clear; close all; clc;
 
 %% Parameters
 
-% File locations
-epma_dir = '/Users/mstein/bin/kyanite/inputs/maps/';
-figs_dir = '/Users/mstein/bin/kyanite/figs/';
+% File locations — anchored to this script's own location (not a
+% hardcoded machine-specific path) so the same file runs unmodified on
+% any machine this repo is checked out on.
+repo_root = fileparts(mfilename('fullpath'));
+epma_dir = fullfile(repo_root, 'inputs', 'maps');
+figs_dir = fullfile(repo_root, 'figs');
 
 % Rendered display PNGs are saved here, separate from figs_dir (which this
 % script only reads from — the grain mask). Named map_renders/, not maps/,

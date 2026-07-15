@@ -67,7 +67,12 @@ from kyanite_palette import (BLUE, ORANG, SEQUENTIAL_CMAP, element_colors as _el
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data'   # file or directory
+# Anchored to this script's own location (not a hardcoded machine-specific
+# path) so the same file runs unmodified on any machine/cluster this repo is
+# checked out on.
+_REPO_ROOT = Path(__file__).resolve().parent
+
+CSV_INPUT = _REPO_ROOT / 'figs' / 'data'   # file or directory
 ELEMENTS  = None      # list of CSV column names to include; None = all columns except CL/Region
 
 # Where output (figures, tables, logs) is saved — independent of CSV_INPUT,
@@ -75,8 +80,8 @@ ELEMENTS  = None      # list of CSV column names to include; None = all columns 
 # live) never dumps results in among the reusable data files. Whole-grain
 # CSVs' output goes to WHOLE_GRAIN_OUTPUT_DIR; region CSVs' (has a 'Region'
 # column) to REGION_OUTPUT_DIR. Both are created if missing.
-WHOLE_GRAIN_OUTPUT_DIR = '/Users/mstein/bin/kyanite/figs/whole_grain'
-REGION_OUTPUT_DIR      = '/Users/mstein/bin/kyanite/figs/regions'
+WHOLE_GRAIN_OUTPUT_DIR = _REPO_ROOT / 'figs' / 'whole_grain'
+REGION_OUTPUT_DIR      = _REPO_ROOT / 'figs' / 'regions'
 
 ANALYSES = 'all'   # 'pca', 'rf', 'shap', 'all', or a list of these
 

@@ -27,8 +27,13 @@ clear; clc;
 %% PARAMETERS  — edit this section for each use
 % =========================================================================
 
-input_dir  = '/Users/mstein/bin/kyanite/inputs/maps';
-output_dir = '/Users/mstein/bin/kyanite/inputs/maps';
+% Anchored to this script's own location (not a hardcoded machine-specific
+% path) so the same file runs unmodified on any machine this repo is
+% checked out on.
+repo_root = fileparts(mfilename('fullpath'));
+
+input_dir  = fullfile(repo_root, 'inputs', 'maps');
+output_dir = fullfile(repo_root, 'inputs', 'maps');
 
 % List all map filenames to be summed.
 input_files = {

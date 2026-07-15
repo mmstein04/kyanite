@@ -38,13 +38,18 @@ from kyanite_palette import BLUE, ORANG, element_colors
 # PARAMETERS — edit this section for each run
 # =============================================================================
 
-CSV_INPUT = '/Users/mstein/bin/kyanite/figs/data/NA-GS-P84-06_pixel_data.csv'   # a single grain's *_pixel_data.csv
+# Anchored to this script's own location (not a hardcoded machine-specific
+# path) so the same file runs unmodified on any machine/cluster this repo is
+# checked out on.
+_REPO_ROOT = Path(__file__).resolve().parent
+
+CSV_INPUT = _REPO_ROOT / 'figs' / 'data' / 'NA-GS-P84-06_pixel_data.csv'   # a single grain's *_pixel_data.csv
 ELEMENTS  = None      # list of CSV column names to include; None = all columns except CL/Region
 
 # Where output is saved — independent of CSV_INPUT, so pointing CSV_INPUT at
 # figs/data/ (where the pixel-data CSV actually lives) never dumps results in
 # among the reusable data files.
-OUTPUT_DIR = '/Users/mstein/bin/kyanite/figs/sample_size_convergence'
+OUTPUT_DIR = _REPO_ROOT / 'figs' / 'sample_size_convergence'
 
 # --- Data cleaning, same conventions as kyanite_pca_rf.py ---
 BELOW_DETECTION          = None   # values <= this are treated as below detection limit; None to disable

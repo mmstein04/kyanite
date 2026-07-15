@@ -71,19 +71,24 @@ from pathlib import Path
 # PARAMETERS — edit this section for each use
 # =============================================================================
 
-H5_FILE  = '/Users/mstein/bin/kyanite/inputs/xrf/NVD3-01_xrf.h5'
+# Anchored to this script's own location (not a hardcoded machine-specific
+# path) so the same file runs unmodified on any machine/cluster this repo is
+# checked out on.
+_REPO_ROOT = Path(__file__).resolve().parent
+
+H5_FILE  = _REPO_ROOT / 'inputs' / 'xrf' / 'NVD3-01_xrf.h5'
 GRAIN_ID = 'NVD3-01'   # drives figs/data/<GRAIN_ID>_mask.tif, figs/<GRAIN_ID>_CL_registered.tif,
                        # inputs/xanes_classification/<GRAIN_ID>_pre_edge_classification.csv,
                        # and spot_id = <GRAIN_ID>_spotNN
 
-FIGS_DIR           = '/Users/mstein/bin/kyanite/figs'
-CLASSIFICATION_DIR = '/Users/mstein/bin/kyanite/inputs/xanes_classification'
+FIGS_DIR           = _REPO_ROOT / 'figs'
+CLASSIFICATION_DIR = _REPO_ROOT / 'inputs' / 'xanes_classification'
 
 
 # Reusable data — read back by kyanite_spot_analysis.py and
 # xanes_rf_classifier.py, so it lives in figs/data/ alongside the rest of
 # the project's reusable per-grain data files, not among any figures.
-OUTPUT_CSV = f'/Users/mstein/bin/kyanite/figs/data/{GRAIN_ID}_spot_geochemistry.csv'
+OUTPUT_CSV = _REPO_ROOT / 'figs' / 'data' / f'{GRAIN_ID}_spot_geochemistry.csv'
 
 # Only include areas whose name matches this regex (case-insensitive).
 # Set to None to include every area in xrmmap/areas (drawn regions included).

@@ -80,11 +80,16 @@ set(0, 'DefaultLegendInterpreter',      'none');
 %% SECTION 1: PARAMETERS  — edit this section for each new grain / region set
 % =========================================================================
 
+% Anchored to this script's own location (not a hardcoded machine-specific
+% path) so the same file runs unmodified on any machine this repo is
+% checked out on.
+repo_root = fileparts(mfilename('fullpath'));
+
 grain_id = 'NA-GS-P84-03';
 
 % Directory containing the outputs of CL_EPMA_registration.m for this grain
 % (registered CL TIFFs and the grain mask TIFF).
-input_dir = '/Users/mstein/bin/kyanite/figs';
+input_dir = fullfile(repo_root, 'figs');
 
 % Reusable data files (grain mask, pixel data, etc.) live in their own
 % subfolder of input_dir, per CL_EPMA_registration.m's convention.
@@ -101,7 +106,7 @@ use_color_display = true;
 
 % Folder containing EPMA/XRF element map TIFFs (same folder used by
 % CL_EPMA_registration.m for this grain). All *.tif files auto-discovered.
-epma_dir = ['/Users/mstein/bin/kyanite/inputs/maps/', grain_id];
+epma_dir = fullfile(repo_root, 'inputs', 'maps', grain_id);
 
 % Reusable data (region polygons, pixel data, texture class raster) is
 % written into data_dir (figs/data/), alongside CL_EPMA_registration.m's own
@@ -113,7 +118,7 @@ epma_dir = ['/Users/mstein/bin/kyanite/inputs/maps/', grain_id];
 % class map PNG) — kyanite_figures.py / kyanite_pca_rf.py also save their
 % region-mode figures here.
 diagnostics_dir = fullfile(input_dir, 'diagnostics');
-output_dir = '/Users/mstein/bin/kyanite/figs/regions';
+output_dir = fullfile(repo_root, 'figs', 'regions');
 
 % --- Spatial calibration --------------------------------------------------
 epma_pixel_um = 1.0;     % µm per pixel — must match the value used during registration
