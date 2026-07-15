@@ -19,13 +19,20 @@
 #          jointly, e.g. Cr's effect depends on Fe level, rather than purely
 #          additively).
 #
-# RF/SHAP only apply to whole-grain CSVs (*_pixel_data.csv) — region CSVs
-# (*_region_pixel_data.csv, has a 'Region' column) are skipped with a
-# warning; region-level analysis is PCA-only (kyanite_pca.py).
+# RF/SHAP only apply to whole-grain CSVs (*_pixel_data.csv) by default — region
+# CSVs (*_region_pixel_data.csv, has a 'Region' column) are skipped with a
+# warning, since a full CV Random Forest + permutation importance + TreeSHAP
+# fit is expensive per dataset, and running it again once per region (on top
+# of every whole-grain grain) multiplies that cost; region-level analysis
+# normally uses kyanite_pca.py's pooled region-PCA instead, which is cheap.
+# Set ANALYZE_REGIONS = True below to run RF/SHAP per region anyway (each
+# region fit as its own independent dataset, own model — not pooled across
+# regions the way kyanite_pca.py's region PCA is).
 #
 # CSV_INPUT may be a single CSV file or a directory; all *_pixel_data.csv
 # files found in a directory are processed (region CSVs among them are
-# skipped, not errored on). CSVs are saved to OUTPUT_DIR below (default
+# skipped, not errored on, unless ANALYZE_REGIONS is True). CSVs are saved to
+# OUTPUT_DIR below (default
 # figs/data/, alongside the pixel-data CSV this script reads — these outputs
 # are themselves reusable data, read back by kyanite_rf_shap_plots.py); the
 # run log goes to DIAGNOSTICS_DIR (default figs/diagnostics/, matching every
@@ -54,6 +61,12 @@ _REPO_ROOT = Path(__file__).resolve().parent
 
 CSV_INPUT = _REPO_ROOT / 'figs' / 'data'   # file or directory
 ELEMENTS  = None      # list of CSV column names to include; None = all columns except CL
+
+# Region CSVs (*_region_pixel_data.csv) are skipped by default — RF/SHAP is
+# too computationally expensive to run once per region on top of every
+# whole-grain grain. Set True to fit RF/SHAP separately on each region
+# (labeled '<grain_id>_<region>' in outputs) instead of skipping them.
+ANALYZE_REGIONS = False
 
 # Where output (CSVs, log) is saved — independent of CSV_INPUT. This
 # script's CSVs (predictions, importance, SHAP values/interactions) are
@@ -377,9 +390,10 @@ diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
 for csv_path in csv_files:
     df = pd.read_csv(csv_path)
-    if 'Region' in df.columns:
-        print(f'  Region CSV {csv_path.name}: RF/SHAP is whole-grain only, skipping '
-              f'(use kyanite_pca.py for region PCA).')
+    if 'Region' in df.columns and not ANALYZE_REGIONS:
+        print(f'  Region CSV {csv_path.name}: RF/SHAP is whole-grain only by default (too '
+              f'computationally expensive per region), skipping (use kyanite_pca.py for region '
+              f'PCA, or set ANALYZE_REGIONS=True to fit RF/SHAP per region anyway).')
         continue
 
     exclude = {'CL', 'Region', 'DomainID'}
@@ -389,7 +403,14 @@ for csv_path in csv_files:
     if missing:
         print(f'  WARNING: columns not found, skipping: {missing}')
 
-    grain_id = csv_path.stem.replace('_pixel_data', '')
-    process_grain(df, available, grain_id, out_dir, diagnostics_dir, csv_path, missing)
+    if 'Region' in df.columns:
+        grain_id = csv_path.stem.replace('_region_pixel_data', '')
+        for region in df['Region'].drop_duplicates():
+            sub = df[df['Region'] == region].reset_index(drop=True)
+            process_grain(sub, available, f'{grain_id}_{region}', out_dir, diagnostics_dir,
+                           csv_path, missing)
+    else:
+        grain_id = csv_path.stem.replace('_pixel_data', '')
+        process_grain(df, available, grain_id, out_dir, diagnostics_dir, csv_path, missing)
 
 print('\nDone.')

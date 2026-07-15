@@ -29,7 +29,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | `CL_local_regression_map.m` | MATLAB | Slide a circular window across an already-registered grain and run a per-pixel CL-vs-element linear regression inside each window, producing continuous slope/R maps that complement `CL_region_extraction.m`'s fixed polygon regions |
 | `kyanite_figures.py` | Python | Standalone figure generation from exported CSV pixel data |
 | `kyanite_pca.py` | Python | PCA analysis of CL vs. trace elements from whole-grain CSV pixel data; for region CSVs, instead fits one shared PCA pooled across regions (scree, loadings, PC1/PC2-by-region scatter, biplot) to test whether hand-drawn regions separate in PC space — no per-region PCA |
-| `kyanite_rf_shap.py` | Python | Cross-validated Random Forest regression and TreeSHAP importance/interactions of CL vs. trace elements from whole-grain CSV pixel data; fits models and exports CSVs only, no figures — region CSVs are skipped (RF/SHAP is whole-grain only; region-level analysis is `kyanite_pca.py`'s pooled region-PCA) |
+| `kyanite_rf_shap.py` | Python | Cross-validated Random Forest regression and TreeSHAP importance/interactions of CL vs. trace elements from whole-grain CSV pixel data; fits models and exports CSVs only, no figures — region CSVs are skipped by default, too computationally expensive to run per region (`ANALYZE_REGIONS=True` opts in; region-level analysis is otherwise `kyanite_pca.py`'s cheap pooled region-PCA) |
 | `kyanite_rf_shap_plots.py` | Python | Figure generation from `kyanite_rf_shap.py`'s CSV outputs (observed-vs-predicted, permutation/SHAP importance, SHAP interactions, SHAP dependence) — decoupled from model fitting so a figure can be regenerated or restyled without retraining |
 | `kyanite_sample_size_convergence.py` | Python | Diagnostic: sweeps RF/SHAP over a range of pixel subsample sizes for one grain to check whether importance estimates have converged below `kyanite_rf_shap.py`'s `MAX_SAMPLES`/`SHAP_SAMPLES`, or would still change with more data |
 | `kyanite_spot_analysis.py` | Python | Batch analysis of `<grain_id>_spot_geochemistry.csv` files: XANES class distribution pie-chart grid, pooled CL-vs-element scatter plots colored by class, element-by-class box plots, PCA (PC1/PC2 scatter, scree, loadings, biplot) colored by class, and per-grain labeled spot-location maps on the registered CL image |
@@ -621,7 +621,14 @@ so they carry local functions with the identical values hand-copied in —
 
 **`kyanite_rf_shap.py`**
 - Fits models and exports CSVs + a log only — no figures; region CSVs (`Region`
-  column present) are skipped with a warning, since RF/SHAP is whole-grain only
+  column present) are skipped with a warning by default, since a full CV RF +
+  permutation importance + TreeSHAP fit is too expensive to also run once per
+  region on top of every whole-grain grain
+- `ANALYZE_REGIONS` — `False` (default): skip region CSVs as above. `True`: fit
+  RF/SHAP separately on each region within a region CSV instead (each region
+  treated as its own independent dataset/model, not pooled — unlike
+  `kyanite_pca.py`'s region PCA); outputs are labeled `<grain_id>_<region>`
+  instead of `<grain_id>`
 - `CSV_INPUT`, `ELEMENTS` — file/directory and columns to include (defaults to all element columns)
 - `OUTPUT_DIR` — where the CSVs are saved (default `figs/data/`, since these
   CSVs are themselves reusable data — `kyanite_rf_shap_plots.py` reads them
