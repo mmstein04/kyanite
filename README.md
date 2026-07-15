@@ -32,6 +32,19 @@ grain.
 - MATLAB + Image Processing Toolbox (`cpselect`, `imwarp`, `activecontour`, `visboundaries`, etc.)
 - Python: `h5py`, `numpy`, `tifffile`, `pandas`, `matplotlib`, `seaborn`, `scipy`, `scikit-learn`, `shap`, `pyyaml`
 
+On a shared HPC/cluster account, install these into a dedicated virtualenv
+rather than a shared `--user`/system site-packages install — the latter can
+silently upgrade a package (e.g. `numpy`) out from under unrelated tools that
+pin an older version:
+```
+python3 -m venv ~/kyanite_env
+source ~/kyanite_env/bin/activate
+pip install h5py numpy tifffile pandas matplotlib seaborn scipy scikit-learn shap pyyaml
+```
+`kyanite.sh` is an example SLURM batch script that activates this venv and
+runs a Python step (`kyanite_pca_rf.py` by default) non-interactively; adapt
+the script name and `#SBATCH` directives to the step/cluster you're using.
+
 **Directory structure.** Scripts are located at the repository root.
 `inputs/` and `figs/` are created automatically as the pipeline runs:
 ```
@@ -59,6 +72,8 @@ kyanite/
 ├── kyanite_palette.py                 shared colors (element/region/category/colormap
 │                                      conventions) — imported by the Python scripts above;
 │                                      the MATLAB scripts keep local copies of the same values
+├── kyanite.sh                          example SLURM batch script (HPC) — activates a venv,
+│                                      runs one Python step non-interactively
 │
 ├── inputs/                            everything the pipeline reads as input
 │   ├── xrf/                             raw synchrotron XRF scans: <grain_id>_xrf.h5
@@ -353,6 +368,9 @@ Steps 3–7:
 - **`sum_epma_maps.m`** — sums two or more element-line maps into one TIFF
   (e.g. `Zr_La` + `Zr_Lb`, when a single line does not capture the full
   signal).
+- **`kyanite.sh`** — example SLURM batch script for running a Python step
+  (default `kyanite_pca_rf.py`) non-interactively on an HPC cluster; sources
+  a dedicated venv before invoking Python (see Requirements above).
 
 ---
 

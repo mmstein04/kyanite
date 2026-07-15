@@ -34,6 +34,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | `xanes_rf_classifier.py` | Python | Cross-validated Random Forest classification of XANES pre-edge class (Type 1/2/3) from per-spot trace-element geochemistry, pooled across grains — the classification analog of `kyanite_pca_rf.py` |
 | `xrf_display.m` | MATLAB | Visualize XRF element-map TIFFs with grain mask overlay |
 | `sum_epma_maps.m` | MATLAB | Sum two or more element maps into a combined TIFF (e.g. Zr_La + Zr_Lb) |
+| `kyanite.sh` | Bash | Example SLURM batch script: activates the project's dedicated Python virtualenv and runs one Python step (default `kyanite_pca_rf.py`) non-interactively on an HPC cluster — adapt the script name and `#SBATCH`/environment variables per job |
 
 ### `CL_EPMA_registration.m` workflow
 1. Load CL image and auto-discover all EPMA/XRF TIFFs in `epma_dir`
@@ -620,3 +621,8 @@ so they carry local functions with the identical values hand-copied in —
 - MATLAB with Image Processing Toolbox (for `cpselect`, `imwarp`, `imread`, etc.)
 - Python: `h5py`, `numpy`, `tifffile`, `pandas`, `matplotlib`, `seaborn`, `scipy`, `scikit-learn`, `shap`, `pyyaml` (only needed for `onboard_dataset.py`)
 - Images are 8-, 16-, or 32-bit grayscale TIFFs; EPMA maps are the fixed reference
+- On a shared HPC/cluster account, install the Python dependencies above into a
+  dedicated virtualenv rather than a shared `--user`/system site-packages —
+  installing directly there can silently upgrade packages (e.g. `numpy`) out from
+  under unrelated tools already relying on an older version. `kyanite.sh` is an
+  example SLURM script that activates such a venv before running a Python step
