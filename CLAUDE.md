@@ -544,10 +544,12 @@ so they carry local functions with the identical values hand-copied in —
   trims whatever's left: `'mad'` (default) — a robust modified z-score computed in
   log-space (element concentrations are right-skewed, same assumption this project
   already makes before PCA elsewhere), excluded where it exceeds `MAD_K_LO`/
-  `MAD_K_HI` (`None` disables that side; default has no low-side trim), adapting to
-  how spread out each element's own distribution actually is instead of always
-  chopping a fixed fraction; or `'percentile'` — legacy fixed-percentile behavior
-  via `PCT_LO`/`PCT_HI` (0/100 disables it)
+  `MAD_K_HI` (`None` disables that side; default has no low-side trim, and
+  `MAD_K_HI=4` — chosen as the project default after visually comparing candidate
+  configurations' excluded pixels with `kyanite_outlier_method_comparison.py`),
+  adapting to how spread out each element's own distribution actually is instead of
+  always chopping a fixed fraction; or `'percentile'` — legacy fixed-percentile
+  behavior via `PCT_LO`/`PCT_HI` (0/100 disables it)
 - `OUTLIER_SPATIAL_QC` (default on, whole-grain CSVs only): every time the outlier
   logic above is applied to an element, also renders where it actually excluded
   pixels directly on the masked 2-D element map — one `<grain_id>_<element>_

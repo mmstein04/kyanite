@@ -165,13 +165,15 @@ BIN_EDGES = None
 #        distribution actually is, instead of always chopping a fixed
 #        top/bottom fraction — a clean element loses ~0 pixels, a
 #        contaminated one loses whatever doesn't fit its own typical spread.
-#        None for either K disables that side (default: no low-side trim,
-#        matching the old PCT_LO=0 default).
+#        None for either K disables that side (default: no low-side trim).
+#        MAD_K_HI=4 chosen as the project default after visually comparing
+#        candidate configurations' excluded pixels with
+#        kyanite_outlier_method_comparison.py.
 #      'percentile' — legacy fixed-percentile behavior; PCT_LO=0/PCT_HI=100
 #        disables it.
-OUTLIER_METHOD = 'percentile'   # 'mad' or 'percentile'
+OUTLIER_METHOD = 'mad'   # 'mad' or 'percentile'
 MAD_K_LO = None
-MAD_K_HI = 3.5
+MAD_K_HI = 4
 PCT_LO   = 0
 PCT_HI   = 99
 
