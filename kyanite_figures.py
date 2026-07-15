@@ -93,7 +93,7 @@ _REPO_ROOT = Path(__file__).resolve().parent
 
 CSV_INPUT = _REPO_ROOT / 'figs' / 'data'   # file or directory
 ELEMENTS  = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Mn_Ka', 'Ti_Ka']          # CSV column names
-PLOT_TYPE = 'scatter'      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix', 'summary', 'distributions', 'all', or a list of these
+PLOT_TYPE = 'all'      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix', 'summary', 'distributions', 'all', or a list of these
 
 # Where figures are saved — independent of CSV_INPUT, so pointing CSV_INPUT
 # at figs/data/ (where the pixel-data CSVs actually live) never dumps PNGs
