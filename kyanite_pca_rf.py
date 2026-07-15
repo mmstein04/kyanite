@@ -78,7 +78,7 @@ ELEMENTS  = None      # list of CSV column names to include; None = all columns 
 WHOLE_GRAIN_OUTPUT_DIR = '/Users/mstein/bin/kyanite/figs/whole_grain'
 REGION_OUTPUT_DIR      = '/Users/mstein/bin/kyanite/figs/regions'
 
-ANALYSES = 'pca'   # 'pca', 'rf', 'shap', 'all', or a list of these
+ANALYSES = 'all'   # 'pca', 'rf', 'shap', 'all', or a list of these
 
 # --- Data cleaning, shared by PCA and RF ---
 BELOW_DETECTION          = None   # values <= this are treated as below detection limit; None to disable
@@ -101,19 +101,22 @@ REGION_PCA_PCS   = (1, 2)   # which two PCs to scatter regions on
 REGION_PCA_HULLS = True     # draw a convex-hull outline around each region's point cloud
 
 # --- Random Forest ---
-N_ESTIMATORS         = 100
+# Maximum-accuracy configuration: no subsampling, unbounded trees, a large
+# forest, and heavier CV/permutation/SHAP repeats for stable estimates.
+# Runtime is intentionally not a consideration here.
+N_ESTIMATORS         = 1000
 MIN_SAMPLES_LEAF     = 5
-MAX_DEPTH            = 10     # cap tree depth; keeps fit/permutation-importance/SHAP-interaction cost
-                               # tractable at large N (same knob as kyanite_sample_size_convergence.py's
-                               # MAX_DEPTH); None = unbounded
-CV_FOLDS             = 10
-N_PERMUTATIONS       = 10     # repeats per fold for permutation importance
+MAX_DEPTH            = None   # unbounded; was capped at 10 to keep fit/permutation-importance/
+                               # SHAP-interaction cost tractable at large N (same knob as
+                               # kyanite_sample_size_convergence.py's MAX_DEPTH)
+CV_FOLDS             = 20
+N_PERMUTATIONS       = 50     # repeats per fold for permutation importance
 IMPORTANCE_SIG_RATIO = 1.0    # element flagged "significant" if mean/std of importance exceeds this
-MAX_SAMPLES          = 50000  # subsample pixels before RF/permutation importance for speed; None = use all
+MAX_SAMPLES          = None   # subsample pixels before RF/permutation importance for speed; None = use all
 RANDOM_STATE         = 42
 
 # --- SHAP ---
-SHAP_SAMPLES         = 500    # pixels used to fit the SHAP explainer model; interaction values are
+SHAP_SAMPLES         = 5000   # pixels used to fit the SHAP explainer model; interaction values are
                                # O(n * n_features^2), so keep this well below MAX_SAMPLES
 SHAP_INTERACTIONS    = True   # also compute pairwise SHAP interaction values (slower); False = importance only
 SHAP_DEPENDENCE_PLOTS = True  # element value vs. its own SHAP value, one panel per element;
