@@ -262,7 +262,9 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `_texture_domains_*` equivalents in `classification_mode`). Same idea again for
   `CL_local_regression_map.m`: `<grain_id>_local_regression_analysis_log.txt`,
   `<grain_id>_local_regression_slope_QC.png`, `<grain_id>_local_regression_R_QC.png`,
-  `<grain_id>_local_regression_n_map.png`
+  `<grain_id>_local_regression_n_map.png`. `kyanite_figures.py`'s own outlier-exclusion
+  QC (see its Key Parameters entry) follows the same idea: `<grain_id>_<element>_
+  outlier_exclusion_QC.png` in `figs/diagnostics/`, not alongside its analysis figures
 - Whole-grain analysis figures from `kyanite_figures.py` and `kyanite_pca_rf.py`
   (`WHOLE_GRAIN_OUTPUT_DIR`, default `figs/whole_grain/`) and region-mode
   figures from the same two scripts plus `CL_region_extraction.m`'s own
@@ -482,10 +484,58 @@ so they carry local functions with the identical values hand-copied in —
 
 **`kyanite_figures.py`**
 - `CSV_INPUT`, `ELEMENTS`, `PLOT_TYPE` (`scatter`, `violin`, `boxplot`, `contour`,
-  `heatmap`, `corrmatrix`, `all`, or a list of these)
+  `heatmap`, `corrmatrix`, `summary`, `distributions`, `all`, or a list of these)
 - `WHOLE_GRAIN_OUTPUT_DIR` / `REGION_OUTPUT_DIR` — where figures are saved
   (default `figs/whole_grain/` / `figs/regions/`), independent of `CSV_INPUT`
-- `N_BINS` / `BIN_EDGES`, `PCT_LO` / `PCT_HI`
+- `N_BINS` / `BIN_EDGES`
+- `summary` (only fires when `CSV_INPUT` is a directory): pools every whole-grain
+  (non-region) CSV found into one grains-x-`ELEMENTS` heatmap of CL-vs-element
+  Pearson r (annotated with n per cell), so correlation strength/consistency can be
+  compared across grains — skipped (with a warning) if `CSV_INPUT` isn't a directory
+  or fewer than 2 whole-grain CSVs are found. `SUMMARY_OUTPUT_DIR` (default `None` →
+  `WHOLE_GRAIN_OUTPUT_DIR`) and `ALL_GRAINS_LABEL` (default `'all_grains'`, the
+  filename prefix) control where/how it's saved
+- Outlier removal on the element axis (applied per region in region mode), two
+  independent stages: (1) `SATURATION_FILTER` (default on) flags and excludes
+  pixels piled up near an element's own max value — the signature of a
+  saturated/clipped detector channel — controlled by `SATURATION_BAND_FRAC`/
+  `SATURATION_MIN_FRAC`/`SATURATION_MIN_COUNT`; only ever fires (with a printed
+  warning) on a genuine pileup, and only on the max side (a pileup near the min is
+  ordinary near-zero/below-detection-limit data, not saturation). (2) `OUTLIER_METHOD`
+  trims whatever's left: `'mad'` (default) — a robust modified z-score computed in
+  log-space (element concentrations are right-skewed, same assumption this project
+  already makes before PCA elsewhere), excluded where it exceeds `MAD_K_LO`/
+  `MAD_K_HI` (`None` disables that side; default has no low-side trim), adapting to
+  how spread out each element's own distribution actually is instead of always
+  chopping a fixed fraction; or `'percentile'` — legacy fixed-percentile behavior
+  via `PCT_LO`/`PCT_HI` (0/100 disables it)
+- `OUTLIER_SPATIAL_QC` (default on, whole-grain CSVs only): every time the outlier
+  logic above is applied to an element, also renders where it actually excluded
+  pixels directly on the masked 2-D element map — one `<grain_id>_<element>_
+  outlier_exclusion_QC.png` per element, saved to `OUTLIER_QC_DIR` (default
+  `figs/diagnostics/`). `pixel_data.csv` carries no row/col, so this reloads the raw
+  element TIFF (`MAPS_DIR`, default `inputs/maps/`) and grain mask TIFF (`MASK_DIR`,
+  default `figs/data/`) instead of using the CSV — skipped per element (with a
+  warning) if either file isn't found. Exclusion decisions are scale-invariant
+  (percentile and log-space MAD are both unaffected by a positive scalar like
+  whatever `normalize_epma` applied), so the pixels flagged here exactly match what
+  the CSV-based filtering just computed even though the displayed concentration
+  values may be in different (e.g. unnormalized raw) units. Colors: gray = kept,
+  dark red (`SATURATION_QC_COLOR`) = saturation-excluded, orange = statistical-trim-
+  excluded — always reflects whichever `OUTLIER_METHOD` is currently configured, not
+  a comparison between methods
+- `distributions` — `summary`-shaped (only fires when `CSV_INPUT` is a directory,
+  pools every whole-grain CSV rather than looping per-grain): for each element,
+  renders a grain-x-grain small-multiples grid (`DIST_GRID_NCOLS` columns) of its raw
+  value histogram and a second grid of its log10 histogram, each with a fitted normal
+  curve + skew annotation, on each grain's full *unfiltered* masked population — a
+  direct sanity check, per grain/element, of the log-normal assumption
+  `OUTLIER_METHOD='mad'` relies on (testing on already-trimmed data would be
+  circular). Also writes `<ALL_GRAINS_LABEL>_element_distribution_stats.csv`
+  (skew/kurtosis, raw and log, per grain x element) and prints each element's median
+  log-skew/kurtosis across grains. Saved to `DISTRIBUTION_QC_DIR` (default `None` →
+  `OUTLIER_QC_DIR`, i.e. `figs/diagnostics/`) — skipped (with a warning) if
+  `CSV_INPUT` isn't a directory or no whole-grain CSVs are found
 
 **`kyanite_pca_rf.py`**
 - `CSV_INPUT`, `ELEMENTS` — file/directory and columns to include (defaults to all element columns)
