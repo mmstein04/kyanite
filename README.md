@@ -132,13 +132,13 @@ kyanite/
     │                                   (visualizations of the inputs/maps/ TIFFs)
     ├── xanes/                           xanes_plot.py's pre-edge classification-support figures
     │                                   (spot geochemistry CSVs live in data/, not here)
-    ├── spot_analysis/                   kyanite_spot_analysis.py's batch figures
-    │                                   (pie/scatter/box/PCA/map)
-    └── xanes_rf_classifier/             xanes_rf_classifier.py's two figures (importance,
-                                        confusion matrix) — kept separate from spot_analysis/
-                                        even though both pool the same per-spot CSVs, since
-                                        they're different analyses (its reusable CSVs go to
-                                        data/, its run log to diagnostics/)
+    └── spot_analysis/                   kyanite_spot_analysis.py's batch figures
+                                        (pie/scatter/box/PCA/map) plus xanes_rf_classifier.py's
+                                        two figures (importance, confusion matrix) — shared
+                                        since both pool the same per-spot CSVs and fall under
+                                        the same "spot analysis" umbrella, even though they're
+                                        different analyses (xanes_rf_classifier.py's reusable
+                                        CSVs go to data/, its run log to diagnostics/)
 ```
 
 **If raw data does not already follow these conventions** (for example, a
@@ -410,9 +410,10 @@ Steps 3–7:
    fold cannot learn one grain's chemical signature instead of a general
    chemistry–oxidation relationship. Reads the same `figs/data/` CSVs as
    `kyanite_spot_analysis.py`. Output splits the same way as Steps 7a/7b:
-   its two figures (importance, confusion matrix) go to their own
-   `figs/xanes_rf_classifier/` (`OUT_DIR`) rather than `figs/spot_analysis/`,
-   since it's a different analysis; its reusable CSVs (importance,
+   its two figures (importance, confusion matrix) go to `figs/spot_analysis/`
+   (`OUT_DIR`) — shared with `kyanite_spot_analysis.py`, no dedicated folder
+   of its own, since both fall under the same "spot analysis" umbrella even
+   though they're different analyses; its reusable CSVs (importance,
    predictions) go to `figs/data/` (`DATA_OUTPUT_DIR`); its run log goes to
    `figs/diagnostics/` (`DIAGNOSTICS_DIR`).
 

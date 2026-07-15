@@ -56,9 +56,11 @@ from kyanite_palette import BLUE, ORANG, CATEGORY_ORDER
 _REPO_ROOT = Path(__file__).resolve().parent
 
 CSV_INPUT    = _REPO_ROOT / 'figs' / 'data'    # file or directory of *_spot_geochemistry.csv
-OUT_DIR      = _REPO_ROOT / 'figs' / 'xanes_rf_classifier'   # figures only; kept separate from
-               # figs/spot_analysis/ (kyanite_spot_analysis.py's output) — a different
-               # analysis (XANES-class classifier vs. pooled scatter/pie/box/PCA figures)
+OUT_DIR      = _REPO_ROOT / 'figs' / 'spot_analysis'   # figures only; shares
+               # kyanite_spot_analysis.py's folder — both pool the same per-spot
+               # CSVs and fall under the same "spot analysis" umbrella, even
+               # though they're two different analyses (classifier vs. pooled
+               # scatter/pie/box/PCA figures)
 DATA_OUTPUT_DIR = _REPO_ROOT / 'figs' / 'data'   # reusable CSVs (importance, predictions),
                # alongside the spot_geochemistry CSVs this script reads
 DIAGNOSTICS_DIR = _REPO_ROOT / 'figs' / 'diagnostics'   # run log, matching every other

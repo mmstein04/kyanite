@@ -271,7 +271,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   (`<OUTPUT_LABEL>_rf_classifier_log.txt`) — their run logs live in
   `figs/diagnostics/` (`DIAGNOSTICS_DIR`) even though their figures/CSVs go
   elsewhere (`figs/pca/`+`figs/regions/`, `figs/data/`, and
-  `figs/xanes_rf_classifier/`+`figs/data/`, respectively).
+  `figs/spot_analysis/`+`figs/data/`, respectively).
   `kyanite_figures.py`'s own outlier-exclusion
   QC (see its Key Parameters entry) follows the same idea: `<grain_id>_<element>_
   outlier_exclusion_QC.png` in `figs/diagnostics/`, not alongside its analysis figures
@@ -283,8 +283,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `kyanite_rf_shap_plots.py`'s figures split by analysis: RF figures to
   `RF_OUTPUT_DIR` (default `figs/rf/`), SHAP figures to `SHAP_OUTPUT_DIR`
   (default `figs/shap/`) — kept apart even though both are read from the same
-  `figs/data/` CSVs, since they're different analyses (mirrors
-  `xanes_rf_classifier.py` vs. `kyanite_spot_analysis.py` below). All of these
+  `figs/data/` CSVs, since they're different analyses. All of these
   are kept separate from `figs/data/` and `figs/diagnostics/` — output
   location for each Python script is an explicit parameter, independent of
   wherever `CSV_INPUT` happens to point. Same principle for the other
@@ -296,10 +295,10 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `figs/diagnostics/` (`DIAGNOSTICS_DIR`).
   `CL_local_regression_map.m`'s one true result figure
   (`<grain_id>_local_regression_R_Cr_vs_CL.png`) → `figs/local_regression/`,
-  `kyanite_spot_analysis.py` → `figs/spot_analysis/`, `xanes_rf_classifier.py` →
-  `figs/xanes_rf_classifier/` (kept separate from `figs/spot_analysis/` even though
-  both pool the same per-spot CSVs, since they're different analyses), `xanes_plot.py`
-  → `figs/xanes/`
+  `kyanite_spot_analysis.py` and `xanes_rf_classifier.py` → `figs/spot_analysis/`
+  (shared — both pool the same per-spot CSVs and fall under the same
+  "spot analysis" umbrella, even though they're two different analyses),
+  `xanes_plot.py` → `figs/xanes/`
 - Reusable data files read back in by other scripts go in `figs/data/`
   rather than directly in `figs/`: grain mask (`<grain_id>_mask.tif`), pixel
   data exports (`<grain_id>_pixel_data.csv` and `.mat`), control-point MATs
@@ -359,7 +358,8 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `OUTPUT_LABEL`, default `all_grains_`), split the same way as
   `kyanite_pca.py`/`kyanite_rf_shap.py`: figures
   (`_rf_classifier_importance.png`, `_rf_classifier_confusion_matrix.png`) in
-  `figs/xanes_rf_classifier/` (`OUT_DIR`); reusable CSVs
+  `figs/spot_analysis/` (`OUT_DIR` — shared with `kyanite_spot_analysis.py`,
+  no dedicated folder of its own); reusable CSVs
   (`_rf_classifier_importance.csv`, `_rf_classifier_predictions.csv`) in
   `figs/data/` (`DATA_OUTPUT_DIR`); the run log
   (`_rf_classifier_log.txt`) in `figs/diagnostics/` (`DIAGNOSTICS_DIR`)
@@ -700,8 +700,9 @@ so they carry local functions with the identical values hand-copied in —
 **`xanes_rf_classifier.py`**
 - `CSV_INPUT` — file/directory of `*_spot_geochemistry.csv` (defaults to `figs/data/`, same as `kyanite_spot_analysis.py`)
 - `OUT_DIR` — figures only (`_rf_classifier_importance.png`, `_rf_classifier_confusion_matrix.png`);
-  default `figs/xanes_rf_classifier/`, kept separate from `kyanite_spot_analysis.py`'s
-  `figs/spot_analysis/` since it's a different analysis (classifier vs. pooled scatter/pie/box/PCA figures)
+  default `figs/spot_analysis/`, shared with `kyanite_spot_analysis.py` — both pool
+  the same per-spot CSVs and fall under the same "spot analysis" umbrella, even
+  though they're two different analyses (classifier vs. pooled scatter/pie/box/PCA figures)
 - `DATA_OUTPUT_DIR` — reusable CSVs (`_rf_classifier_importance.csv`, `_rf_classifier_predictions.csv`);
   default `figs/data/`, alongside the `spot_geochemistry` CSVs this script reads
 - `DIAGNOSTICS_DIR` — run log (`_rf_classifier_log.txt`); default `figs/diagnostics/`,
