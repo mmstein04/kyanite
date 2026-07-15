@@ -88,6 +88,7 @@ N_PERMUTATIONS       = 50     # repeats per fold for permutation importance
 IMPORTANCE_SIG_RATIO = 1.0    # element flagged "significant" if mean/std of importance exceeds this
 MAX_SAMPLES          = None   # subsample pixels before RF/permutation importance for speed; None = use all
 RANDOM_STATE         = 42
+N_JOBS               = 16    # parallel worker processes for RF fitting and permutation importance
 
 # --- SHAP ---
 SHAP_SAMPLES         = 5000   # pixels used to fit the SHAP explainer model; interaction values are
@@ -175,7 +176,7 @@ def run_rf_cv(X, y, elements, log_lines):
     for i, (train_idx, test_idx) in enumerate(kf.split(X)):
         rf = RandomForestRegressor(n_estimators=N_ESTIMATORS,
                                     min_samples_leaf=MIN_SAMPLES_LEAF, max_depth=MAX_DEPTH,
-                                    random_state=RANDOM_STATE, n_jobs=1)
+                                    random_state=RANDOM_STATE, n_jobs=N_JOBS)
         rf.fit(X[train_idx], y[train_idx])
         y_pred = rf.predict(X[test_idx])
         y_pred_all[test_idx] = y_pred
@@ -188,7 +189,7 @@ def run_rf_cv(X, y, elements, log_lines):
 
         perm = permutation_importance(rf, X[test_idx], y[test_idx],
                                        n_repeats=N_PERMUTATIONS,
-                                       random_state=RANDOM_STATE, n_jobs=1)
+                                       random_state=RANDOM_STATE, n_jobs=N_JOBS)
         imp_all[i] = perm.importances_mean
 
         line = f'  Fold {i + 1} - RMSE: {rmse:.4f} | R2: {r2:.4f}'
@@ -212,7 +213,7 @@ def run_shap(X_df, y, elements):
 
     rf = RandomForestRegressor(n_estimators=N_ESTIMATORS,
                                 min_samples_leaf=MIN_SAMPLES_LEAF, max_depth=MAX_DEPTH,
-                                random_state=RANDOM_STATE, n_jobs=1)
+                                random_state=RANDOM_STATE, n_jobs=N_JOBS)
     rf.fit(X_vals, y_vals)
 
     explainer = shap.TreeExplainer(rf)
@@ -254,6 +255,7 @@ def build_log_header(label, csv_path, requested, missing, kept, dropped, n_valid
             f'  IMPORTANCE_SIG_RATIO: {IMPORTANCE_SIG_RATIO}',
             f'  MAX_SAMPLES: {MAX_SAMPLES}',
             f'  RANDOM_STATE: {RANDOM_STATE}',
+            f'  N_JOBS: {N_JOBS}',
         ]
     if 'shap' in analyses:
         lines += [
