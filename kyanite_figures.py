@@ -160,7 +160,7 @@ BIN_EDGES = None
 #      'mad' (default) — robust modified z-score, 0.6745*(x - median)/MAD,
 #        computed in log-space (element concentrations are right-skewed,
 #        same assumption this project already makes before PCA elsewhere —
-#        see LOG_TRANSFORM in kyanite_pca_rf.py), excluded where it exceeds
+#        see LOG_TRANSFORM in kyanite_pca.py), excluded where it exceeds
 #        MAD_K_LO/MAD_K_HI. Adapts to how spread out each element's own
 #        distribution actually is, instead of always chopping a fixed
 #        top/bottom fraction — a clean element loses ~0 pixels, a
@@ -444,7 +444,7 @@ def saturation_mask(x, label, verbose=True):
 def mad_keep_mask(x, k_lo, k_hi):
     # Robust modified z-score (Iglewicz & Hoya): 0.6745*(x - median)/MAD,
     # computed in log-space — element concentrations are right-skewed
-    # (lognormal-ish), same assumption kyanite_pca_rf.py/kyanite_spot_analysis.py
+    # (lognormal-ish), same assumption kyanite_pca.py/kyanite_spot_analysis.py
     # already make before z-scoring for PCA. On raw values, MAD reads the
     # natural long high-concentration tail as "outliers" and would strip out
     # exactly the scientifically important pixels (e.g. high-Fe quenching

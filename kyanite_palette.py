@@ -23,7 +23,7 @@ ORANG = '#D85B30'
 # --- Fixed element -> color --------------------------------------------------
 # Okabe-Ito colorblind-safe qualitative set. Covers the 5 elements that
 # recur across every grain's whole-grain/region maps (the ELEMENTS default
-# shared by kyanite_figures.py/kyanite_pca_rf.py/CL_EPMA_registration.m's
+# shared by kyanite_figures.py/kyanite_pca.py/CL_EPMA_registration.m's
 # shift-sensitivity plot). Any other element name (e.g. a spot-geochemistry
 # trace element not in this set) falls back to the extra colors below, then
 # repeats — see element_colors().

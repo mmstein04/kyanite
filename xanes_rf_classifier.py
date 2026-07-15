@@ -7,7 +7,7 @@
 # every <grain_id>_spot_geochemistry.csv produced by xrf_h5_extract_spots.py.
 # Reports k-fold CV accuracy/balanced accuracy/macro F1, an out-of-fold
 # confusion matrix, and permutation feature importance — the classification
-# analog of kyanite_pca_rf.py's CL-intensity regression.
+# analog of kyanite_rf_shap.py's CL-intensity regression.
 #
 # 'Bad data'/unclassified spots are dropped (same convention as
 # kyanite_spot_analysis.py's pie/box plots). All grains are always pooled
@@ -29,7 +29,7 @@
 #                  chemistry from grains it never trained on. Recommended,
 #                  but constrained by there being only a handful of grains.
 #   'stratified' - StratifiedKFold ignoring grain identity: simpler, matches
-#                  kyanite_pca_rf.py's plain KFold, but risks a fold learning
+#                  kyanite_rf_shap.py's plain KFold, but risks a fold learning
 #                  a grain's chemistry signature rather than a general
 #                  chemistry-oxidation relationship.
 # =============================================================================
@@ -56,9 +56,13 @@ from kyanite_palette import BLUE, ORANG, CATEGORY_ORDER
 _REPO_ROOT = Path(__file__).resolve().parent
 
 CSV_INPUT    = _REPO_ROOT / 'figs' / 'data'    # file or directory of *_spot_geochemistry.csv
-OUT_DIR      = _REPO_ROOT / 'figs' / 'xanes_rf_classifier'   # kept separate from
+OUT_DIR      = _REPO_ROOT / 'figs' / 'xanes_rf_classifier'   # figures only; kept separate from
                # figs/spot_analysis/ (kyanite_spot_analysis.py's output) — a different
                # analysis (XANES-class classifier vs. pooled scatter/pie/box/PCA figures)
+DATA_OUTPUT_DIR = _REPO_ROOT / 'figs' / 'data'   # reusable CSVs (importance, predictions),
+               # alongside the spot_geochemistry CSVs this script reads
+DIAGNOSTICS_DIR = _REPO_ROOT / 'figs' / 'diagnostics'   # run log, matching every other
+               # analysis/registration log in this project
 OUTPUT_LABEL = 'all_grains'   # prefix for all output files (pooled analysis; no per-grain run)
 
 ELEMENTS = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Ti_Ka', 'Mn_Ka']   # None = auto-detect (present in every input CSV)
@@ -66,7 +70,7 @@ ELEMENTS = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Ti_Ka', 'Mn_Ka']   # None = auto-detect (
 # --- Target / class filtering ---
 # CATEGORY_ORDER (imported from kyanite_palette) excludes 'Bad data'/NaN, matches kyanite_spot_analysis.py
 
-# --- Data cleaning (same semantics as kyanite_pca_rf.py) ---
+# --- Data cleaning (same semantics as kyanite_rf_shap.py) ---
 BELOW_DETECTION          = None   # values <= this are treated as below detection limit; None to disable
 MAX_BELOW_DETECTION_FRAC = 0.2    # drop an element if more than this fraction of spots are below detection
 LOG_TRANSFORM            = True   # log10-transform element concentrations before RF
@@ -132,8 +136,13 @@ if CV_STRATEGY not in ALL_CV_STRATEGIES:
     raise ValueError(f"Unknown CV_STRATEGY '{CV_STRATEGY}'; choose from {ALL_CV_STRATEGIES}.")
 
 out_dir = Path(OUT_DIR)
-if SAVE_FIG or SAVE_CSV:
+if SAVE_FIG:
     out_dir.mkdir(parents=True, exist_ok=True)
+data_dir = Path(DATA_OUTPUT_DIR)
+if SAVE_CSV:
+    data_dir.mkdir(parents=True, exist_ok=True)
+diagnostics_dir = Path(DIAGNOSTICS_DIR)
+diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
 # =============================================================================
 # HELPERS
@@ -418,14 +427,14 @@ if SAVE_CSV:
         'element': kept, 'mean_importance': mean_imp, 'std_importance': std_imp,
         'significant': [e in significant for e in kept],
     }).sort_values('mean_importance', ascending=False)
-    imp_df.to_csv(out_dir / f'{OUTPUT_LABEL}_rf_classifier_importance.csv', index=False)
+    imp_df.to_csv(data_dir / f'{OUTPUT_LABEL}_rf_classifier_importance.csv', index=False)
 
     pred_df = classifiable.loc[X_df.index, ['grain_id', 'spot_id', 'spot', 'category_label']].copy()
     pred_df['predicted_label'] = y_pred_all
     pred_df['correct'] = pred_df['category_label'] == pred_df['predicted_label']
     for ci, cls in enumerate(CATEGORY_ORDER):
         pred_df[f'proba_{cls}'] = proba_all[:, ci]
-    pred_df.to_csv(out_dir / f'{OUTPUT_LABEL}_rf_classifier_predictions.csv', index=False)
+    pred_df.to_csv(data_dir / f'{OUTPUT_LABEL}_rf_classifier_predictions.csv', index=False)
 
     print(f'  Saved: {OUTPUT_LABEL}_rf_classifier_importance.csv, {OUTPUT_LABEL}_rf_classifier_predictions.csv')
 
@@ -442,7 +451,7 @@ if SAVE_FIG:
 
     print(f'  Saved: {OUTPUT_LABEL}_rf_classifier_importance.png, {OUTPUT_LABEL}_rf_classifier_confusion_matrix.png')
 
-log_file = out_dir / f'{OUTPUT_LABEL}_rf_classifier_log.txt'
+log_file = diagnostics_dir / f'{OUTPUT_LABEL}_rf_classifier_log.txt'
 log_file.write_text('\n'.join(str(l) for l in log_lines) + '\n')
 print(f'\nLog saved: {log_file.name}')
 print('Done.')

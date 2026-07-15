@@ -5,4 +5,4 @@ export OMP_NUM_THREADS=16
 export PYTHONUNBUFFERED=1
 source ~/kyanite_env/bin/activate
 
-~/kyanite_env/bin/python3 kyanite_pca_rf.py
+~/kyanite_env/bin/python3 kyanite_rf_shap.py

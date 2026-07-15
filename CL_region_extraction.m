@@ -110,12 +110,12 @@ epma_dir = fullfile(repo_root, 'inputs', 'maps', grain_id);
 
 % Reusable data (region polygons, pixel data, texture class raster) is
 % written into data_dir (figs/data/), alongside CL_EPMA_registration.m's own
-% data outputs, so kyanite_figures.py / kyanite_pca_rf.py find whole-grain
+% data outputs, so kyanite_figures.py / kyanite_pca.py find whole-grain
 % and region pixel data in one place. QC-only outputs (overlay, all-maps QC,
 % log) go in diagnostics_dir (figs/diagnostics/), matching
 % CL_EPMA_registration.m's split. output_dir itself holds only the
 % remaining true analysis-result outputs (region summary stats, texture
-% class map PNG) — kyanite_figures.py / kyanite_pca_rf.py also save their
+% class map PNG) — kyanite_figures.py / kyanite_pca.py also save their
 % region-mode figures here.
 diagnostics_dir = fullfile(input_dir, 'diagnostics');
 output_dir = fullfile(repo_root, 'figs', 'regions');
@@ -938,7 +938,7 @@ end
 
 % ---- Save combined pixel data ---------------------------------------------
 % NOTE: this filename/the 'Region' column are kept identical in both modes —
-% kyanite_figures.py / kyanite_pca_rf.py / kyanite_sample_size_convergence.py
+% kyanite_figures.py / kyanite_pca.py / kyanite_rf_shap.py glob
 % glob '*_pixel_data.csv' and group on 'Region'. Running classification mode
 % for a grain that already has default-mode pixel data (or vice versa) will
 % overwrite it; warn rather than silently clobber.
@@ -1188,7 +1188,7 @@ function color_map = region_name_colors(names)
 % grain: colors are assigned by *sorted name* (not draw order) into a fixed
 % qualitative palette (matplotlib's 'tab10', spelled out here so the values
 % match kyanite_palette.py's REGION_PALETTE / kyanite_figures.py's
-% region-highlight figures / kyanite_pca_rf.py's region-PCA plots exactly
+% region-highlight figures / kyanite_pca.py's region-PCA plots exactly
 % — see CLAUDE.md's "Color conventions" section). Region names today are
 % generic (roi_1, roi_2, ...) rather than semantic, so this intentionally
 % does not hardcode a vocabulary — same name always gets the same color,

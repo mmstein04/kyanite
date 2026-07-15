@@ -42,8 +42,9 @@ source ~/kyanite_env/bin/activate
 pip install h5py numpy tifffile pandas matplotlib seaborn scipy scikit-learn shap pyyaml
 ```
 `kyanite.sh` is an example SLURM batch script that activates this venv and
-runs a Python step (`kyanite_pca_rf.py` by default) non-interactively; adapt
-the script name and `#SBATCH` directives to the step/cluster you're using.
+runs a Python step (`kyanite_rf_shap.py` by default, the compute-heavy step)
+non-interactively; adapt the script name and `#SBATCH` directives to the
+step/cluster you're using.
 
 **Directory structure.** Scripts are located at the repository root.
 `inputs/` and `figs/` are created automatically as the pipeline runs:
@@ -60,8 +61,10 @@ kyanite/
 ├── CL_region_extraction.m             Step 4 (optional) — sub-grain regions / texture domains
 ├── CL_local_regression_map.m          Step 5 (optional) — continuous local CL-vs-element regression
 ├── kyanite_figures.py                 Step 6 — whole-grain figures from pixel CSV
-├── kyanite_pca_rf.py                  Step 7 — PCA / Random Forest / SHAP
-├── kyanite_sample_size_convergence.py  diagnostic for Step 7's subsampling
+├── kyanite_pca.py                     Step 7a — PCA (whole-grain + pooled region-PCA)
+├── kyanite_rf_shap.py                 Step 7b — Random Forest / SHAP fit, exports CSVs only
+├── kyanite_rf_shap_plots.py           Step 7c — figures from kyanite_rf_shap.py's CSVs
+├── kyanite_sample_size_convergence.py  diagnostic for Step 7b's subsampling
 ├── xanes_plot.py                      Step 8.1 — plot pre-edge doublets for hand classification
 ├── xanes_classification_split.py      Step 8.2 — split hand classification CSV per grain
 ├── xrf_h5_extract_spots.py            Step 8.3 — per-spot geochemistry + CL + XANES class CSV
@@ -92,36 +95,50 @@ kyanite/
     ├── data/                            reusable data other scripts read back in: grain mask,
     │                                   pixel/region-pixel data CSV/MAT, control-point MATs,
     │                                   mask-edit history, local-regression MAT/CSV, per-spot
-    │                                   geochemistry CSV — data files live here regardless of
-    │                                   which script/mode produced them
+    │                                   geochemistry CSV, kyanite_pca.py's PCA tables
+    │                                   (variance/loadings/scores/centroid distances),
+    │                                   kyanite_rf_shap.py's RF/SHAP CSVs, and
+    │                                   xanes_rf_classifier.py's importance/predictions CSVs —
+    │                                   data files live here regardless of which script/mode
+    │                                   produced them
     ├── diagnostics/                     not-for-publishing sanity/alignment-check + run-metadata
     │                                   outputs from CL_EPMA_registration.m / CL_mask_edit.m /
     │                                   CL_region_extraction.m / CL_local_regression_map.m
     │                                   (analysis logs, all-maps QC, registration overlay,
     │                                   mask-image registration check, shift-sensitivity,
     │                                   mask check, mask-edit diff/log, region overlay/QC,
-    │                                   local-regression slope/R/n-map QC)
+    │                                   local-regression slope/R/n-map QC) plus kyanite_pca.py's,
+    │                                   kyanite_rf_shap.py's, and xanes_rf_classifier.py's run logs,
+    │                                   and all of kyanite_sample_size_convergence.py's output
+    │                                   (raw sweep CSV, convergence figures, log — it's itself a
+    │                                   diagnostic, so it has no dedicated folder of its own)
     ├── mask_edit_backups/               pre-edit snapshots written automatically by CL_mask_edit.m
-    ├── whole_grain/                     kyanite_figures.py / kyanite_pca_rf.py figures for
-    │                                   whole-grain pixel CSVs (scatter/violin/boxplot/contour/
-    │                                   heatmap/corrmatrix, PCA/RF/SHAP)
+    ├── whole_grain/                     kyanite_figures.py's whole-grain pixel-CSV figures
+    │                                   (scatter/violin/boxplot/contour/heatmap/corrmatrix)
+    ├── pca/                             kyanite_pca.py's whole-grain PCA figures (scree,
+    │                                   loadings, PC-vs-CL scatter)
+    ├── rf/                               kyanite_rf_shap_plots.py's RF figures
+    │                                   (observed-vs-predicted, permutation importance)
+    ├── shap/                             kyanite_rf_shap_plots.py's SHAP figures
+    │                                   (importance, interactions, dependence)
     ├── regions/                         CL_region_extraction.m's non-reusable region outputs
     │                                   (region summary CSV, texture class map PNG) plus
-    │                                   kyanite_figures.py / kyanite_pca_rf.py figures for
-    │                                   region pixel CSVs
+    │                                   kyanite_figures.py / kyanite_pca.py figures for
+    │                                   region pixel CSVs (RF/SHAP has no region-mode output)
     ├── local_regression/                CL_local_regression_map.m's one true result figure
     │                                   (Cr R-vs-CL); slope/R/n-map QC now live in diagnostics/,
     │                                   and the MAT/CSV in data/
-    ├── sample_size_convergence/         kyanite_sample_size_convergence.py outputs
     ├── map_renders/                     xrf_display.m's rendered element/ratio-map PNGs
     │                                   (visualizations of the inputs/maps/ TIFFs)
     ├── xanes/                           xanes_plot.py's pre-edge classification-support figures
     │                                   (spot geochemistry CSVs live in data/, not here)
     ├── spot_analysis/                   kyanite_spot_analysis.py's batch figures
     │                                   (pie/scatter/box/PCA/map)
-    └── xanes_rf_classifier/             xanes_rf_classifier.py outputs — kept separate from
-                                        spot_analysis/ even though both pool the same per-spot
-                                        CSVs, since they're different analyses
+    └── xanes_rf_classifier/             xanes_rf_classifier.py's two figures (importance,
+                                        confusion matrix) — kept separate from spot_analysis/
+                                        even though both pool the same per-spot CSVs, since
+                                        they're different analyses (its reusable CSVs go to
+                                        data/, its run log to diagnostics/)
 ```
 
 **If raw data does not already follow these conventions** (for example, a
@@ -285,30 +302,64 @@ to `WHOLE_GRAIN_OUTPUT_DIR`/`REGION_OUTPUT_DIR` (default `figs/whole_grain/`/
 it at `figs/data/` never dumps PNGs in among the reusable data files.
 
 ### Step 7 — Multivariate statistics: PCA, Random Forest, and SHAP
-**`kyanite_pca_rf.py`**
+Three scripts, split so retraining a Random Forest/SHAP model is never
+required just to regenerate or restyle a figure:
+
+**Step 7a — `kyanite_pca.py`**
 
 Reads `figs/data/<grain_id>_pixel_data.csv` (or a directory of several
-files, pooled). `ANALYSES` selects any of: `pca` (dimensionality/structure
-of the trace-element space), `rf` (cross-validated Random Forest regressing
-CL on elements, with permutation importance — the primary quantitative
-result for which elements predict CL), `shap` (TreeSHAP importance,
-pairwise interactions, and per-element dependence plots from a single RF
-fit on a subsample, since SHAP does not scale to a full ~300k-pixel grain).
+files, pooled) and runs PCA (dimensionality/structure of the trace-element
+space): scree plot, per-PC loadings, and PC score vs. CL intensity.
 `BELOW_DETECTION`/`MAX_BELOW_DETECTION_FRAC` exclude elements that are
-mostly below detection before model fitting. Region CSVs (from Step 4) get
-a different, PCA-only treatment: one PCA fit pooled across all of a grain's
-regions, so every region is projected into the same PC space and can be
-tested for separation (scree/loadings/PC1-vs-PC2 scatter/biplot, plus ANOVA
-and centroid-distance stats). As with Step 6, output goes to
-`WHOLE_GRAIN_OUTPUT_DIR`/`REGION_OUTPUT_DIR` (default `figs/whole_grain/`/
-`figs/regions/`), independent of `CSV_INPUT`.
+mostly below detection before fitting. Region CSVs (from Step 4) get a
+different treatment: one PCA fit pooled across all of a grain's regions, so
+every region is projected into the same PC space and can be tested for
+separation (scree/loadings/PC1-vs-PC2 scatter/biplot, plus ANOVA and
+centroid-distance stats). Figures go to `WHOLE_GRAIN_OUTPUT_DIR`/
+`REGION_OUTPUT_DIR` (default `figs/pca/`/`figs/regions/`); the reusable CSV
+tables (variance, loadings, and — region CSVs only — scores/centroid
+distances) go to `DATA_OUTPUT_DIR` (default `figs/data/`, alongside the
+pixel-data CSVs); the run log goes to `DIAGNOSTICS_DIR` (default
+`figs/diagnostics/`, matching every other analysis log in this project).
+All independent of `CSV_INPUT`.
+
+**Step 7b — `kyanite_rf_shap.py`**
+
+Reads the same whole-grain pixel CSV(s) as Step 7a (region CSVs are
+skipped with a warning — RF/SHAP is whole-grain only) and fits `rf`
+(cross-validated Random Forest regressing CL on elements, with permutation
+importance — the primary quantitative result for which elements predict
+CL) and/or `shap` (TreeSHAP importance and pairwise interactions from a
+single RF fit on a subsample, since SHAP does not scale to a full
+~300k-pixel grain), selected via `ANALYSES`. This script only fits models
+and writes CSVs (`OUTPUT_DIR`, default `figs/data/`, since these CSVs are
+themselves reusable data) plus a run log (`DIAGNOSTICS_DIR`, default
+`figs/diagnostics/`) — no figures. The per-pixel data behind every figure
+Step 7c can draw is exported: out-of-fold predictions (`_rf_predictions.csv`),
+permutation importance (`_rf_importance.csv`), SHAP importance
+(`_shap_importance.csv`), raw per-pixel SHAP values (`_shap_values.csv`), and
+the SHAP interaction matrix (`_shap_interactions.csv`).
+
+**Step 7c — `kyanite_rf_shap_plots.py`**
+
+Reads Step 7b's CSVs back from `CSV_INPUT` (default `figs/data/`, matching
+Step 7b's `OUTPUT_DIR`) and renders the observed-vs-predicted scatter and
+permutation-importance bar chart to `RF_OUTPUT_DIR` (default `figs/rf/`),
+and the SHAP importance bar chart, interaction heatmap, and dependence
+panels to `SHAP_OUTPUT_DIR` (default `figs/shap/`) — no model fitting
+happens here, so changing `PLOTS`/`FIG_DPI`/`SHOW_TITLE` and rerunning is
+instant. A grain missing a plot's underlying CSV (e.g. it only ran
+`ANALYSES=['rf']` in Step 7b) is skipped for that plot with a warning, not
+an error.
 
 **`kyanite_sample_size_convergence.py`** is a diagnostic, not a pipeline
-step. Run it once per grain to check whether `kyanite_pca_rf.py`'s
-`MAX_SAMPLES`/`SHAP_SAMPLES` subsampling has converged (importance
-estimates stop changing with more data), rather than assuming convergence
-for computational convenience. Output goes to `OUTPUT_DIR` (default
-`figs/sample_size_convergence/`), independent of `CSV_INPUT`.
+step. Run it once per grain to check whether Step 7b's `MAX_SAMPLES`/
+`SHAP_SAMPLES` subsampling has converged (importance estimates stop
+changing with more data), rather than assuming convergence for
+computational convenience. Since the whole script is itself a diagnostic,
+its output doesn't get a dedicated analysis-family folder like Steps
+7a–7c — raw sweep CSV, convergence figures, and log all go to
+`DIAGNOSTICS_DIR` (default `figs/diagnostics/`), independent of `CSV_INPUT`.
 
 ### Step 8 (optional, parallel track) — XANES spot classification
 This sub-pipeline relates CL and chemistry to Fe²⁺/Fe³⁺ oxidation state at
@@ -358,8 +409,12 @@ Steps 3–7:
    'grouped'` (default) holds out folds by grain rather than by spot, so a
    fold cannot learn one grain's chemical signature instead of a general
    chemistry–oxidation relationship. Reads the same `figs/data/` CSVs as
-   `kyanite_spot_analysis.py`, but writes to its own `figs/xanes_rf_classifier/`
-   rather than `figs/spot_analysis/`, since it's a different analysis.
+   `kyanite_spot_analysis.py`. Output splits the same way as Steps 7a/7b:
+   its two figures (importance, confusion matrix) go to their own
+   `figs/xanes_rf_classifier/` (`OUT_DIR`) rather than `figs/spot_analysis/`,
+   since it's a different analysis; its reusable CSVs (importance,
+   predictions) go to `figs/data/` (`DATA_OUTPUT_DIR`); its run log goes to
+   `figs/diagnostics/` (`DIAGNOSTICS_DIR`).
 
 ### Utilities
 - **`xrf_display.m`** — visualizes an element-map TIFF (or an
@@ -369,8 +424,9 @@ Steps 3–7:
   (e.g. `Zr_La` + `Zr_Lb`, when a single line does not capture the full
   signal).
 - **`kyanite.sh`** — example SLURM batch script for running a Python step
-  (default `kyanite_pca_rf.py`) non-interactively on an HPC cluster; sources
-  a dedicated venv before invoking Python (see Requirements above).
+  (default `kyanite_rf_shap.py`, the compute-heavy step) non-interactively on
+  an HPC cluster; sources a dedicated venv before invoking Python (see
+  Requirements above).
 
 ---
 
@@ -386,9 +442,10 @@ Steps 3–7:
 4. Optionally clean up the mask (`CL_mask_edit.m`), draw regions or
    texture domains (`CL_region_extraction.m`), or build local-regression
    maps (`CL_local_regression_map.m`).
-5. Generate figures from the pixel CSV (`kyanite_figures.py`) and/or run
-   PCA/RF/SHAP (`kyanite_pca_rf.py`) to obtain a quantitative estimate of
-   which elements predict CL.
+5. Generate figures from the pixel CSV (`kyanite_figures.py`), run PCA
+   (`kyanite_pca.py`), and/or fit Random Forest/SHAP (`kyanite_rf_shap.py`,
+   then `kyanite_rf_shap_plots.py` for the figures) to obtain a quantitative
+   estimate of which elements predict CL.
 6. If XANES spectra are also available for spots on this grain, run that
    track in parallel (Step 8 above) and combine with the rest at the
    `kyanite_spot_analysis.py`/`xanes_rf_classifier.py` stage.
@@ -428,11 +485,18 @@ colormap for signed and continuous-intensity quantities respectively.
   image.** If registration itself is inaccurate, rerun Step 2 rather than
   correcting for it downstream.
 - **Figure/output location is independent of `CSV_INPUT`.** `kyanite_figures.py`,
-  `kyanite_pca_rf.py`, and `kyanite_sample_size_convergence.py` each have an
-  explicit output-directory parameter (`WHOLE_GRAIN_OUTPUT_DIR`/
-  `REGION_OUTPUT_DIR`/`OUTPUT_DIR`) rather than saving next to whatever CSV
-  they read — pointing `CSV_INPUT` at `figs/data/` (where the pixel-data CSVs
-  live) is always safe and never dumps figures in among the reusable data files.
+  `kyanite_pca.py`, `kyanite_rf_shap.py`, `kyanite_rf_shap_plots.py`, and
+  `kyanite_sample_size_convergence.py` each have an explicit output-directory
+  parameter (`WHOLE_GRAIN_OUTPUT_DIR`/`REGION_OUTPUT_DIR`/`DATA_OUTPUT_DIR`/
+  `OUTPUT_DIR`/`RF_OUTPUT_DIR`/`SHAP_OUTPUT_DIR`, depending on the script)
+  rather than saving next to whatever CSV they read — pointing `CSV_INPUT` at
+  `figs/data/` (where the pixel-data CSVs live) is always safe and never dumps
+  figures in among the reusable data files.
+- **`kyanite_rf_shap_plots.py`'s `LOG_TRANSFORM` must match whatever
+  `kyanite_rf_shap.py` used for that data.** It only controls axis labeling
+  (`(log10)` suffix) here — the values themselves were already transformed
+  (or not) upstream, so a mismatch mislabels the dependence-plot axes rather
+  than erroring.
 - **`CL_EPMA_registration.m`/`CL_mask_edit.m` no longer generate a CL-vs-element
   scatter figure.** They still compute and log Pearson r/linear-fit numbers as
   an immediate registration-quality check, but all exploratory figures

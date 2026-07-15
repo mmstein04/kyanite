@@ -1,7 +1,7 @@
 # =============================================================================
 # kyanite_sample_size_convergence.py
 #
-# Diagnostic for kyanite_pca_rf.py: does RF/SHAP feature importance actually
+# Diagnostic for kyanite_rf_shap.py: does RF/SHAP feature importance actually
 # need more pixels than MAX_SAMPLES / SHAP_SAMPLES currently use, or has it
 # already converged well before the full grain (which can be 100k-1M+ px)?
 #
@@ -13,7 +13,7 @@
 #   - SHAP importance per element (mean |SHAP value|, on a capped subsample
 #     of the held-out split, so SHAP cost doesn't grow with the sweep)
 # SHAP interaction values are NOT computed here — they're the expensive part
-# of kyanite_pca_rf.py and this script is about whether *sample size* matters,
+# of kyanite_rf_shap.py and this script is about whether *sample size* matters,
 # not about re-deriving the interaction analysis itself.
 #
 # Plots each metric vs. sample size (log x-axis) with the spread across
@@ -46,12 +46,13 @@ _REPO_ROOT = Path(__file__).resolve().parent
 CSV_INPUT = _REPO_ROOT / 'figs' / 'data' / 'NA-GS-P84-06_pixel_data.csv'   # a single grain's *_pixel_data.csv
 ELEMENTS  = None      # list of CSV column names to include; None = all columns except CL/Region
 
-# Where output is saved — independent of CSV_INPUT, so pointing CSV_INPUT at
-# figs/data/ (where the pixel-data CSV actually lives) never dumps results in
-# among the reusable data files.
-OUTPUT_DIR = _REPO_ROOT / 'figs' / 'sample_size_convergence'
+# This whole script is itself a diagnostic (not a pipeline step — see module
+# docstring), so unlike kyanite_pca.py/kyanite_rf_shap.py its output doesn't
+# get its own dedicated figs/ folder: raw sweep CSV, convergence figures, and
+# run log all go to DIAGNOSTICS_DIR, independent of CSV_INPUT.
+DIAGNOSTICS_DIR = _REPO_ROOT / 'figs' / 'diagnostics'
 
-# --- Data cleaning, same conventions as kyanite_pca_rf.py ---
+# --- Data cleaning, same conventions as kyanite_rf_shap.py ---
 BELOW_DETECTION          = None   # values <= this are treated as below detection limit; None to disable
 MAX_BELOW_DETECTION_FRAC = 0.2    # drop an element if more than this fraction of pixels are below detection
 LOG_TRANSFORM            = True   # log10-transform element concentrations before RF/SHAP
@@ -64,7 +65,7 @@ N_REPEATS     = 5      # independent random subsamples per size, to show spread
 TEST_FRACTION = 0.2    # held-out fraction within each subsample
 CONVERGENCE_THRESHOLD = 0.05   # a step-to-step relative change below this counts as "converged"
 
-# --- Random Forest (kept smaller/faster than kyanite_pca_rf.py defaults,
+# --- Random Forest (kept smaller/faster than kyanite_rf_shap.py defaults,
 #     since this script fits many more times) ---
 N_ESTIMATORS        = 50
 MIN_SAMPLES_LEAF    = 5
@@ -90,8 +91,8 @@ SAVE_CSV = True
 csv_path = Path(CSV_INPUT)
 df = pd.read_csv(csv_path)
 label = csv_path.stem.replace('_pixel_data', '').replace('_region_pixel_data', '')
-out_dir = Path(OUTPUT_DIR)
-out_dir.mkdir(parents=True, exist_ok=True)
+diagnostics_dir = Path(DIAGNOSTICS_DIR)
+diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
 exclude = {'CL', 'Region', 'DomainID'}
 elements = ELEMENTS or [c for c in df.columns if c not in exclude]
@@ -179,7 +180,7 @@ for size in sizes:
 results = pd.DataFrame(records)
 
 if SAVE_CSV:
-    results.to_csv(out_dir / f'{label}_convergence_raw.csv', index=False)
+    results.to_csv(diagnostics_dir / f'{label}_convergence_raw.csv', index=False)
 
 # =============================================================================
 # AGGREGATE + CONVERGENCE CHECK
@@ -271,25 +272,25 @@ if SAVE_FIG:
     mean, std = summarize('rmse')
     fig = plot_metric_vs_size(mean, std, 'Held-out RMSE', f'{label} — RF RMSE vs. sample size')
     fig.tight_layout()
-    fig.savefig(out_dir / f'{label}_convergence_rmse.png', dpi=200, bbox_inches='tight')
+    fig.savefig(diagnostics_dir / f'{label}_convergence_rmse.png', dpi=200, bbox_inches='tight')
 
     mean, std = summarize('r2')
     fig = plot_metric_vs_size(mean, std, 'Held-out R2', f'{label} — RF R2 vs. sample size')
     fig.tight_layout()
-    fig.savefig(out_dir / f'{label}_convergence_r2.png', dpi=200, bbox_inches='tight')
+    fig.savefig(diagnostics_dir / f'{label}_convergence_r2.png', dpi=200, bbox_inches='tight')
 
     fig = plot_importance_vs_size('perm', 'Permutation importance',
                                    f'{label} — permutation importance vs. sample size')
     fig.tight_layout()
-    fig.savefig(out_dir / f'{label}_convergence_perm_importance.png', dpi=200, bbox_inches='tight')
+    fig.savefig(diagnostics_dir / f'{label}_convergence_perm_importance.png', dpi=200, bbox_inches='tight')
 
     fig = plot_importance_vs_size('shap', 'Mean |SHAP value|',
                                    f'{label} — SHAP importance vs. sample size')
     fig.tight_layout()
-    fig.savefig(out_dir / f'{label}_convergence_shap_importance.png', dpi=200, bbox_inches='tight')
+    fig.savefig(diagnostics_dir / f'{label}_convergence_shap_importance.png', dpi=200, bbox_inches='tight')
     plt.close('all')
 
-log_file = out_dir / f'{label}_convergence_log.txt'
+log_file = diagnostics_dir / f'{label}_convergence_log.txt'
 log_file.write_text('\n'.join(log_lines) + '\n')
 print(f'\nLog saved: {log_file.name}')
 print('Done.')

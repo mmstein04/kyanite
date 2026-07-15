@@ -65,7 +65,7 @@ SCATTER_ELEMENTS = ['Cr_Ka', 'Fe_Ka', 'V_Ka', 'Mn_Ka', 'Ti_Ka']
 # PCA is sensitive to which variables are included, so this is chosen deliberately
 # rather than reusing the scatter/box list).
 PCA_ELEMENTS = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Ti_Ka', 'Mn_Ka']
-PCA_LOG_TRANSFORM = True   # log10-transform elements before z-scoring/PCA, same as kyanite_pca_rf.py
+PCA_LOG_TRANSFORM = True   # log10-transform elements before z-scoring/PCA, same as kyanite_pca.py
 PCA_N_PCS_SCREE = None     # number of PCs shown on the scree plot; None = all (len(PCA_ELEMENTS))
 PCA_LOADING_THRESHOLD = 0.3   # |loading| >= this is highlighted on the loadings plot
 
