@@ -544,8 +544,11 @@ so they carry local functions with the identical values hand-copied in —
 - `MAPS_DIR`, `MASK_DIR` — where to find `<grain_id>_<el>_Ka.tif` (default `inputs/maps/`) and
   `<grain_id>_mask.tif` (default `figs/data/`); `OUTPUT_DIR` — where rendered PNGs are saved
   (default `figs/map_renders/`), independent of the above
-- `GRAIN_IDS`, `ELEMENTS` — grain(s) to render (single string or list) and bare element symbols
-  (e.g. `'Cr'`, mapped to `<grain_id>_Cr_Ka.tif`)
+- `GRAIN_IDS` — single string, list, or `None` (default) to auto-discover and render every grain
+  with both a maps folder (`MAPS_DIR/<grain_id>/`) and a mask (skipping, with a warning, any maps
+  folder that has no matching mask); `ELEMENTS` — bare element symbols (e.g. `'Cr'`, mapped to
+  `<grain_id>_Cr_Ka.tif`). A grain missing one of `ELEMENTS`/`RATIOS`' component maps has just
+  that element/ratio skipped (with a warning), not the whole batch
 - `RATIOS` — list of `(numerator, denominator)` element symbol pairs to render as ratio maps
   (e.g. `('Cr', 'V')`); `[]` disables ratio maps
 - `CMAP` — defaults to `kyanite_palette.SEQUENTIAL_CMAP` (`'inferno'`)

@@ -41,9 +41,10 @@ MAPS_DIR   = _REPO_ROOT / 'inputs' / 'maps'
 MASK_DIR   = _REPO_ROOT / 'figs' / 'data'
 OUTPUT_DIR = _REPO_ROOT / 'figs' / 'map_renders'
 
-# Grain and element selection. GRAIN_IDS may be a single string or a list for
-# batch processing. Mask files are auto-located as MASK_DIR/<grain_id>_mask.tif
-GRAIN_IDS = ['RH-XA-57081P-05']
+# Grain and element selection. GRAIN_IDS may be a single string, a list for
+# batch processing, or None to auto-discover every grain that has both a
+# maps folder (MAPS_DIR/<grain_id>/) and a mask (MASK_DIR/<grain_id>_mask.tif).
+GRAIN_IDS = None
 ELEMENTS  = ['Cr', 'Fe', 'Mn', 'Ti', 'V']   # bare symbol; maps as <grain_id>_<el>_Ka.tif
 
 # Element-ratio maps (numerator, denominator), e.g. Cr/V and Fe/Mn. Both
@@ -121,6 +122,17 @@ def read_pixel_um_from_sidecar(tif_path):
         return None
     m = _SIDECAR_PIXEL_UM_RE.search(sidecar.read_text())
     return float(m.group(1)) if m else None
+
+
+def discover_grain_ids():
+    """Every subfolder of MAPS_DIR that also has a grain mask in MASK_DIR,
+    sorted — used when GRAIN_IDS is None to run every available grain."""
+    candidates = sorted(p.name for p in MAPS_DIR.iterdir() if p.is_dir())
+    found = [g for g in candidates if (MASK_DIR / f'{g}_mask.tif').exists()]
+    skipped = [g for g in candidates if g not in found]
+    if skipped:
+        print(f'Skipping {len(skipped)} grain(s) with no mask in {MASK_DIR}: {", ".join(skipped)}')
+    return found
 
 
 def saturation_mask(x, label, verbose=True):
@@ -246,7 +258,12 @@ def render_and_save_map(grain_id, label, filename_tag, img, mask, grain_px_um, m
 
 
 def main():
-    grain_ids = [GRAIN_IDS] if isinstance(GRAIN_IDS, str) else list(GRAIN_IDS)
+    if GRAIN_IDS is None:
+        grain_ids = discover_grain_ids()
+        if not grain_ids:
+            raise FileNotFoundError(f'No grains with both a maps folder and a mask found under {MAPS_DIR}')
+    else:
+        grain_ids = [GRAIN_IDS] if isinstance(GRAIN_IDS, str) else list(GRAIN_IDS)
     pixel_um = [PIXEL_UM] if np.isscalar(PIXEL_UM) else list(PIXEL_UM)
 
     print(f'Processing {len(grain_ids)} grain(s):')
@@ -274,7 +291,8 @@ def main():
         for el in elements_to_load:
             fn = MAPS_DIR / grain_id / f'{grain_id}_{el}_Ka.tif'
             if not fn.exists():
-                raise FileNotFoundError(f'Element map not found: {fn}')
+                print(f'  WARNING: {grain_id}: element map not found ({fn.name}) — skipping.')
+                continue
             imgs[el] = tifffile.imread(str(fn)).astype(np.float64)
             if PIXEL_UM_FROM_SIDECAR and sidecar_px_um is None:
                 found = read_pixel_um_from_sidecar(fn)
@@ -292,6 +310,8 @@ def main():
 
         # Plot elements
         for el in ELEMENTS:
+            if el not in imgs:
+                continue
             img = imgs[el].copy()
             img[~mask] = np.nan
             render_and_save_map(grain_id, f'{el}_Ka', f'{el}_Ka', img, mask,
@@ -299,6 +319,9 @@ def main():
 
         # Plot element ratios
         for num_el, den_el in RATIOS:
+            if num_el not in imgs or den_el not in imgs:
+                print(f'  WARNING: {grain_id}: skipping {num_el}/{den_el} ratio — missing element map.')
+                continue
             with np.errstate(divide='ignore', invalid='ignore'):
                 ratio_img = imgs[num_el] / imgs[den_el]
             ratio_img[~np.isfinite(ratio_img)] = np.nan   # div-by-zero / 0-over-0
