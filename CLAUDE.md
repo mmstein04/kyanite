@@ -35,7 +35,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | `kyanite_spot_analysis.py` | Python | Batch analysis of `<grain_id>_spot_geochemistry.csv` files: XANES class distribution pie-chart grid, pooled CL-vs-element scatter plots colored by class, element-by-class box plots, PCA (PC1/PC2 scatter, scree, loadings, biplot) colored by class, and per-grain labeled spot-location maps on the registered CL image |
 | `xanes_rf_classifier.py` | Python | Cross-validated Random Forest classification of XANES pre-edge class (Type 1/2/3) from per-spot trace-element geochemistry, pooled across grains — the classification analog of `kyanite_rf_shap.py` |
 | `xrf_display.py` | Python | Visualize XRF element-map TIFFs with grain mask overlay and optional element-ratio maps, using this project's shared `SEQUENTIAL_CMAP` and MAD outlier conventions for the display range |
-| `sum_epma_maps.m` | MATLAB | Sum two or more element maps into a combined TIFF (e.g. Zr_La + Zr_Lb) |
+| `sum_epma_maps.py` | Python | Sum two or more element maps into a combined TIFF (e.g. Zr_La + Zr_Lb) |
 | `kyanite.sh` | Bash | Example SLURM batch script: activates the project's dedicated Python virtualenv and runs one Python step (default `kyanite_rf_shap.py`, the compute-heavy step) non-interactively on an HPC cluster — adapt the script name and `#SBATCH`/environment variables per job |
 
 ### `CL_EPMA_registration.m` workflow
@@ -545,6 +545,16 @@ so they carry local functions with the identical values hand-copied in —
   (with a warning) if no sidecar is found/parseable for any loaded element
 - Output: `figs/map_renders/<grain_id>_<el>_Ka_display.png` per element,
   `figs/map_renders/<grain_id>_<num>_<den>_ratio_display.png` per ratio
+
+**`sum_epma_maps.py`**
+- `INPUT_DIR`, `OUTPUT_DIR` — default both `inputs/maps/`
+- `INPUT_FILES` — list of map filenames (relative to `INPUT_DIR`) to sum
+- `OUTPUT_FILE` — output filename (saved to `OUTPUT_DIR`)
+- Auto-crops all inputs to their smallest common dimensions (trimming from the right/bottom) if
+  they differ in size, e.g. from colorbar width variation; RGB inputs are converted to grayscale
+  (with a warning) before summing
+- Output is always a 32-bit float TIFF (raw pixel sum, accumulated in float64 to avoid overflow
+  regardless of input bit depth) — compatible with `CL_EPMA_registration.m`'s `epma_dir` input
 
 **`kyanite_figures.py`**
 - `CSV_INPUT`, `ELEMENTS`, `PLOT_TYPE` (`scatter`, `violin`, `boxplot`, `contour`,
