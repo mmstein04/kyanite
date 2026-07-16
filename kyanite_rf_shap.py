@@ -61,6 +61,10 @@ _REPO_ROOT = Path(__file__).resolve().parent
 
 CSV_INPUT = _REPO_ROOT / 'figs' / 'data'   # file or directory
 ELEMENTS  = None      # list of CSV column names to include; None = all columns except CL
+GRAIN_FILTER = [        # list of grain_ids to process, or None for every grain found in CSV_INPUT
+    'NA-SS-P1156-02', 'NVD3-01', 'RH-XA-57081B-02', 'RH-XA-57081P-05', 'RH-XA-57081P-07',
+]   # TEMP: the 5 grains that hadn't completed when the prior 96G run OOM'd on NA-SS-P1156-02;
+    # set back to None once these are done so a normal run covers every grain again
 
 # Region CSVs (*_region_pixel_data.csv) are skipped by default — RF/SHAP is
 # too computationally expensive to run once per region on top of every
@@ -99,7 +103,10 @@ MAX_DEPTH            = None   # unbounded; was capped at 10 to keep fit/permutat
 CV_FOLDS             = 10
 N_PERMUTATIONS       = 50     # repeats per fold for permutation importance
 IMPORTANCE_SIG_RATIO = 1.0    # element flagged "significant" if mean/std of importance exceeds this
-MAX_SAMPLES          = None   # subsample pixels before RF/permutation importance for speed; None = use all
+MAX_SAMPLES          = 500_000   # subsample pixels before RF/permutation importance for speed; None = use all
+                               # (bounds memory for large grains after a 96G HPC job OOM'd on an
+                               # 876k-pixel grain with MAX_SAMPLES=None; grains up to 518,935 px
+                               # completed fine unsubsampled, so 500k gives a comparable ceiling)
 RANDOM_STATE         = 42
 N_JOBS               = 16    # parallel worker processes for RF fitting and permutation importance
 
@@ -112,6 +119,15 @@ SHAP_INTERACTIONS    = True   # also compute pairwise SHAP interaction values (s
 # RESOLVE INPUT → list of CSV paths
 # =============================================================================
 
+def grain_id_for(csv_path):
+    """Derive a grain_id from a pixel-data CSV filename, stripping the region
+    suffix first since '_region_pixel_data' is the more specific match."""
+    stem = csv_path.stem
+    if stem.endswith('_region_pixel_data'):
+        return stem[:-len('_region_pixel_data')]
+    return stem[:-len('_pixel_data')] if stem.endswith('_pixel_data') else stem
+
+
 input_path = Path(CSV_INPUT)
 if input_path.is_dir():
     # CL_local_regression_map.m's output also ends in '_pixel_data.csv' but is
@@ -123,6 +139,15 @@ if input_path.is_dir():
         raise FileNotFoundError(f'No *_pixel_data.csv files found in {input_path}')
 else:
     csv_files = [input_path]
+
+if GRAIN_FILTER is not None:
+    found = {grain_id_for(p) for p in csv_files}
+    missing_grains = [g for g in GRAIN_FILTER if g not in found]
+    if missing_grains:
+        print(f'WARNING: GRAIN_FILTER entries not found in {input_path}: {missing_grains}')
+    csv_files = [p for p in csv_files if grain_id_for(p) in GRAIN_FILTER]
+    if not csv_files:
+        raise FileNotFoundError(f'No CSVs matched GRAIN_FILTER={GRAIN_FILTER} in {input_path}')
 
 print(f'Processing {len(csv_files)} CSV(s):')
 for p in csv_files:
@@ -404,14 +429,13 @@ for csv_path in csv_files:
     if missing:
         print(f'  WARNING: columns not found, skipping: {missing}')
 
+    grain_id = grain_id_for(csv_path)
     if 'Region' in df.columns:
-        grain_id = csv_path.stem.replace('_region_pixel_data', '')
         for region in df['Region'].drop_duplicates():
             sub = df[df['Region'] == region].reset_index(drop=True)
             process_grain(sub, available, f'{grain_id}_{region}', out_dir, diagnostics_dir,
                            csv_path, missing)
     else:
-        grain_id = csv_path.stem.replace('_pixel_data', '')
         process_grain(df, available, grain_id, out_dir, diagnostics_dir, csv_path, missing)
 
 print('\nDone.')
