@@ -204,6 +204,7 @@ def run_rf_cv(X, y, elements, log_lines):
         rmse_folds.append(rmse)
         r2_folds.append(r2)
 
+        rf.n_jobs = 1  # avoid nested parallelism: permutation_importance below is the outer parallel loop
         perm = permutation_importance(rf, X[test_idx], y[test_idx],
                                        n_repeats=N_PERMUTATIONS,
                                        random_state=RANDOM_STATE, n_jobs=N_JOBS)
