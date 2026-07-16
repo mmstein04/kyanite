@@ -491,15 +491,24 @@ so they carry local functions with the identical values hand-copied in —
   edited mask; `false`: touch only the mask TIFF + edit history
 
 **`CL_local_regression_map.py`**
-- `GRAIN_ID` — must match a grain already processed by `CL_EPMA_registration.m`
-- `INPUT_DIR` — folder holding that grain's registered CL TIFFs + mask TIFF (default `figs/`);
+- `GRAIN_IDS` — single string, list, or `None` (default) to auto-discover and run every grain with
+  a registered CL image, a mask, and a maps folder (skipping, with a warning, any that's missing
+  one); a grain that fails partway (missing input, size mismatch, etc.) is skipped with a warning
+  rather than aborting the batch
+- `INPUT_DIR` — folder holding each grain's registered CL TIFFs + mask TIFF (default `figs/`);
   `DATA_DIR`/`DIAGNOSTICS_DIR`/`OUTPUT_DIR` — where reusable data, QC figures/log, and the one
   true result figure are saved respectively (defaults `figs/data/`, `figs/diagnostics/`,
-  `figs/local_regression/`)
-- `EPMA_DIR` — same EPMA/XRF map folder used during registration
-- `WINDOW_RADIUS_UM` — physical radius of the circular regression window (converted to px via
-  `EPMA_PIXEL_UM`); `MIN_WINDOW_PX` (derived, half the disk area by default) — minimum in-mask
-  pixels required inside a window before a regression is computed there
+  `figs/local_regression/`); `MAPS_DIR` — base EPMA/XRF map folder, same one used during
+  registration (per-grain maps live in `MAPS_DIR/<grain_id>/`)
+- `WINDOW_RADIUS_UM` — physical radius of the circular regression window; `MIN_WINDOW_PX`
+  (derived per grain, half the disk area by default) — minimum in-mask pixels required inside a
+  window before a regression is computed there
+- `PIXEL_UM_FROM_SIDECAR` (default `True`): each grain's µm/px is read from
+  `xrf_h5_to_tiff.py`'s metadata sidecar (same mechanism as `xrf_display.py`), not a single
+  hardcoded constant — grains in this project are imaged at different resolutions (e.g. 1.0 vs.
+  2.0 µm/px), so a fixed `EPMA_PIXEL_UM` would silently make `WINDOW_RADIUS_UM`'s actual pixel
+  radius wrong for whichever grains don't match it. `EPMA_PIXEL_UM` is only the fallback (with a
+  warning) if no sidecar is found/parseable for a given grain
 - `NORMALIZE_EPMA` — match the value used in `CL_EPMA_registration.m` for comparable values
 - `USE_COLOR_DISPLAY` — use the color registered CL as the Cr comparison figure's background
   (falls back to grayscale, with a warning, if not found)
