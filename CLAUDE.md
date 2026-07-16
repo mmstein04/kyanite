@@ -26,7 +26,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | `CL_EPMA_registration.m` | MATLAB | Full registration + analysis pipeline (see workflow below) |
 | `CL_region_extraction.m` | MATLAB | Draw named sub-grain polygon regions on an already-registered CL image and extract per-pixel CL + element data per region (no re-registration) |
 | `CL_mask_edit.m` | MATLAB | After-the-fact touch-up of a grain mask already produced by `CL_EPMA_registration.m` (e.g. an inclusion was masked-in, or real grain was masked-out weeks earlier) — draw add/remove polygons on the already-registered CL image, then re-derive pixel data and downstream figures under the corrected mask |
-| `CL_local_regression_map.m` | MATLAB | Slide a circular window across an already-registered grain and run a per-pixel CL-vs-element linear regression inside each window, producing continuous slope/R maps that complement `CL_region_extraction.m`'s fixed polygon regions |
+| `CL_local_regression_map.py` | Python | Slide a circular window across an already-registered grain and run a per-pixel CL-vs-element linear regression inside each window, producing continuous slope/R maps that complement `CL_region_extraction.m`'s fixed polygon regions |
 | `kyanite_figures.py` | Python | Standalone figure generation from exported CSV pixel data |
 | `kyanite_pca.py` | Python | PCA analysis of CL vs. trace elements from whole-grain CSV pixel data; for region CSVs, instead fits one shared PCA pooled across regions (scree, loadings, PC1/PC2-by-region scatter, biplot) to test whether hand-drawn regions separate in PC space — no per-region PCA |
 | `kyanite_rf_shap.py` | Python | Cross-validated Random Forest regression and TreeSHAP importance/interactions of CL vs. trace elements from whole-grain CSV pixel data; fits models and exports CSVs only, no figures — region CSVs are skipped by default, too computationally expensive to run per region (`ANALYZE_REGIONS=True` opts in; region-level analysis is otherwise `kyanite_pca.py`'s cheap pooled region-PCA) |
@@ -263,7 +263,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   for `CL_region_extraction.m`'s region-mode QC: `<grain_id>_region_analysis_log.txt`,
   `<grain_id>_regions_overlay.png`, `<grain_id>_regions_all_maps_QC.png` (or the
   `_texture_domains_*` equivalents in `classification_mode`). Same idea again for
-  `CL_local_regression_map.m`: `<grain_id>_local_regression_analysis_log.txt`,
+  `CL_local_regression_map.py`: `<grain_id>_local_regression_analysis_log.txt`,
   `<grain_id>_local_regression_slope_QC.png`, `<grain_id>_local_regression_R_QC.png`,
   `<grain_id>_local_regression_n_map.png`. Same idea again for `kyanite_pca.py`
   (`<label>_pca_log.txt` whole-grain, `<grain_id>_regions_pca_log.txt` region-mode),
@@ -293,7 +293,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   diagnostic (not a pipeline step), so it has no dedicated analysis-family
   folder at all — its raw sweep CSV, convergence figures, and log all go to
   `figs/diagnostics/` (`DIAGNOSTICS_DIR`).
-  `CL_local_regression_map.m`'s one true result figure
+  `CL_local_regression_map.py`'s one true result figure
   (`<grain_id>_local_regression_R_Cr_vs_CL.png`) → `figs/local_regression/`,
   `kyanite_spot_analysis.py` and `xanes_rf_classifier.py` → `figs/spot_analysis/`
   (shared — both pool the same per-spot CSVs and fall under the same
@@ -306,7 +306,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `CL_mask_edit.m`'s cumulative edit history (`<grain_id>_mask_edits.mat`),
   region polygons (`<grain_id>_regions.mat`), region pixel data exports
   (`<grain_id>_region_pixel_data.csv` and `.mat`, long-format, `Region`
-  column), `CL_local_regression_map.m`'s slope/R/n maps (`<grain_id>_local_regression.mat`)
+  column), `CL_local_regression_map.py`'s slope/R/n maps (`<grain_id>_local_regression.npz`)
   and long-format table (`<grain_id>_local_regression_pixel_data.csv`), and
   per-spot geochemistry exports (`<grain_id>_spot_geochemistry.csv`, read by both
   `kyanite_spot_analysis.py` and `xanes_rf_classifier.py`) — whole-grain and region
@@ -341,7 +341,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `diagnostics/<grain_id>_mask_edit_log.txt` (per-run record); pre-edit copies of every
   file `CL_mask_edit.m` is about to overwrite are saved to
   `figs/mask_edit_backups/<grain_id>_<timestamp>/` before each run
-- Local regression outputs (`CL_local_regression_map.m`): `data/<grain_id>_local_regression.mat`,
+- Local regression outputs (`CL_local_regression_map.py`): `data/<grain_id>_local_regression.npz`,
   `data/<grain_id>_local_regression_pixel_data.csv`, `diagnostics/<grain_id>_local_regression_analysis_log.txt`,
   `diagnostics/<grain_id>_local_regression_{slope,R}_QC.png`, `diagnostics/<grain_id>_local_regression_n_map.png`,
   and the one true result figure, `<grain_id>_local_regression_R_Cr_vs_CL.png`, directly in `figs/local_regression/`
@@ -433,17 +433,14 @@ so they carry local functions with the identical values hand-copied in —
 - **Diverging colormap** (`kyanite_palette.DIVERGING_CMAP = 'RdBu_r'`) —
   every signed, zero-centered quantity: correlation matrices
   (`kyanite_figures.py`'s `corrmatrix`), local-regression slope/R maps
-  (`CL_local_regression_map.m`). MATLAB can't reference `'RdBu_r'`
-  directly, so `CL_local_regression_map.m`'s hand-rolled `diverging_cmap()`
-  is tuned to matplotlib's actual `RdBu_r` anchor colors at t=0/0.5/1
-  (`#053061` / `#F7F6F6` / `#67001F`) rather than an arbitrary blue-white-red.
+  (`CL_local_regression_map.py`'s slope/R map grids and its Cr-vs-CL figure) —
+  now imported directly rather than hand-rolled, since (as of the Python port)
+  no script in this project needs a MATLAB-compatible stand-in for it.
 - **Sequential colormap** (`kyanite_palette.SEQUENTIAL_CMAP = 'inferno'`) —
   every continuous-intensity role: KDE density (`kyanite_figures.py`'s
   `heatmap`), SHAP interaction magnitude and dependence-plot coloring
-  (`kyanite_rf_shap_plots.py`), and `xrf_display.py`'s element/ratio map
-  display range. `CL_local_regression_map.m`'s spatial element-
-  intensity/coverage maps use MATLAB's `parula` instead — a different role
-  (raw map display, not a project-wide analysis quantity), left as-is.
+  (`kyanite_rf_shap_plots.py`), `xrf_display.py`'s element/ratio map display
+  range, and `CL_local_regression_map.py`'s window-coverage (n) map.
 
 ## Key parameters (set per-grain at top of each script)
 
@@ -493,14 +490,36 @@ so they carry local functions with the identical values hand-copied in —
   recompute Pearson correlations/shift-sensitivity/QC figures after saving the
   edited mask; `false`: touch only the mask TIFF + edit history
 
-**`CL_local_regression_map.m`**
-- `grain_id` — must match a grain already processed by `CL_EPMA_registration.m`
-- `input_dir` — folder holding that grain's registered CL TIFFs + mask TIFF
-- `epma_dir` — same EPMA/XRF map folder used during registration
-- `window_radius_um` — physical radius of the circular regression window;
-  `min_window_px` (derived, half the disk area by default) — minimum in-mask
+**`CL_local_regression_map.py`**
+- `GRAIN_ID` — must match a grain already processed by `CL_EPMA_registration.m`
+- `INPUT_DIR` — folder holding that grain's registered CL TIFFs + mask TIFF (default `figs/`);
+  `DATA_DIR`/`DIAGNOSTICS_DIR`/`OUTPUT_DIR` — where reusable data, QC figures/log, and the one
+  true result figure are saved respectively (defaults `figs/data/`, `figs/diagnostics/`,
+  `figs/local_regression/`)
+- `EPMA_DIR` — same EPMA/XRF map folder used during registration
+- `WINDOW_RADIUS_UM` — physical radius of the circular regression window (converted to px via
+  `EPMA_PIXEL_UM`); `MIN_WINDOW_PX` (derived, half the disk area by default) — minimum in-mask
   pixels required inside a window before a regression is computed there
-- `normalize_epma` — match the value used in `CL_EPMA_registration.m` for comparable values
+- `NORMALIZE_EPMA` — match the value used in `CL_EPMA_registration.m` for comparable values
+- `USE_COLOR_DISPLAY` — use the color registered CL as the Cr comparison figure's background
+  (falls back to grayscale, with a warning, if not found)
+- Uses direct (not FFT-based) 2-D convolution (`scipy.signal.convolve2d`) to compute the moving-
+  window regression sums, matching MATLAB's `conv2` exactly — verified against the original
+  script's output for `RH-XA-57081P-07` (identical `n_map`, slope/R maps matching to ~1e-10).
+  This also surfaced a latent bug in `CL_local_regression_map.m` worth knowing about: its R-map
+  clipping line (`r_e = max(min(r_e, 1), -1)`) relies on MATLAB's `max`/`min` returning the
+  non-NaN operand when one input is NaN, which silently resurrects every masked-out/invalid pixel
+  in `r_maps` as exactly `1.0` instead of leaving it `NaN` — visible as a spurious red halo in the
+  old `_local_regression_R_QC.png`/`_local_regression_R_Cr_vs_CL.png` figures near the grain-mask
+  boundary (within one window radius of the edge). The Python port uses `np.clip`, which
+  correctly preserves `NaN`, so this halo is gone in the new figures. The pixel-data CSV was never
+  affected (its rows are already filtered on slope validity, which this bug didn't touch) — only
+  the raw `r_maps` array and the QC/Cr-comparison figures from prior runs of the MATLAB script
+  carry the artifact.
+- Output: `figs/data/<grain_id>_local_regression.npz` (slope/R/n maps + metadata — `.npz`, not
+  `.mat`, since nothing reads this file back in and `.npz` is numpy's native equivalent);
+  `RowIdx`/`ColIdx` in `_local_regression_pixel_data.csv` are 0-based (numpy convention), unlike
+  the original script's 1-based indices — nothing downstream joins on them
 
 **`xrf_h5_to_tiff.py`**
 - `H5_FILE` — raw XRF HDF5 file, default location `inputs/xrf/`
