@@ -34,7 +34,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | `kyanite_sample_size_convergence.py` | Python | Diagnostic: sweeps RF/SHAP over a range of pixel subsample sizes for one grain to check whether importance estimates have converged below `kyanite_rf_shap.py`'s `MAX_SAMPLES`/`SHAP_SAMPLES`, or would still change with more data |
 | `kyanite_spot_analysis.py` | Python | Batch analysis of `<grain_id>_spot_geochemistry.csv` files: XANES class distribution pie-chart grid, pooled CL-vs-element scatter plots colored by class, element-by-class box plots, PCA (PC1/PC2 scatter, scree, loadings, biplot) colored by class, and per-grain labeled spot-location maps on the registered CL image |
 | `xanes_rf_classifier.py` | Python | Cross-validated Random Forest classification of XANES pre-edge class (Type 1/2/3) from per-spot trace-element geochemistry, pooled across grains — the classification analog of `kyanite_rf_shap.py` |
-| `xrf_display.m` | MATLAB | Visualize XRF element-map TIFFs with grain mask overlay |
+| `xrf_display.py` | Python | Visualize XRF element-map TIFFs with grain mask overlay and optional element-ratio maps, using this project's shared `SEQUENTIAL_CMAP` and MAD outlier conventions for the display range |
 | `sum_epma_maps.m` | MATLAB | Sum two or more element maps into a combined TIFF (e.g. Zr_La + Zr_Lb) |
 | `kyanite.sh` | Bash | Example SLURM batch script: activates the project's dedicated Python virtualenv and runs one Python step (default `kyanite_rf_shap.py`, the compute-heavy step) non-interactively on an HPC cluster — adapt the script name and `#SBATCH`/environment variables per job |
 
@@ -440,10 +440,10 @@ so they carry local functions with the identical values hand-copied in —
 - **Sequential colormap** (`kyanite_palette.SEQUENTIAL_CMAP = 'inferno'`) —
   every continuous-intensity role: KDE density (`kyanite_figures.py`'s
   `heatmap`), SHAP interaction magnitude and dependence-plot coloring
-  (`kyanite_rf_shap_plots.py`). `xrf_display.m`/`CL_local_regression_map.m`'s
-  spatial element-intensity/coverage maps use MATLAB's `parula` instead —
-  a different role (raw map display, not a project-wide analysis quantity),
-  left as-is.
+  (`kyanite_rf_shap_plots.py`), and `xrf_display.py`'s element/ratio map
+  display range. `CL_local_regression_map.m`'s spatial element-
+  intensity/coverage maps use MATLAB's `parula` instead — a different role
+  (raw map display, not a project-wide analysis quantity), left as-is.
 
 ## Key parameters (set per-grain at top of each script)
 
@@ -520,6 +520,31 @@ so they carry local functions with the identical values hand-copied in —
 - `ELEMENTS` / `EXCLUDE_ROIS` — element ROIs to extract (`None` = all except known scaler channels)
 - `NORMALIZE_BY_CLOCK`, `NORMALIZE_BY_I0` — should match whatever was used for this grain's
   exported maps, for comparable units
+
+**`xrf_display.py`**
+- `MAPS_DIR`, `MASK_DIR` — where to find `<grain_id>_<el>_Ka.tif` (default `inputs/maps/`) and
+  `<grain_id>_mask.tif` (default `figs/data/`); `OUTPUT_DIR` — where rendered PNGs are saved
+  (default `figs/map_renders/`), independent of the above
+- `GRAIN_IDS`, `ELEMENTS` — grain(s) to render (single string or list) and bare element symbols
+  (e.g. `'Cr'`, mapped to `<grain_id>_Cr_Ka.tif`)
+- `RATIOS` — list of `(numerator, denominator)` element symbol pairs to render as ratio maps
+  (e.g. `('Cr', 'V')`); `[]` disables ratio maps
+- `CMAP` — defaults to `kyanite_palette.SEQUENTIAL_CMAP` (`'inferno'`)
+- `SATURATION_FILTER`/`SATURATION_BAND_FRAC`/`SATURATION_MIN_FRAC`/`SATURATION_MIN_COUNT` and
+  `MAD_K_LO`/`MAD_K_HI` (default `None`/`4`) — same saturation + MAD outlier logic as
+  `kyanite_figures.py`'s `OUTLIER_METHOD='mad'` default, but used only to set the imshow
+  `vmin`/`vmax` display range rather than to exclude pixels — every in-mask pixel is still drawn,
+  clamped to that range, so a few extreme pixels can't pin the whole color scale and wash out
+  internal zoning. `RATIO_MAD_K_LO`/`RATIO_MAD_K_HI` — same, independently tunable for ratio maps,
+  which are often more skewed than raw element concentrations
+- `SHOW_SCALEBAR`, `SCALEBAR_UM`, `SCALEBAR_POS`, `SCALEBAR_MARGIN` — physical scale bar drawn on
+  each render. `PIXEL_UM_FROM_SIDECAR` (default `True`): pixel size is read straight from
+  `xrf_h5_to_tiff.py`'s metadata sidecar (`<grain_id>_<el>_Ka.txt`'s `step_size_pos1_um`, the fast
+  /X axis the scale bar spans) for whichever loaded element has one, so it can't drift out of sync
+  with the actual scan geometry; `PIXEL_UM` (scalar or per-grain list) is only the fallback used
+  (with a warning) if no sidecar is found/parseable for any loaded element
+- Output: `figs/map_renders/<grain_id>_<el>_Ka_display.png` per element,
+  `figs/map_renders/<grain_id>_<num>_<den>_ratio_display.png` per ratio
 
 **`kyanite_figures.py`**
 - `CSV_INPUT`, `ELEMENTS`, `PLOT_TYPE` (`scatter`, `violin`, `boxplot`, `contour`,
