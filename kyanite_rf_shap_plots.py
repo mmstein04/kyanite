@@ -56,7 +56,7 @@ PLOTS = 'all'   # 'observed_vs_predicted', 'importance', 'shap_importance',
 # log10-transformed, or not, before this script ever sees them).
 LOG_TRANSFORM = True
 
-FIG_DPI    = 200
+FIG_DPI    = 300
 SHOW_TITLE = True
 
 ALL_PLOTS = ['observed_vs_predicted', 'importance', 'shap_importance',
