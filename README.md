@@ -59,7 +59,7 @@ kyanite/
 ├── CL_EPMA_registration.m             Step 2 — register CL, mask grain, extract pixel data
 ├── CL_mask_edit.m                     Step 3 (optional) — fix a mask after the fact
 ├── CL_region_extraction.m             Step 4 (optional) — sub-grain regions / texture domains
-├── CL_local_regression_map.m          Step 5 (optional) — continuous local CL-vs-element regression
+├── CL_local_regression_map.py         Step 5 (optional) — continuous local CL-vs-element regression
 ├── kyanite_figures.py                 Step 6 — whole-grain figures from pixel CSV
 ├── kyanite_pca.py                     Step 7a — PCA (whole-grain + pooled region-PCA)
 ├── kyanite_rf_shap.py                 Step 7b — Random Forest / SHAP fit, exports CSVs only
@@ -70,8 +70,8 @@ kyanite/
 ├── xrf_h5_extract_spots.py            Step 8.3 — per-spot geochemistry + CL + XANES class CSV
 ├── kyanite_spot_analysis.py           Step 8.4 — batch spot analysis (pie/scatter/box/PCA)
 ├── xanes_rf_classifier.py             Step 8.5 — RF classifying XANES class from chemistry
-├── sum_epma_maps.m                    utility — sum element-line maps (e.g. Zr_La + Zr_Lb)
-├── xrf_display.m                      utility — visualize element/ratio maps with mask overlay
+├── sum_epma_maps.py                   utility — sum element-line maps (e.g. Zr_La + Zr_Lb)
+├── xrf_display.py                     utility — visualize element/ratio maps with mask overlay
 ├── kyanite_palette.py                 shared colors (element/region/category/colormap
 │                                      conventions) — imported by the Python scripts above;
 │                                      the MATLAB scripts keep local copies of the same values
@@ -94,7 +94,7 @@ kyanite/
 └── figs/                              everything the pipeline writes
     ├── data/                            reusable data other scripts read back in: grain mask,
     │                                   pixel/region-pixel data CSV/MAT, control-point MATs,
-    │                                   mask-edit history, local-regression MAT/CSV, per-spot
+    │                                   mask-edit history, local-regression NPZ/CSV, per-spot
     │                                   geochemistry CSV, kyanite_pca.py's PCA tables
     │                                   (variance/loadings/scores/centroid distances),
     │                                   kyanite_rf_shap.py's RF/SHAP CSVs, and
@@ -103,7 +103,7 @@ kyanite/
     │                                   produced them
     ├── diagnostics/                     not-for-publishing sanity/alignment-check + run-metadata
     │                                   outputs from CL_EPMA_registration.m / CL_mask_edit.m /
-    │                                   CL_region_extraction.m / CL_local_regression_map.m
+    │                                   CL_region_extraction.m / CL_local_regression_map.py
     │                                   (analysis logs, all-maps QC, registration overlay,
     │                                   mask-image registration check, shift-sensitivity,
     │                                   mask check, mask-edit diff/log, region overlay/QC,
@@ -125,10 +125,10 @@ kyanite/
     │                                   (region summary CSV, texture class map PNG) plus
     │                                   kyanite_figures.py / kyanite_pca.py figures for
     │                                   region pixel CSVs (RF/SHAP has no region-mode output)
-    ├── local_regression/                CL_local_regression_map.m's one true result figure
+    ├── local_regression/                CL_local_regression_map.py's one true result figure
     │                                   (Cr R-vs-CL); slope/R/n-map QC now live in diagnostics/,
-    │                                   and the MAT/CSV in data/
-    ├── map_renders/                     xrf_display.m's rendered element/ratio-map PNGs
+    │                                   and the NPZ/CSV in data/
+    ├── map_renders/                     xrf_display.py's rendered element/ratio-map PNGs
     │                                   (visualizations of the inputs/maps/ TIFFs)
     ├── xanes/                           xanes_plot.py's pre-edge classification-support figures
     │                                   (spot geochemistry CSVs live in data/, not here)
@@ -271,21 +271,29 @@ polygon MAT, `_region_pixel_data.csv`/`.mat`, texture class map TIFF) go to
 region summary CSV and the texture class map PNG go to `figs/regions/`.
 
 ### Step 5 (optional) — Continuous local-window CL-vs-element regression
-**`CL_local_regression_map.m`**
+**`CL_local_regression_map.py`**
 
 Provides a spatially continuous alternative to Step 4's fixed polygons.
 Slides a circular window across every grain-mask pixel, regresses CL
 against each element over the pixels within that window, and stores the
 resulting slope and Pearson r at the window center, producing maps of local
 CL–element relationship strength and sign rather than a single value for
-the whole grain or region. Requires a grain already through Step 2. Set
-`grain_id`, `input_dir`, `epma_dir`, and the window radius. Outputs
-slope/R map grids (one panel per element) and a window-coverage map, which
-indicates where low pixel counts make a slope/R estimate unreliable — these
-QC figures and the analysis log go to `figs/diagnostics/`, the slope/R/n
-MAT and long-format CSV go to `figs/data/`, and the one true analysis-result
-figure (a Cr-specific R map next to the CL image, since Cr³⁺ is a known CL
-activator) is saved directly in `figs/local_regression/`.
+the whole grain or region. Requires each grain to already be through Step
+2. `GRAIN_IDS` may be a single grain, a list, or `None` (default) to
+auto-discover and run every grain with a registered CL image, mask, and
+maps folder in one go — a grain that fails partway (missing input, size
+mismatch) is skipped with a warning rather than aborting the batch. Each
+grain's µm/px is read from `xrf_h5_to_tiff.py`'s metadata sidecar rather
+than a single hardcoded value, since grains in this project aren't all
+imaged at the same resolution — a fixed value would silently make the
+window radius physically wrong for whichever grains don't match it.
+Outputs slope/R map grids (one panel per element) and a window-coverage
+map, which indicates where low pixel counts make a slope/R estimate
+unreliable — these QC figures and the analysis log go to
+`figs/diagnostics/`, the slope/R/n NPZ and long-format CSV go to
+`figs/data/`, and the one true analysis-result figure (a Cr-specific R map
+next to the CL image, since Cr³⁺ is a known CL activator) is saved
+directly in `figs/local_regression/`.
 
 ### Step 6 — Whole-grain figures from the exported pixel CSV
 **`kyanite_figures.py`**
@@ -418,10 +426,15 @@ Steps 3–7:
    `figs/diagnostics/` (`DIAGNOSTICS_DIR`).
 
 ### Utilities
-- **`xrf_display.m`** — visualizes an element-map TIFF (or an
+- **`xrf_display.py`** — visualizes an element-map TIFF (or an
   element-ratio map) with the grain mask overlaid; used for a quick check
-  before or after registration. Saves rendered PNGs to `figs/map_renders/`.
-- **`sum_epma_maps.m`** — sums two or more element-line maps into one TIFF
+  before or after registration. `GRAIN_IDS = None` (default) renders every
+  grain with a maps folder and a mask in one run. Contrast range is set
+  from a saturation + MAD-outlier check (matching `kyanite_figures.py`'s
+  default outlier convention) rather than a fixed percentile, so a few
+  extreme pixels can't wash out internal zoning. Saves rendered PNGs to
+  `figs/map_renders/`.
+- **`sum_epma_maps.py`** — sums two or more element-line maps into one TIFF
   (e.g. `Zr_La` + `Zr_Lb`, when a single line does not capture the full
   signal).
 - **`kyanite.sh`** — example SLURM batch script for running a Python step
@@ -442,7 +455,7 @@ Steps 3–7:
    values. This is the only step mandatory for every grain.
 4. Optionally clean up the mask (`CL_mask_edit.m`), draw regions or
    texture domains (`CL_region_extraction.m`), or build local-regression
-   maps (`CL_local_regression_map.m`).
+   maps (`CL_local_regression_map.py`).
 5. Generate figures from the pixel CSV (`kyanite_figures.py`), run PCA
    (`kyanite_pca.py`), and/or fit Random Forest/SHAP (`kyanite_rf_shap.py`,
    then `kyanite_rf_shap_plots.py` for the figures) to obtain a quantitative
@@ -473,9 +486,10 @@ colormap for signed and continuous-intensity quantities respectively.
   string used as a filename prefix, not derived from metadata. A typo
   produces a second, disconnected grain rather than an error.
 - **Normalization settings must match across scripts for the same grain.**
-  `NORMALIZE_BY_CLOCK`/`NORMALIZE_BY_I0` (Python) and `normalize_epma`
-  (MATLAB) must agree with the values used in Step 2, or downstream
-  comparisons are invalid.
+  `NORMALIZE_BY_CLOCK`/`NORMALIZE_BY_I0` and `normalize_epma`/`NORMALIZE_EPMA`
+  (in `CL_EPMA_registration.m`/`CL_mask_edit.m`/`CL_local_regression_map.py`)
+  must agree with the values used in Step 2, or downstream comparisons are
+  invalid.
 - **`classification_mode` and default mode in `CL_region_extraction.m`
   write the same `_region_pixel_data.csv` filename.** Running one mode
   after the other for the same grain overwrites the file.
