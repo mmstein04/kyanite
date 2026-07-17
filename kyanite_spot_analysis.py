@@ -55,7 +55,7 @@ CSV_INPUT = _REPO_ROOT / 'figs' / 'data'    # file or directory of *_spot_geoche
 FIGS_DIR  = _REPO_ROOT / 'figs'             # where <grain_id>_CL_registered.tif live
 OUT_DIR   = _REPO_ROOT / 'figs' / 'spot_analysis'
 
-ANALYSES = ['pca']   # 'pie', 'scatter', 'box', 'map', 'pca', 'all', or a list of these
+ANALYSES = 'all'   # 'pie', 'scatter', 'box', 'map', 'pca', 'all', or a list of these
 
 # Columns to make a pooled "CL vs element" scatter plot for.
 # None = auto-detect every element ROI column present in the union of all input files.
