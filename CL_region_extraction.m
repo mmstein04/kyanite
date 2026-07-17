@@ -85,7 +85,7 @@ set(0, 'DefaultLegendInterpreter',      'none');
 % checked out on.
 repo_root = fileparts(mfilename('fullpath'));
 
-grain_id = 'NA-GS-P84-03';
+grain_id = 'NA-GS-P84-06';
 
 % Directory containing the outputs of CL_EPMA_registration.m for this grain
 % (registered CL TIFFs and the grain mask TIFF).
@@ -121,7 +121,15 @@ diagnostics_dir = fullfile(input_dir, 'diagnostics');
 output_dir = fullfile(repo_root, 'figs', 'regions');
 
 % --- Spatial calibration --------------------------------------------------
-epma_pixel_um = 1.0;     % µm per pixel — must match the value used during registration
+% Pixel size is read straight from xrf_h5_to_tiff.py's metadata sidecar
+% (<grain_id>_<el>_Ka.txt's step_size_pos1_um, the fast/X axis) for whichever
+% auto-discovered EPMA map has one (same mechanism as CL_EPMA_registration.m /
+% xrf_display.py / CL_local_regression_map.py) — so this stays in sync with
+% the value CL_EPMA_registration.m used for this grain without hand-copying
+% it. epma_pixel_um below is only the fallback used (with a warning) if no
+% sidecar is found/parseable for any of this grain's maps.
+epma_pixel_um_from_sidecar = true;
+epma_pixel_um = 1.0;     % µm per pixel — fallback only; must match the value used during registration
 
 % --- Region parameters -----------------------------------------------------
 % Intersect every drawn polygon with the grain mask, so stray clicks outside
@@ -217,6 +225,26 @@ end
 
 n_elements = numel(epma_files);
 fprintf('Auto-discovered %d EPMA maps in: %s\n', n_elements, epma_dir);
+
+% --- Pixel size auto-detection from metadata sidecar ----------------------
+epma_pixel_um_source = '';
+if epma_pixel_um_from_sidecar
+    for e = 1:n_elements
+        found = read_pixel_um_from_sidecar(fullfile(epma_dir, epma_files{e}));
+        if ~isnan(found)
+            epma_pixel_um = found;
+            epma_pixel_um_source = epma_files{e};
+            break;
+        end
+    end
+    if isempty(epma_pixel_um_source)
+        warning(['epma_pixel_um_from_sidecar = true but no metadata sidecar found/parseable ' ...
+                 'for any EPMA map — falling back to epma_pixel_um = %.4g µm/px.'], epma_pixel_um);
+    else
+        fprintf('  Pixel size: %.4g µm/px (from %s metadata sidecar)\n', epma_pixel_um, epma_pixel_um_source);
+    end
+end
+
 fprintf('=== CL Region Extraction: %s ===\n\n', grain_id);
 
 % ---- Open analysis log ---------------------------------------------------
@@ -267,7 +295,11 @@ end
 lprintf('\n  Restrict regions to grain mask: %s\n', mat2str(restrict_to_grain_mask));
 lprintf('  Min region size warning:        %d px\n', min_region_px);
 lprintf('  Normalize EPMA maps:            %s\n', mat2str(normalize_epma));
-lprintf('  Spatial calibration:            %.4f µm/px\n', epma_pixel_um);
+if ~isempty(epma_pixel_um_source)
+    lprintf('  Spatial calibration:            %.4f µm/px  (from %s)\n', epma_pixel_um, epma_pixel_um_source);
+else
+    lprintf('  Spatial calibration:            %.4f µm/px  (fallback — no sidecar found)\n', epma_pixel_um);
+end
 lprintf('  Classification mode:            %s\n', mat2str(classification_mode));
 if classification_mode
     lprintf('  Texture class vocabulary:       %s  (+ auto ''Unclassified'')\n', strjoin(TEXTURE_CLASSES, ', '));
@@ -1290,5 +1322,24 @@ function s = ternary_label(is_classification)
         s = 'classification-mode';
     else
         s = 'default-mode';
+    end
+end
+
+function px_um = read_pixel_um_from_sidecar(tif_path)
+% Fast-axis (X, pos1) pixel size in microns from xrf_h5_to_tiff.py's
+% metadata sidecar for this TIFF (same base name, .txt extension) — mirrors
+% CL_EPMA_registration.m's / xrf_display.py's / CL_local_regression_map.py's
+% function of the same name/logic. Returns NaN if the sidecar is missing or
+% the field can't be parsed.
+    [d, base] = fileparts(tif_path);
+    sidecar = fullfile(d, [base, '.txt']);
+    px_um = NaN;
+    if ~exist(sidecar, 'file')
+        return;
+    end
+    txt = fileread(sidecar);
+    tok = regexp(txt, 'step_size_pos1_um\s*:\s*([-\d.eE]+)', 'tokens', 'once');
+    if ~isempty(tok)
+        px_um = str2double(tok{1});
     end
 end

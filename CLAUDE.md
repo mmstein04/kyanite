@@ -459,7 +459,12 @@ so they carry local functions with the identical values hand-copied in —
 - `epma_dir` — folder of element map TIFFs; all `*.tif` files auto-discovered;
   default `inputs/maps/<grain_id>`
 - `epma_ref_file` — reference map for control point picking (choose highest contrast)
-- `epma_pixel_um` — pixel size in µm (spatial calibration)
+- `epma_pixel_um_from_sidecar` (default `true`): pixel size is read from
+  `xrf_h5_to_tiff.py`'s metadata sidecar (`<grain_id>_<el>_Ka.txt`'s
+  `step_size_pos1_um`) for whichever auto-discovered `epma_dir` map has one,
+  same mechanism as `xrf_display.py`/`CL_local_regression_map.py`.
+  `epma_pixel_um` is only the fallback (with a warning) if no sidecar is
+  found/parseable for this grain
 - `mask_method` — grain segmentation method
 - `pct_lo_cut` / `pct_hi_cut` — outlier percentile bounds for the Pearson r/fit computation
 
@@ -467,6 +472,10 @@ so they carry local functions with the identical values hand-copied in —
 - `grain_id` — must match a grain already processed by `CL_EPMA_registration.m`
 - `input_dir` — folder holding that grain's registered CL TIFFs + mask TIFF
 - `epma_dir` — same EPMA/XRF map folder used during registration
+- `epma_pixel_um_from_sidecar` (default `true`): same sidecar auto-detection as
+  `CL_EPMA_registration.m` — keeps this in sync with the value registration used
+  for this grain without hand-copying it; `epma_pixel_um` is only the fallback
+  (with a warning) if no sidecar is found/parseable
 - `restrict_to_grain_mask` — intersect each drawn region with the grain mask (default `true`)
 - `normalize_epma` — match the value used in `CL_EPMA_registration.m` for comparable values
 - `classification_mode` — `false` (default): freeform/possibly-overlapping/partial-coverage
@@ -481,7 +490,12 @@ so they carry local functions with the identical values hand-copied in —
 - `input_dir` — folder holding that grain's registered CL TIFFs, mask TIFF, and
   pixel data (also used as `output_dir`; edits happen in place)
 - `epma_dir` — same EPMA/XRF map folder used during registration
-- `epma_pixel_um`, `normalize_epma`, `pct_lo_cut`/`pct_hi_cut`, `shift_range` — must
+- `epma_pixel_um_from_sidecar` (default `true`): same sidecar auto-detection as
+  `CL_EPMA_registration.m`/`CL_region_extraction.m` — keeps this in sync with
+  the value registration used for this grain without hand-copying it;
+  `epma_pixel_um` is only the fallback (with a warning) if no sidecar is
+  found/parseable
+- `normalize_epma`, `pct_lo_cut`/`pct_hi_cut`, `shift_range` — must
   match the values used in the grain's original `CL_EPMA_registration.m` run, or
   re-derived pixel data/plots won't be comparable to before the edit
 - `close_radius_px` / `min_object_px` / `fill_holes` — post-edit mask cleanup,

@@ -85,7 +85,13 @@ epma_ref_file = [grain_id, '_Cr_Ka.tif'];   % e.g., 'NA-CM-G12B4-02_Fe_Ka_it5.ti
 output_dir  = fullfile(repo_root, 'figs');
 
 % --- Spatial calibration --------------------------------------------------
-epma_pixel_um = 2.0;            % µm per pixel
+% Pixel size is read straight from xrf_h5_to_tiff.py's metadata sidecar
+% (<grain_id>_<el>_Ka.txt's step_size_pos1_um, the fast/X axis) for whichever
+% auto-discovered EPMA map has one (same mechanism as xrf_display.py /
+% CL_local_regression_map.py). epma_pixel_um below is only the fallback used
+% (with a warning) if no sidecar is found/parseable for any of this grain's maps.
+epma_pixel_um_from_sidecar = true;
+epma_pixel_um = 2.0;            % µm per pixel — fallback only
 
 % --- Mask parameters ------------------------------------------------------
 mask_method   = 'interactive';         % otsu | manual | interactive | polygon | activecontour
@@ -206,6 +212,25 @@ end
 n_elements = numel(epma_files);
 fprintf('Auto-discovered %d EPMA maps in: %s\n', n_elements, epma_dir);
 
+% --- Pixel size auto-detection from metadata sidecar ----------------------
+epma_pixel_um_source = '';
+if epma_pixel_um_from_sidecar
+    for e = 1:n_elements
+        found = read_pixel_um_from_sidecar(fullfile(epma_dir, epma_files{e}));
+        if ~isnan(found)
+            epma_pixel_um = found;
+            epma_pixel_um_source = epma_files{e};
+            break;
+        end
+    end
+    if isempty(epma_pixel_um_source)
+        warning(['epma_pixel_um_from_sidecar = true but no metadata sidecar found/parseable ' ...
+                 'for any EPMA map — falling back to epma_pixel_um = %.4g µm/px.'], epma_pixel_um);
+    else
+        fprintf('  Pixel size: %.4g µm/px (from %s metadata sidecar)\n', epma_pixel_um, epma_pixel_um_source);
+    end
+end
+
 fprintf('=== CL-EPMA Registration: %s ===\n\n', grain_id);
 
 % ---- Open analysis log ---------------------------------------------------
@@ -297,7 +322,11 @@ if ~isempty(mask_image_file)
 else
     lprintf('    Mask image:        <using registered CL image>\n');
 end
-lprintf('\n  Spatial calibration: %.4f µm/px\n', epma_pixel_um);
+if ~isempty(epma_pixel_um_source)
+    lprintf('\n  Spatial calibration: %.4f µm/px  (from %s)\n', epma_pixel_um, epma_pixel_um_source);
+else
+    lprintf('\n  Spatial calibration: %.4f µm/px  (fallback — no sidecar found)\n', epma_pixel_um);
+end
 if length(shift_range) > 1
     lprintf('  Shift test range:    %d to %d px  (step %g)\n', ...
             min(shift_range), max(shift_range), shift_range(2)-shift_range(1));
@@ -1471,5 +1500,24 @@ function log_file_info(fid, fpath, label)
         else
             fprintf(fid, '    (imfinfo failed; file may not exist yet)\n');
         end
+    end
+end
+
+function px_um = read_pixel_um_from_sidecar(tif_path)
+% Fast-axis (X, pos1) pixel size in microns from xrf_h5_to_tiff.py's
+% metadata sidecar for this TIFF (same base name, .txt extension) — mirrors
+% xrf_display.py's / CL_local_regression_map.py's function of the same
+% name/logic. Returns NaN if the sidecar is missing or the field can't be
+% parsed.
+    [d, base] = fileparts(tif_path);
+    sidecar = fullfile(d, [base, '.txt']);
+    px_um = NaN;
+    if ~exist(sidecar, 'file')
+        return;
+    end
+    txt = fileread(sidecar);
+    tok = regexp(txt, 'step_size_pos1_um\s*:\s*([-\d.eE]+)', 'tokens', 'once');
+    if ~isempty(tok)
+        px_um = str2double(tok{1});
     end
 end

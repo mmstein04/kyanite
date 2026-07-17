@@ -68,7 +68,7 @@ set(0, 'DefaultLegendInterpreter',      'none');
 % checked out on.
 repo_root = fileparts(mfilename('fullpath'));
 
-grain_id = 'RH-XA-57081P-05';
+grain_id = 'NA-GS-P84-06';
 
 % Directory holding the outputs of CL_EPMA_registration.m for this grain.
 % This script reads from and writes back into the same folder (in place).
@@ -89,8 +89,16 @@ use_color_display = true;
 epma_dir = fullfile(repo_root, 'inputs', 'maps', grain_id);
 
 % --- Spatial calibration --------------------------------------------------
-% Must match the value used in CL_EPMA_registration.m for this grain.
-epma_pixel_um = 2.0;     % µm per pixel
+% Pixel size is read straight from xrf_h5_to_tiff.py's metadata sidecar
+% (<grain_id>_<el>_Ka.txt's step_size_pos1_um, the fast/X axis) for whichever
+% auto-discovered EPMA map has one — same mechanism as
+% CL_EPMA_registration.m / CL_region_extraction.m / xrf_display.py /
+% CL_local_regression_map.py, so this stays in sync with the value
+% CL_EPMA_registration.m used for this grain without hand-copying it.
+% epma_pixel_um below is only the fallback used (with a warning) if no
+% sidecar is found/parseable for any of this grain's maps.
+epma_pixel_um_from_sidecar = true;
+epma_pixel_um = 2.0;     % µm per pixel — fallback only; must match the value used during registration
 
 % --- Post-edit mask cleanup ------------------------------------------------
 % Re-applied after add/remove edits, same knobs as CL_EPMA_registration.m's
@@ -177,6 +185,26 @@ end
 n_elements = numel(epma_files);
 
 fprintf('Auto-discovered %d EPMA maps in: %s\n', n_elements, epma_dir);
+
+% --- Pixel size auto-detection from metadata sidecar ----------------------
+epma_pixel_um_source = '';
+if epma_pixel_um_from_sidecar
+    for e = 1:n_elements
+        found = read_pixel_um_from_sidecar(fullfile(epma_dir, epma_files{e}));
+        if ~isnan(found)
+            epma_pixel_um = found;
+            epma_pixel_um_source = epma_files{e};
+            break;
+        end
+    end
+    if isempty(epma_pixel_um_source)
+        warning(['epma_pixel_um_from_sidecar = true but no metadata sidecar found/parseable ' ...
+                 'for any EPMA map — falling back to epma_pixel_um = %.4g µm/px.'], epma_pixel_um);
+    else
+        fprintf('  Pixel size: %.4g µm/px (from %s metadata sidecar)\n', epma_pixel_um, epma_pixel_um_source);
+    end
+end
+
 fprintf('=== CL Mask Edit: %s ===\n\n', grain_id);
 
 run_timestamp = datestr(now, 'yyyymmdd_HHMMSS');
@@ -218,7 +246,11 @@ lprintf('  EPMA directory:         %s\n', epma_dir);
 lprintf('  Registered CL (gray):   %s\n', cl_filename);
 lprintf('  Registered CL (color):  %s  (display: %s)\n', cl_color_filename, mat2str(use_color_display));
 lprintf('  Grain mask:             %s\n', mask_filename);
-lprintf('  Spatial calibration:    %.4f µm/px\n', epma_pixel_um);
+if ~isempty(epma_pixel_um_source)
+    lprintf('  Spatial calibration:    %.4f µm/px  (from %s)\n', epma_pixel_um, epma_pixel_um_source);
+else
+    lprintf('  Spatial calibration:    %.4f µm/px  (fallback — no sidecar found)\n', epma_pixel_um);
+end
 lprintf('  Post-edit cleanup:      close=%d px, min_object=%d px, fill_holes=%s\n', ...
         close_radius_px, min_object_px, mat2str(fill_holes));
 lprintf('  Regenerate downstream:  %s\n', mat2str(regenerate_downstream));
@@ -836,5 +868,24 @@ function log_file_info(fid, fpath, label)
         else
             fprintf(fid, '    (imfinfo failed; file may not exist yet)\n');
         end
+    end
+end
+
+function px_um = read_pixel_um_from_sidecar(tif_path)
+% Fast-axis (X, pos1) pixel size in microns from xrf_h5_to_tiff.py's
+% metadata sidecar for this TIFF (same base name, .txt extension) — mirrors
+% CL_EPMA_registration.m's / CL_region_extraction.m's / xrf_display.py's /
+% CL_local_regression_map.py's function of the same name/logic. Returns NaN
+% if the sidecar is missing or the field can't be parsed.
+    [d, base] = fileparts(tif_path);
+    sidecar = fullfile(d, [base, '.txt']);
+    px_um = NaN;
+    if ~exist(sidecar, 'file')
+        return;
+    end
+    txt = fileread(sidecar);
+    tok = regexp(txt, 'step_size_pos1_um\s*:\s*([-\d.eE]+)', 'tokens', 'once');
+    if ~isempty(tok)
+        px_um = str2double(tok{1});
     end
 end
