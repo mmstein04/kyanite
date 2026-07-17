@@ -7,23 +7,43 @@
 #
 # Produces:
 #   - a combined figure: a grid of pie charts, one per grain, showing the
-#     Type 1/2/3 XANES class distribution ('Bad data' / unclassified spots
-#     are excluded from the pie charts entirely)
+#     Type 1/2/3 XANES class distribution ('Bad data' / unclassified spots,
+#     and off-grain spots, are excluded from the pie charts entirely)
 #   - CL vs. element scatter plots, one per element, pooling spots from all
 #     input grains together and coloring by XANES class ('Bad data' /
-#     unclassified spots ARE included here, as grey points)
+#     unclassified spots ARE included here, as grey points; off-grain spots
+#     are absent because they have no CL/element mean to plot in the first
+#     place — see on_grain note below)
 #   - box-and-whisker plots, one per element (same element list as the
 #     scatter plots), showing that element's distribution grouped by XANES
 #     class, to check for a correlation between class and element amount
-#     ('Bad data' / unclassified excluded, same as the pie charts)
+#     ('Bad data' / unclassified excluded, same as the pie charts;
+#     off-grain spots absent for the same reason as the scatter plots)
 #   - a labeled spot-location map per grain: the registered CL image with
 #     each spot plotted at its pixel location, colored by XANES class and
-#     labeled with its spot number
+#     labeled with its spot number — off-grain spots are shown too, marked
+#     with a distinct shape (still colored by class) rather than dropped
 #   - a PCA scatter (PC1 vs PC2) over a chosen element list (PCA_ELEMENTS),
 #     pooling spots from all input grains, colored by XANES class ('Bad
 #     data' / unclassified spots ARE included, as grey points, same as the
 #     CL vs. element scatter) — spots missing any PCA_ELEMENTS value are
-#     dropped
+#     dropped (this also drops off-grain spots, for the same reason as the
+#     scatter/box plots)
+#
+# on_grain (from xrf_h5_extract_spots.py): False means the spot's sampling
+# zone didn't overlap the grain mask at all — it sampled some other phase,
+# not kyanite. Its CL and every element mean are NaN for that reason (not a
+# data-quality problem), which is exactly why the scatter/box/PCA analyses
+# above already exclude it via their normal NaN handling — no separate
+# filtering needed there. Its category_label (XANES pre-edge class) is left
+# untouched, though, since oxidation state is a property of whatever phase
+# was actually sampled, not of kyanite specifically, and is still useful
+# data on its own — that's why the pie chart explicitly filters on_grain
+# (so it doesn't misrepresent kyanite's class distribution) while the spot
+# map keeps off-grain spots visible, just flagged, rather than discarding
+# that class information outright. A CSV predating this column (or a spot
+# whose grain had no mask at extraction time) is treated as on-grain by
+# default (see on_grain_mask()).
 #
 # CSV_INPUT may be a single CSV or a directory; all *_spot_geochemistry.csv
 # files in a directory are processed. Per-spot CSVs are reusable data (also
@@ -93,7 +113,7 @@ METADATA_COLS = [
     'grain_id', 'spot', 'spot_id', 'area_name', 'category', 'category_label',
     'pixel_count', 'row_px_h5', 'col_px_h5', 'row_px_tiff', 'col_px_tiff',
     'row_matlab', 'col_matlab', 'x_mm', 'y_mm', 'x_rel_um', 'y_rel_um',
-    'zone_radius_um', 'zone_pixel_count', 'zone_mask_px_count', 'CL',
+    'zone_radius_um', 'zone_pixel_count', 'zone_mask_px_count', 'on_grain', 'CL',
 ]
 
 SPOT_LABEL_FONTSIZE = 6
@@ -139,6 +159,16 @@ def resolved_color(label):
     return CATEGORY_COLORS.get(label, GREY)
 
 
+def on_grain_mask(df):
+    """Boolean mask, True for spots on the grain. CSVs without an on_grain
+    column (extracted before this column existed) are treated as all
+    on-grain; NaN (indeterminate — no grain mask was available at extraction
+    time) is also treated as on-grain, the same conservative default."""
+    if 'on_grain' not in df.columns:
+        return pd.Series(True, index=df.index)
+    return df['on_grain'] != False
+
+
 def detect_elements(df):
     return [c for c in df.columns if c not in METADATA_COLS]
 
@@ -154,9 +184,14 @@ def element_availability(grain_frames, element):
 # =============================================================================
 
 def pie_counts(df):
-    sub = df[df['category_label'].isin(CATEGORY_ORDER)]
+    """Restricted to on-grain spots — this pie characterizes the grain's own
+    XANES class distribution, and an off-grain spot's classification belongs
+    to whatever other phase it actually sampled, not to this grain."""
+    on_grain = df[on_grain_mask(df)]
+    n_off_grain = len(df) - len(on_grain)
+    sub = on_grain[on_grain['category_label'].isin(CATEGORY_ORDER)]
     counts = sub['category_label'].value_counts()
-    return [int(counts.get(c, 0)) for c in CATEGORY_ORDER], len(sub), len(df)
+    return [int(counts.get(c, 0)) for c in CATEGORY_ORDER], len(sub), len(on_grain), n_off_grain
 
 
 def plot_pie_grid(grain_frames):
@@ -170,7 +205,7 @@ def plot_pie_grid(grain_frames):
 
     for ax, grain_id in zip(axes, grain_ids):
         df = grain_frames[grain_id]
-        counts, n_classified, n_total = pie_counts(df)
+        counts, n_classified, n_total, n_off_grain = pie_counts(df)
         if n_classified == 0:
             ax.text(0.5, 0.5, 'no classified\nspots', ha='center', va='center',
                     fontsize=8, color='gray', transform=ax.transAxes)
@@ -181,7 +216,10 @@ def plot_pie_grid(grain_frames):
             # identical whether or not it has spots of a given type.
             ax.pie(counts, colors=colors, startangle=90,
                    wedgeprops=dict(edgecolor='white', linewidth=0.5))
-        ax.set_title(f'{grain_id}\n(n={n_classified}/{n_total})', fontsize=9)
+        title = f'{grain_id}\n(n={n_classified}/{n_total})'
+        if n_off_grain:
+            title += f'\n{n_off_grain} off-grain excluded'
+        ax.set_title(title, fontsize=9)
 
     for ax in axes[n:]:
         ax.axis('off')
@@ -191,7 +229,7 @@ def plot_pie_grid(grain_frames):
                frameon=False, fontsize=9, bbox_to_anchor=(0.5, -0.02))
     if SHOW_TITLE:
         fig.suptitle('XANES pre-edge class distribution by grain\n'
-                      '(Bad data / unclassified spots excluded)', fontsize=12)
+                      '(Bad data / unclassified and off-grain spots excluded)', fontsize=12)
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     return fig
 
@@ -460,6 +498,9 @@ def load_cl_background(grain_id):
     return tifffile.imread(str(path))
 
 
+OFF_GRAIN_MARKER = 'X'   # on-grain spots use 'o' — shape flags location, color still carries XANES class
+
+
 def plot_spot_map(grain_id, df, cl_img):
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.imshow(cl_img, cmap='gray', origin='upper')
@@ -468,9 +509,11 @@ def plot_spot_map(grain_id, df, cl_img):
     # MATLAB's imagesc default used in xrf_display.m). Adding invert_yaxis() would
     # silently flip every spot vertically relative to the image.
 
-    for row in df.itertuples():
+    on_grain = on_grain_mask(df)
+    for row, is_on_grain in zip(df.itertuples(), on_grain):
         color = resolved_color(row.category_label)
-        ax.scatter(row.col_px_tiff, row.row_px_tiff, s=28, color=color,
+        marker = 'o' if is_on_grain else OFF_GRAIN_MARKER
+        ax.scatter(row.col_px_tiff, row.row_px_tiff, s=28, color=color, marker=marker,
                    edgecolors='black', linewidths=0.5, zorder=3)
         ax.annotate(str(int(row.spot)), (row.col_px_tiff, row.row_px_tiff),
                     xytext=SPOT_LABEL_OFFSET, textcoords='offset points',
@@ -485,6 +528,8 @@ def plot_spot_map(grain_id, df, cl_img):
                           markeredgecolor='black', label=c) for c in CATEGORY_ORDER]
     handles.append(plt.Line2D([0], [0], marker='o', linestyle='', markerfacecolor=GREY,
                               markeredgecolor='black', label='Bad data / unclassified'))
+    handles.append(plt.Line2D([0], [0], marker=OFF_GRAIN_MARKER, linestyle='', markerfacecolor='0.5',
+                              markeredgecolor='black', label='Off-grain (other phase) —\ncolor = XANES class still shown'))
     ax.legend(handles=handles, loc='upper right', fontsize=7, framealpha=0.7)
     if SHOW_TITLE:
         ax.set_title(f'{grain_id} — spot locations ({len(df)} spots)', fontsize=11)

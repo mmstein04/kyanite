@@ -184,6 +184,13 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 - Missing mask/CL/classification files for `GRAIN_ID`, or zero grain-mask overlap for a
   spot's zone, degrade gracefully (NaN + a printed warning) rather than crashing —
   useful at earlier pipeline stages
+- `on_grain` column: `False` when a spot's zone has zero overlap with the grain mask
+  (it sampled some other phase, not kyanite) — CL and every element mean are NaN for
+  that spot, but `category`/`category_label` (the hand-assigned XANES pre-edge class)
+  are left untouched, since oxidation state is a property of whatever phase was
+  actually sampled and remains useful data on its own, just not attributable to
+  kyanite. `NaN` (indeterminate) only if no grain mask was found for `GRAIN_ID` at all.
+  See `kyanite_spot_analysis.py`'s handling below
 - `NAME_FILTER` (default `'spot'`) selects which `xrmmap/areas` entries to include;
   set to `None` to include drawn polygon regions too (their shape is discarded —
   extraction is centered on the region's centroid, like a point spot)
@@ -200,17 +207,32 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `CSV_INPUT` may be a single file or a directory (globs `*_spot_geochemistry.csv`)
 - Three independently toggleable analyses (`ANALYSES` list): `pie` (one combined
   figure, small-multiples grid of per-grain XANES class pies — `'Bad data'`/
-  unclassified spots excluded from the pie counts entirely, per-grain slice
-  order/coloring stays identical even at zero count for a type), `scatter`
-  (CL-vs-element, one figure per element, pooling spots from every input grain —
-  `'Bad data'`/unclassified spots ARE included here, as grey points/markers, for
-  QC context), `map` (per-grain spot-location map on the registered CL image,
-  labeled by spot number), `pca` (one PCA fit over `PCA_ELEMENTS`, pooling spots
-  from every input grain, producing four figures — PC1-vs-PC2 scatter, scree plot,
-  PC1/PC2 loadings bar charts, and a PC1-vs-PC2 biplot with loading vectors — all
-  colored by XANES class the same way as `scatter` — `'Bad data'`/unclassified
-  spots ARE included as grey points; spots missing any `PCA_ELEMENTS` value are
-  dropped)
+  unclassified spots AND off-grain spots (`on_grain = False`) excluded from the pie
+  counts entirely, so the pie reflects only this grain's own kyanite class
+  distribution; per-grain slice order/coloring stays identical even at zero count
+  for a type; a per-grain subtitle reports how many off-grain spots were excluded),
+  `scatter` (CL-vs-element, one figure per element, pooling spots from every input
+  grain — `'Bad data'`/unclassified spots ARE included here, as grey points/markers,
+  for QC context; off-grain spots are absent, but only because their CL/element
+  means are already `NaN` from extraction and get dropped by the normal
+  CL/element `dropna` — no separate `on_grain` filtering needed here), `map`
+  (per-grain spot-location map on the registered CL image, labeled by spot number
+  — off-grain spots ARE plotted, at their real location, still colored by XANES
+  class, but marked with an `'X'` marker instead of `'o'` so they read as
+  off-grain-but-still-useful rather than being silently dropped), `pca` (one PCA
+  fit over `PCA_ELEMENTS`, pooling spots from every input grain, producing four
+  figures — PC1-vs-PC2 scatter, scree plot, PC1/PC2 loadings bar charts, and a
+  PC1-vs-PC2 biplot with loading vectors — all colored by XANES class the same way
+  as `scatter` — `'Bad data'`/unclassified spots ARE included as grey points;
+  spots missing any `PCA_ELEMENTS` value are dropped, which — same as `scatter` —
+  already excludes off-grain spots without any separate filtering)
+- `on_grain` (written by `xrf_h5_extract_spots.py`): `False` means the spot's CL/
+  element means are `NaN` because it sampled a different phase, not kyanite — its
+  `category_label` (XANES pre-edge class / oxidation state) stays intact and
+  meaningful for that other phase, just not attributable to kyanite. `on_grain_mask()`
+  treats `NaN` (indeterminate — no grain mask at extraction time) and a missing
+  `on_grain` column (an older CSV, extracted before this field existed) both as
+  on-grain, so nothing regresses for CSVs from before this change
 - `SCATTER_ELEMENTS` (default `None`) auto-detects every element column present in
   the union of input files; an element missing from some grains' CSVs (ROI lists
   vary slightly, e.g. LLF6-01 has extra REE lines) is pooled from whichever grains
@@ -801,6 +823,13 @@ so they carry local functions with the identical values hand-copied in —
 - `CATEGORY_ORDER` — fixed XANES class order, `'Bad data'`/NaN excluded (matches `kyanite_spot_analysis.py`)
 - `CV_STRATEGY` — `'grouped'` (default, `StratifiedGroupKFold` by `grain_id`: no grain's spots span
   train/test) or `'stratified'` (`StratifiedKFold` ignoring grain identity)
+- Off-grain spots (`on_grain = False`) are excluded implicitly, not by an explicit
+  filter: their element columns are already `NaN` (see `xrf_h5_extract_spots.py`'s
+  `on_grain`), and `prepare_data()` drops any row with an incomplete feature
+  vector — correct here since this classifier predicts XANES class from
+  *kyanite's* chemistry specifically, unlike `kyanite_spot_analysis.py`'s spot map,
+  which keeps them visible (flagged) since their classification is still
+  meaningful for whatever other phase they sampled
 
 **`xanes_plot.py`**
 - `XANES_INPUT` — file/directory of raw per-spot XANES spectra (`inputs/xanes/<grain_id>_spotNN.csv`)

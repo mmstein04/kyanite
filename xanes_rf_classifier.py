@@ -10,11 +10,20 @@
 # analog of kyanite_rf_shap.py's CL-intensity regression.
 #
 # 'Bad data'/unclassified spots are dropped (same convention as
-# kyanite_spot_analysis.py's pie/box plots). All grains are always pooled
-# into a single classifier rather than analyzed per-grain: with ~300 spots
-# total, several classes missing entirely from some grains, and one grain
-# (RH-XA-57081P-07 as of this writing) 100% a single class, per-grain models
-# wouldn't be meaningful.
+# kyanite_spot_analysis.py's pie/box plots). Off-grain spots (on_grain =
+# False — the spot's zone missed the grain mask, so it sampled some other
+# phase) are dropped too, but implicitly: their element columns are already
+# NaN from extraction (there's no kyanite chemistry to average there), and
+# prepare_data() below drops any row with an incomplete feature vector — this
+# classifier predicts XANES class from *kyanite's* trace-element chemistry
+# specifically, so excluding them is correct, unlike kyanite_spot_analysis.py's
+# spot map, which keeps them visible (just flagged) since their oxidation
+# state is still meaningful for whatever phase they did sample.
+#
+# All grains are always pooled into a single classifier rather than analyzed
+# per-grain: with ~300 spots total, several classes missing entirely from some
+# grains, and one grain (RH-XA-57081P-07 as of this writing) 100% a single
+# class, per-grain models wouldn't be meaningful.
 #
 # Element columns are auto-detected as in kyanite_spot_analysis.py
 # (everything not in METADATA_COLS), then further restricted to elements
@@ -102,7 +111,7 @@ METADATA_COLS = [
     'grain_id', 'spot', 'spot_id', 'area_name', 'category', 'category_label',
     'pixel_count', 'row_px_h5', 'col_px_h5', 'row_px_tiff', 'col_px_tiff',
     'row_matlab', 'col_matlab', 'x_mm', 'y_mm', 'x_rel_um', 'y_rel_um',
-    'zone_radius_um', 'zone_pixel_count', 'zone_mask_px_count', 'CL',
+    'zone_radius_um', 'zone_pixel_count', 'zone_mask_px_count', 'on_grain', 'CL',
 ]
 
 # =============================================================================

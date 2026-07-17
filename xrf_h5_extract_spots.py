@@ -8,6 +8,14 @@ XRF map HDF5 file:
     circular zone around the spot, restricted to grain-mask pixels
   - mean CL brightness over that same zone, from the registered CL image
   - the hand-assigned XANES pre-edge classification (Type 1/2/3/Bad data)
+  - on_grain: whether the spot's zone overlapped the grain mask at all.
+    A spot placed off the grain (e.g. on a neighboring phase) gets on_grain
+    = False and NaN CL/element means (there's no kyanite chemistry to
+    average there), but keeps its category/category_label untouched — the
+    XANES pre-edge classification is a property of whatever phase the spot
+    actually sampled, not of kyanite specifically, so it's still meaningful
+    data for that other phase. on_grain is NaN (indeterminate) only if no
+    grain mask was found at all for this grain.
 
 Data sources:
   xrmmap/areas/<name>        — boolean mask, same shape as the element maps;
@@ -211,6 +219,7 @@ def extract_zone_geochem(row_px_tiff, col_px_tiff, n_rows, n_cols,
         'zone_radius_um': radius_um,
         'zone_pixel_count': int(disk.sum()),
         'zone_mask_px_count': 0,
+        'on_grain': np.nan,   # indeterminate until a grain mask is available (see below)
         'CL': np.nan,
     }
     for col_name in roi_indices:
@@ -222,9 +231,11 @@ def extract_zone_geochem(row_px_tiff, col_px_tiff, n_rows, n_cols,
     zone_mask = disk & grain_mask[row_lo:row_hi + 1, col_lo:col_hi + 1]
     n_zone = int(zone_mask.sum())
     result['zone_mask_px_count'] = n_zone
+    result['on_grain'] = n_zone > 0
     if n_zone == 0:
         print(f"  WARNING: spot at (row={row_px_tiff}, col={col_px_tiff}) has zero "
-              f"overlap with the grain mask — CL/element means will be NaN.")
+              f"overlap with the grain mask — CL/element means will be NaN, "
+              f"on_grain=False (spot likely samples a different phase).")
         return result
 
     if cl_img is not None:
@@ -379,7 +390,7 @@ def main():
              'pixel_count',
              'row_px_h5', 'col_px_h5', 'row_px_tiff', 'col_px_tiff', 'row_matlab', 'col_matlab',
              'x_mm', 'y_mm', 'x_rel_um', 'y_rel_um',
-             'zone_radius_um', 'zone_pixel_count', 'zone_mask_px_count',
+             'zone_radius_um', 'zone_pixel_count', 'zone_mask_px_count', 'on_grain',
              'CL']
             + element_cols
         )
