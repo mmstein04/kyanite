@@ -70,7 +70,7 @@ MAPS_DIR = _REPO_ROOT / 'inputs' / 'maps'    # raw element map TIFFs, <grain_id>
 CL_DIR   = _REPO_ROOT / 'figs'               # registered CL TIFFs, <grain_id>_CL_registered.tif
 OUTPUT_DIR = _REPO_ROOT / 'figs' / 'diagnostics'
 
-GRAINS   = None   # None = every <grain_id>_mask.tif found in MASK_DIR; or a list of grain_id strings
+GRAINS   = ['NA-GS-P84-06']   # None = every <grain_id>_mask.tif found in MASK_DIR; or a list of grain_id strings
 ELEMENTS = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Mn_Ka', 'Ti_Ka']   # only elements with a map TIFF for a given grain are used
 
 # Saturation detection — same defaults/meaning as kyanite_figures.py, held

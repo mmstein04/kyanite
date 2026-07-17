@@ -82,7 +82,7 @@ _REPO_ROOT = Path(__file__).resolve().parent
 # Grain selection. A single string, a list for batch processing, or None to
 # auto-discover every grain that has a registered CL image (INPUT_DIR), a
 # mask (DATA_DIR), and an EPMA/XRF maps folder (MAPS_DIR/<grain_id>/).
-GRAIN_IDS = None
+GRAIN_IDS = 'NA-GS-P84-06'
 
 # Directory containing the outputs of CL_EPMA_registration.m (registered CL
 # TIFFs and the grain mask TIFF).

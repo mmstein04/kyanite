@@ -44,7 +44,7 @@ OUTPUT_DIR = _REPO_ROOT / 'figs' / 'map_renders'
 # Grain and element selection. GRAIN_IDS may be a single string, a list for
 # batch processing, or None to auto-discover every grain that has both a
 # maps folder (MAPS_DIR/<grain_id>/) and a mask (MASK_DIR/<grain_id>_mask.tif).
-GRAIN_IDS = None
+GRAIN_IDS = 'NA-GS-P84-06'
 ELEMENTS  = ['Cr', 'Fe', 'Mn', 'Ti', 'V']   # bare symbol; maps as <grain_id>_<el>_Ka.tif
 
 # Element-ratio maps (numerator, denominator), e.g. Cr/V and Fe/Mn. Both

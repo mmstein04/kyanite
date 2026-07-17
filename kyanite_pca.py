@@ -63,7 +63,7 @@ from kyanite_palette import (BLUE, ORANG, element_colors as _element_colors,
 # checked out on.
 _REPO_ROOT = Path(__file__).resolve().parent
 
-CSV_INPUT = _REPO_ROOT / 'figs' / 'data'   # file or directory
+CSV_INPUT = _REPO_ROOT / 'figs' / 'data' / 'NA-GS-P84-06_pixel_data.csv'   # file or directory
 ELEMENTS  = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Mn_Ka', 'Ti_Ka']      # list of CSV column names to include; None = all columns except CL/Region
 
 # Where figures are saved — independent of CSV_INPUT, so pointing CSV_INPUT

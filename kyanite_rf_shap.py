@@ -61,10 +61,7 @@ _REPO_ROOT = Path(__file__).resolve().parent
 
 CSV_INPUT = _REPO_ROOT / 'figs' / 'data'   # file or directory
 ELEMENTS  = None      # list of CSV column names to include; None = all columns except CL
-GRAIN_FILTER = [        # list of grain_ids to process, or None for every grain found in CSV_INPUT
-    'NA-SS-P1156-02', 'NVD3-01', 'RH-XA-57081B-02', 'RH-XA-57081P-05', 'RH-XA-57081P-07',
-]   # TEMP: the 5 grains that hadn't completed when the prior 96G run OOM'd on NA-SS-P1156-02;
-    # set back to None once these are done so a normal run covers every grain again
+GRAIN_FILTER = ['NA-GS-P84-06']   # list of grain_ids to process, or None for every grain found in CSV_INPUT
 
 # Region CSVs (*_region_pixel_data.csv) are skipped by default — RF/SHAP is
 # too computationally expensive to run once per region on top of every
