@@ -53,7 +53,7 @@ from sklearn.model_selection import StratifiedKFold, StratifiedGroupKFold
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import (accuracy_score, balanced_accuracy_score, f1_score,
                               classification_report, confusion_matrix)
-from kyanite_palette import BLUE, ORANG, CATEGORY_ORDER
+from kyanite_palette import CATEGORY_ORDER, element_colors
 
 # =============================================================================
 # PARAMETERS — edit this section for each run
@@ -254,15 +254,25 @@ def run_rf_cv(X, y, groups, elements, log_lines):
     return y_pred_all, proba_all, np.array(acc_folds), np.array(bal_acc_folds), np.array(f1_folds), imp_all
 
 
-def plot_importance(mean_imp, std_imp, elements):
+def plot_importance(mean_imp, std_imp, elements, significant):
+    """Bar fill = element's fixed color (kyanite_palette), so the same
+    element reads the same color across every figure/script; bar border
+    separately encodes significance — a black outline if the element is
+    flagged significant, no border otherwise — same two-channel convention
+    as kyanite_pca.py's plot_loadings / kyanite_spot_analysis.py's
+    plot_pca_loadings / kyanite_rf_shap_plots.py's plot_importance."""
     order = np.argsort(mean_imp)[::-1]
     sorted_mean = mean_imp[order]
     sorted_std = std_imp[order]
     sorted_names = [elements[i] for i in order]
-    colors = [BLUE if v >= 0 else ORANG for v in sorted_mean]
+    sorted_sig = [significant[i] for i in order]
+    fill_colors = element_colors(sorted_names)
+    edge_colors = ['black' if sig else 'none' for sig in sorted_sig]
+    edge_widths = [1.5 if sig else 0 for sig in sorted_sig]
 
     fig, ax = plt.subplots(figsize=(max(6, 0.4 * len(elements)), 4.5))
-    ax.bar(range(len(sorted_mean)), sorted_mean, color=colors)
+    ax.bar(range(len(sorted_mean)), sorted_mean, color=[fill_colors[n] for n in sorted_names],
+           edgecolor=edge_colors, linewidth=edge_widths)
     ax.errorbar(range(len(sorted_mean)), sorted_mean, yerr=sorted_std,
                 fmt='none', ecolor='k', elinewidth=1.2, capsize=3)
     ax.axhline(0, color='k', lw=1)
@@ -450,7 +460,7 @@ if SAVE_CSV:
     print(f'  Saved: {OUTPUT_LABEL}_rf_classifier_importance.csv, {OUTPUT_LABEL}_rf_classifier_predictions.csv')
 
 if SAVE_FIG:
-    fig = plot_importance(mean_imp, std_imp, kept)
+    fig = plot_importance(mean_imp, std_imp, kept, [e in significant for e in kept])
     if SHOW_TITLE:
         fig.suptitle(f'{OUTPUT_LABEL} — RF permutation importance (XANES class)')
     fig.tight_layout()

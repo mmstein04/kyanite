@@ -429,6 +429,17 @@ so they carry local functions with the identical values hand-copied in —
   `|loading|` clears the threshold, no border (`edgecolor='none'`)
   otherwise — so element identity and significance are both visible at
   once, on two different visual channels rather than one overloaded color.
+  The same fill/border convention is reused by the RF permutation-importance
+  bar charts (`kyanite_rf_shap_plots.py`'s `plot_importance`,
+  `xanes_rf_classifier.py`'s `plot_importance`) — fill = element color,
+  border = the CSV's `significant` flag (mean/std of importance exceeding
+  `IMPORTANCE_SIG_RATIO`) — which also replaced those two functions' prior
+  BLUE/ORANG-by-sign coloring (sign of mean importance is now visible from
+  the bar crossing the zero line instead, and in practice was never a very
+  informative channel — `significant` already implies positive). The SHAP
+  importance bar chart (`kyanite_rf_shap_plots.py`'s `plot_shap_importance`)
+  gets element-colored fill too, but no border, since mean |SHAP value| is
+  never negative and its CSV carries no significance flag.
 - **Region name → color** (`kyanite_palette.REGION_PALETTE` /
   `region_colors()`; MATLAB: `region_name_colors()` in
   `CL_region_extraction.m`) — region names are freeform and per-grain

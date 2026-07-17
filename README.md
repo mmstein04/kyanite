@@ -68,7 +68,7 @@ kyanite/
 ├── xanes_plot.py                      Step 8.1 — plot pre-edge doublets for hand classification
 ├── xanes_classification_split.py      Step 8.2 — split hand classification CSV per grain
 ├── xrf_h5_extract_spots.py            Step 8.3 — per-spot geochemistry + CL + XANES class CSV
-├── kyanite_spot_analysis.py           Step 8.4 — batch spot analysis (pie/scatter/box/PCA)
+├── kyanite_spot_analysis.py           Step 8.4 — batch spot analysis (pie/scatter/box/map/PCA)
 ├── xanes_rf_classifier.py             Step 8.5 — RF classifying XANES class from chemistry
 ├── sum_epma_maps.py                   utility — sum element-line maps (e.g. Zr_La + Zr_Lb)
 ├── xrf_display.py                     utility — visualize element/ratio maps with mask overlay
@@ -189,7 +189,11 @@ image; default `inputs/cl`), `cl_filename` (any format readable by
 `imread`), `epma_dir` (folder of element-map TIFFs; default
 `inputs/maps/<grain_id>`; all `*.tif` files are auto-discovered),
 `epma_ref_file` (the highest-contrast map, used for control-point picking),
-`epma_pixel_um`, and `mask_method`.
+and `mask_method`. `epma_pixel_um` is read automatically from
+`xrf_h5_to_tiff.py`'s metadata sidecar for whichever EPMA map has one
+(`epma_pixel_um_from_sidecar = true`, the same mechanism `xrf_display.py`/
+`CL_local_regression_map.py` use) — the hardcoded `epma_pixel_um` value is
+only a fallback if no sidecar is found.
 
 1. `cpselect` opens interactively — click matching control points on the CL
    image and the reference EPMA/XRF map, then close the window to warp.
@@ -228,10 +232,12 @@ shift-sensitivity, all-maps QC, mask check) are written to
 
 Use this instead of rerunning Step 2 when a mask problem is found later (an
 inclusion masked in, or real grain masked out). No re-registration or
-control-point selection is required. Set `grain_id`, `input_dir`,
-`epma_dir`, and match `epma_pixel_um`/`normalize_epma`/`pct_lo_cut`/
-`pct_hi_cut`/`shift_range` to the values used in Step 2 for this grain, so
-the before/after comparison is valid.
+control-point selection is required. Set `grain_id`, `input_dir`, `epma_dir`,
+and match `normalize_epma`/`pct_lo_cut`/`pct_hi_cut`/`shift_range` to the
+values used in Step 2 for this grain, so the before/after comparison is
+valid. `epma_pixel_um` is read from the same sidecar mechanism as Step 2
+(`epma_pixel_um_from_sidecar = true`), so it stays in sync with Step 2's
+value for this grain automatically rather than needing to be hand-copied.
 
 Add and remove polygons are drawn interactively, with a live preview after
 each edit; `u` undoes the last edit, `d` finishes. Before overwriting
@@ -246,8 +252,11 @@ internally consistent.
 ### Step 4 (optional) — Sub-grain regions or full-grain texture domains
 **`CL_region_extraction.m`**
 
-Requires a grain that has already been through Step 2. Two modes,
-controlled by `classification_mode`:
+Requires a grain that has already been through Step 2. Like `CL_mask_edit.m`,
+`epma_pixel_um` is read from the same metadata-sidecar mechanism as Step 2
+(`epma_pixel_um_from_sidecar = true`), so region area (µm²) calculations stay
+in sync with Step 2's value automatically. Two modes, controlled by
+`classification_mode`:
 
 - **`false` (default)** — freeform ROIs. Draw and name any number of
   polygons (e.g. "core", "rim"); overlapping or partial coverage is
@@ -411,14 +420,26 @@ Steps 3–7:
      read back by both `kyanite_spot_analysis.py` and `xanes_rf_classifier.py`.
 4. **`kyanite_spot_analysis.py`** — batch analysis pooling every grain's
    `*_spot_geochemistry.csv`: XANES class pie-chart grid, pooled
-   CL-vs-element scatter/box plots colored by class, and PCA (scatter,
-   scree, loadings, biplot with cluster hulls) over `PCA_ELEMENTS`, all
-   colored consistently by class, with `'Bad data'`/unclassified spots
-   shown as grey points for QC context rather than dropped.
+   CL-vs-element scatter/box plots colored by class, PCA (scatter,
+   scree, loadings, biplot with cluster hulls) over `PCA_ELEMENTS`, and a
+   per-grain spot-location map on the registered CL image, all colored
+   consistently by class, with `'Bad data'`/unclassified spots shown as
+   grey points for QC context rather than dropped. Off-grain spots
+   (`on_grain = False` — the spot's zone missed the grain mask entirely, so
+   it sampled some other phase) are handled differently per figure: the
+   pie chart excludes them (it characterizes this grain's own kyanite class
+   distribution), while scatter/box/PCA exclude them implicitly since their
+   CL/element values are already `NaN`. The spot map is the exception — it
+   keeps off-grain spots visible, marked with an `'X'` instead of `'o'` but
+   still colored by class, since their oxidation state is still meaningful
+   data for whatever phase they actually sampled.
 5. **`xanes_rf_classifier.py`** — the classification analog of Step 7's
    regression: cross-validated Random Forest predicting XANES class from
    spot chemistry, pooled across all grains (per-grain models are not
-   meaningful, since some grains are entirely one class). `CV_STRATEGY =
+   meaningful, since some grains are entirely one class). Off-grain spots
+   are excluded the same implicit way as Step 8.4's scatter/box/PCA — their
+   `NaN` chemistry is correctly dropped, since this classifier is about
+   kyanite's own chemistry specifically. `CV_STRATEGY =
    'grouped'` (default) holds out folds by grain rather than by spot, so a
    fold cannot learn one grain's chemical signature instead of a general
    chemistry–oxidation relationship. Reads the same `figs/data/` CSVs as
