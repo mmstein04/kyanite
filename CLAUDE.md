@@ -573,12 +573,18 @@ so they carry local functions with the identical values hand-copied in —
 - `NORMALIZE_BY_CLOCK`, `NORMALIZE_BY_I0`
 
 **`xrf_h5_extract_spots.py`**
-- `H5_FILE` — raw XRF HDF5 file, default location `inputs/xrf/`
-- `GRAIN_ID` — must match the grain's `figs/`/`inputs/xanes_classification/` filenames;
-  a warning is printed if `GRAIN_ID` isn't a substring of `H5_FILE`'s filename
+- `H5_DIR` — folder of raw XRF HDF5 files, one per grain (`H5_DIR/<grain_id>_xrf.h5`);
+  default `inputs/xrf/`
+- `GRAIN_IDS` — single string, list, or `None` (default discovers every grain with an h5
+  file in `H5_DIR` — the only hard requirement for extraction; a missing mask/CL image/
+  classification CSV for a given grain still degrades gracefully, NaN + a warning, same
+  as ever). A grain that fails partway (e.g. an unreadable/malformed h5) is skipped with
+  a warning rather than aborting the batch. Drives the grain's `figs/`/
+  `inputs/xanes_classification/` filenames
 - `FIGS_DIR`, `CLASSIFICATION_DIR` — where to look up the mask/CL TIFFs and classification CSV
   (default `inputs/xanes_classification/`)
-- `OUTPUT_CSV` — defaults to `figs/data/<GRAIN_ID>_spot_geochemistry.csv`; set to `None` for console-only
+- `OUTPUT_DIR` — where `<grain_id>_spot_geochemistry.csv` is written; default `figs/data/`.
+  `SAVE_CSV` — `False` for console-only (no files written)
 - `NAME_FILTER` — regex to select which `xrmmap/areas` entries count as spots (default `'spot'`)
 - `ZONE_RADIUS_UM` — physical radius (µm) of the circular sampling zone around each spot
 - `ELEMENTS` / `EXCLUDE_ROIS` — element ROIs to extract (`None` = all except known scaler channels)

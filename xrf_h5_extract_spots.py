@@ -53,7 +53,14 @@ exported to maps/<grain_id>/*.tif.
 Spot numbering in the HDF5 area names does not necessarily match the sample
 prefix used elsewhere in this project (e.g. h5 area "LLF6-Area2-spot01" vs.
 grain_id "LLF6-01") — everything here joins on the trailing spot number via
-GRAIN_ID + that number, not the h5 area's own name.
+the grain's own grain_id + that number, not the h5 area's own name.
+
+Batch mode: GRAIN_IDS may be a single string, a list, or None to
+auto-discover every grain with a raw XRF h5 file in H5_DIR (the only hard
+requirement for extraction — a missing mask/CL image/classification CSV for
+a given grain degrades gracefully, NaN + a warning, same as always). A grain
+that fails partway (e.g. an unreadable/malformed h5) is skipped with a
+warning rather than aborting the whole batch.
 
 Pixel coordinates are reported in two frames:
   - row_px_h5/col_px_h5     — native HDF5 orientation (row 0 = bottom of scan)
@@ -64,8 +71,8 @@ Pixel coordinates are reported in two frames:
                               image, element maps, and mask. The circular
                               zone extraction below operates in this frame.
 
-Output: one row per spot, written to OUTPUT_CSV (if set) and printed to the
-console.
+Output: one row per spot, written to OUTPUT_DIR/<grain_id>_spot_geochemistry.csv
+(if SAVE_CSV) and printed to the console.
 """
 
 import re
@@ -84,19 +91,24 @@ from pathlib import Path
 # checked out on.
 _REPO_ROOT = Path(__file__).resolve().parent
 
-H5_FILE  = _REPO_ROOT / 'inputs' / 'xrf' / 'NVD3-01_xrf.h5'
-GRAIN_ID = 'NVD3-01'   # drives figs/data/<GRAIN_ID>_mask.tif, figs/<GRAIN_ID>_CL_registered.tif,
-                       # inputs/xanes_classification/<GRAIN_ID>_pre_edge_classification.csv,
-                       # and spot_id = <GRAIN_ID>_spotNN
+# Folder of raw XRF HDF5 files, one per grain: H5_DIR/<grain_id>_xrf.h5.
+H5_DIR = _REPO_ROOT / 'inputs' / 'xrf'
+
+# Grain selection. A single string, a list for batch processing, or None to
+# auto-discover every grain with an h5 file in H5_DIR — see "Batch mode" above.
+# Drives figs/data/<grain_id>_mask.tif, figs/<grain_id>_CL_registered.tif,
+# inputs/xanes_classification/<grain_id>_pre_edge_classification.csv, and
+# spot_id = <grain_id>_spotNN.
+GRAIN_IDS = None
 
 FIGS_DIR           = _REPO_ROOT / 'figs'
 CLASSIFICATION_DIR = _REPO_ROOT / 'inputs' / 'xanes_classification'
 
-
 # Reusable data — read back by kyanite_spot_analysis.py and
 # xanes_rf_classifier.py, so it lives in figs/data/ alongside the rest of
 # the project's reusable per-grain data files, not among any figures.
-OUTPUT_CSV = _REPO_ROOT / 'figs' / 'data' / f'{GRAIN_ID}_spot_geochemistry.csv'
+OUTPUT_DIR = _REPO_ROOT / 'figs' / 'data'
+SAVE_CSV   = True   # False to print to console only, without writing any CSV
 
 # Only include areas whose name matches this regex (case-insensitive).
 # Set to None to include every area in xrmmap/areas (drawn regions included).
@@ -137,6 +149,14 @@ def _scalar(ds):
 def spot_sort_key(name):
     m = SPOT_NUM_RE.search(name)
     return (int(m.group(1)) if m else float('inf'), name)
+
+
+def discover_grain_ids():
+    """Every grain with a raw XRF h5 file in H5_DIR — the only hard
+    requirement for extraction; a missing mask/CL image/classification CSV
+    for a given grain degrades gracefully (NaN + warning) rather than
+    blocking it. Used when GRAIN_IDS is None to run every available grain."""
+    return sorted(p.name[:-len('_xrf.h5')] for p in Path(H5_DIR).glob('*_xrf.h5'))
 
 
 def load_grain_mask(figs_dir, grain_id):
@@ -259,12 +279,10 @@ def extract_zone_geochem(row_px_tiff, col_px_tiff, n_rows, n_cols,
     return result
 
 
-def main():
-    if GRAIN_ID not in Path(H5_FILE).stem:
-        print(f"WARNING: GRAIN_ID '{GRAIN_ID}' is not a substring of H5_FILE "
-              f"'{Path(H5_FILE).name}' — double check these refer to the same grain.")
+def process_grain(grain_id):
+    h5_file = Path(H5_DIR) / f'{grain_id}_xrf.h5'
 
-    with h5py.File(H5_FILE, 'r') as f:
+    with h5py.File(h5_file, 'r') as f:
         scan = f['xrmmap/config/scan']
         pos1_addr = _scalar(scan['pos1'])
         pos2_addr = _scalar(scan['pos2'])
@@ -304,9 +322,9 @@ def main():
             i0_arr = np.flipud(np.array(f['xrmmap/scalars/I0'], dtype=np.float64))
             i0_arr[i0_arr == 0] = np.nan
 
-        grain_mask = load_grain_mask(FIGS_DIR, GRAIN_ID)
-        cl_img = load_cl_image(FIGS_DIR, GRAIN_ID)
-        classification = load_classification(CLASSIFICATION_DIR, GRAIN_ID)
+        grain_mask = load_grain_mask(FIGS_DIR, grain_id)
+        cl_img = load_cl_image(FIGS_DIR, grain_id)
+        classification = load_classification(CLASSIFICATION_DIR, grain_id)
 
         areas = f['xrmmap/areas']
         names = list(areas.keys())
@@ -342,7 +360,7 @@ def main():
 
             m = SPOT_NUM_RE.search(name)
             spot_num = int(m.group(1)) if m else None
-            spot_id = f"{GRAIN_ID}_spot{spot_num:02d}" if spot_num is not None else None
+            spot_id = f"{grain_id}_spot{spot_num:02d}" if spot_num is not None else None
 
             category, category_label = (np.nan, np.nan)
             if spot_num is not None and spot_num in classification:
@@ -351,7 +369,7 @@ def main():
                 unmatched_classification.append(spot_num)
 
             row = {
-                'grain_id': GRAIN_ID,
+                'grain_id': grain_id,
                 'spot': spot_num,
                 'spot_id': spot_id,
                 'area_name': name,
@@ -399,10 +417,39 @@ def main():
         with pd.option_context('display.max_rows', None, 'display.width', 200):
             print(df.to_string(index=False))
 
-        if OUTPUT_CSV is not None:
-            Path(OUTPUT_CSV).parent.mkdir(parents=True, exist_ok=True)
-            df.to_csv(OUTPUT_CSV, index=False)
-            print(f"\nWrote {len(df)} spot(s) to {OUTPUT_CSV}")
+        if SAVE_CSV:
+            output_csv = Path(OUTPUT_DIR) / f'{grain_id}_spot_geochemistry.csv'
+            output_csv.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(output_csv, index=False)
+            print(f"\nWrote {len(df)} spot(s) to {output_csv}")
+
+
+def main():
+    if GRAIN_IDS is None:
+        grain_ids = discover_grain_ids()
+        if not grain_ids:
+            raise FileNotFoundError(f'No *_xrf.h5 files found in {H5_DIR}.')
+    else:
+        grain_ids = [GRAIN_IDS] if isinstance(GRAIN_IDS, str) else list(GRAIN_IDS)
+
+    print(f'Processing {len(grain_ids)} grain(s):')
+    for g in grain_ids:
+        print(f'  {g}')
+
+    failed = []
+    for grain_id in grain_ids:
+        print(f'\n{"=" * 80}')
+        print(f'=== {grain_id} ===')
+        try:
+            process_grain(grain_id)
+        except Exception as exc:
+            print(f'  WARNING: {grain_id} failed — {exc}')
+            failed.append(grain_id)
+
+    print(f'\n{"=" * 80}')
+    print(f'=== BATCH COMPLETE: {len(grain_ids) - len(failed)}/{len(grain_ids)} grain(s) succeeded ===')
+    if failed:
+        print(f'Failed: {", ".join(failed)}')
 
 
 if __name__ == '__main__':

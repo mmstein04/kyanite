@@ -392,10 +392,15 @@ Steps 3–7:
    (`xrmmap/areas`), extracts pixel and physical coordinates, mean element
    concentrations, and CL brightness over a small grain-mask-restricted
    circular zone (`ZONE_RADIUS_UM`), and joins in the hand classification
-   from step 2. Set `H5_FILE` (default location `inputs/xrf/`), `GRAIN_ID`,
-   `FIGS_DIR`, `CLASSIFICATION_DIR` (default
-   `inputs/xanes_classification/`). Missing files or zero mask-overlap
-   produce NaN and a warning rather than an error.
+   from step 2. `GRAIN_IDS` may be a single grain, a list, or `None`
+   (default) to auto-discover and run every grain with an h5 file in
+   `H5_DIR` (default `inputs/xrf/`) in one go — a grain that fails partway
+   (e.g. an unreadable/malformed h5) is skipped with a warning rather than
+   aborting the batch. Also set `FIGS_DIR`, `CLASSIFICATION_DIR` (default
+   `inputs/xanes_classification/`). A missing mask/CL image/classification
+   CSV, or zero mask-overlap for a given spot, produce NaN (and, for
+   mask-overlap, an `on_grain = False` flag) plus a warning rather than an
+   error.
    - Note: h5 area names do not need to share a naming scheme with
      `GRAIN_ID` (e.g. h5 area `LLF6-Area2-spot01` under grain `LLF6-01`);
      matching is done on the trailing spot number against `NAME_FILTER`
