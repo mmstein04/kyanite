@@ -119,6 +119,13 @@ METADATA_COLS = [
 SPOT_LABEL_FONTSIZE = 6
 SPOT_LABEL_OFFSET   = (4, 4)   # points
 
+# plot_spot_map's legend is placed in whichever image corner has the fewest
+# spots within this fraction of the image width/height from that corner —
+# so it doesn't sit on top of spot markers, which vary in location grain to
+# grain (a single fixed loc, e.g. 'upper right', would hide spots for some
+# grains, as seen on NA-CM-G12B7-01's spot 4).
+LEGEND_CORNER_MARGIN_FRAC = 0.3
+
 # =============================================================================
 # LOAD
 # =============================================================================
@@ -501,6 +508,26 @@ def load_cl_background(grain_id):
 OFF_GRAIN_MARKER = 'X'   # on-grain spots use 'o' — shape flags location, color still carries XANES class
 
 
+def best_legend_corner(df, img_shape, margin_frac=LEGEND_CORNER_MARGIN_FRAC):
+    """Whichever image corner has the fewest spots within margin_frac of the
+    image's width/height from that corner -- i.e. the corner a legend box
+    drawn there is least likely to sit on top of a spot marker."""
+    n_rows, n_cols = img_shape[:2]
+    margin_r, margin_c = margin_frac * n_rows, margin_frac * n_cols
+    corners = {
+        'upper right': lambda r, c: r <= margin_r and c >= n_cols - margin_c,
+        'upper left':  lambda r, c: r <= margin_r and c <= margin_c,
+        'lower right': lambda r, c: r >= n_rows - margin_r and c >= n_cols - margin_c,
+        'lower left':  lambda r, c: r >= n_rows - margin_r and c <= margin_c,
+    }
+    counts = {loc: 0 for loc in corners}
+    for row in df.itertuples():
+        for loc, in_corner in corners.items():
+            if in_corner(row.row_px_tiff, row.col_px_tiff):
+                counts[loc] += 1
+    return min(counts, key=counts.get)
+
+
 def plot_spot_map(grain_id, df, cl_img):
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.imshow(cl_img, cmap='gray', origin='upper')
@@ -530,7 +557,8 @@ def plot_spot_map(grain_id, df, cl_img):
                               markeredgecolor='black', label='Bad data / unclassified'))
     handles.append(plt.Line2D([0], [0], marker=OFF_GRAIN_MARKER, linestyle='', markerfacecolor='0.5',
                               markeredgecolor='black', label='Off-grain (other phase) —\ncolor = XANES class still shown'))
-    ax.legend(handles=handles, loc='upper right', fontsize=7, framealpha=0.7)
+    legend_loc = best_legend_corner(df, cl_img.shape)
+    ax.legend(handles=handles, loc=legend_loc, fontsize=7, framealpha=0.7)
     if SHOW_TITLE:
         ax.set_title(f'{grain_id} — spot locations ({len(df)} spots)', fontsize=11)
     plt.tight_layout()

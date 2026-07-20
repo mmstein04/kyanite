@@ -267,6 +267,11 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 - Spot maps plot directly at `row_px_tiff`/`col_px_tiff` on
   `imshow(cl_img, cmap='gray', origin='upper')` with no additional flip — this
   already matches the project's row-0-at-top convention
+- The spot map's legend is placed in whichever image corner
+  (`best_legend_corner()`) has the fewest spots within `LEGEND_CORNER_MARGIN_FRAC`
+  (default `0.3`) of the image width/height from that corner, rather than a
+  single fixed `loc` — spot layout varies enough grain to grain that a fixed
+  corner (e.g. always `'upper right'`) can end up sitting on top of a spot
 
 ## File conventions
 - Everything the core pipeline reads as input lives under `inputs/`, separate from
