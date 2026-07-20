@@ -112,6 +112,15 @@ SAVE_CSV   = True   # False to print to console only, without writing any CSV
 
 # Only include areas whose name matches this regex (case-insensitive).
 # Set to None to include every area in xrmmap/areas (drawn regions included).
+# Some grains carry more than one family of point under xrmmap/areas — e.g.
+# generic '<prefix>_spotNN' points (used for Cr/V XANES) alongside dedicated
+# '<prefix>-FeN' points (Fe-only XANES). NAME_FILTER selects which family to
+# extract; e.g. r'-Fe\d+$' to extract only the Fe-dedicated points from a
+# grain that has both. Spot numbers are always taken from the trailing digits
+# of the area name (see SPOT_NUM_RE below), regardless of which family/tag
+# word precedes them, so 'Fe7' and 'spot07' both resolve to spot number 7 and
+# spot_id '<grain_id>_spot07' — fine as long as you aren't extracting both
+# families for the same grain in one run (they'd collide on spot number).
 NAME_FILTER = r'spot'
 
 # --- Point geochemistry / CL zone extraction --------------------------------
@@ -136,9 +145,36 @@ EXCLUDE_ROIS = ['Clock', 'I0', 'I1', 'I2', 'I3', 'Clock_raw', 'I0_raw',
 NORMALIZE_BY_CLOCK = False
 NORMALIZE_BY_I0    = True
 
+# --- Line-scan expansion -----------------------------------------------------
+
+# Some grains mark a XANES line scan in xrmmap/areas as just two single-pixel
+# areas, '<prefix>_linestart'/'<prefix>_linestop' — the individual points in
+# between (however many were actually measured) have no area entry of their
+# own. EXPAND_LINE_SCANS = True looks up those intermediate points' pixel
+# locations from their raw per-point files (named 'Fe_XANES_<prefix>_FeLine_
+# <n>.<repeat>' in XANES_RAW_DIR) instead, and extracts each as its own spot,
+# independent of NAME_FILTER (linestart/linestop never carry per-pixel data
+# themselves, so they're excluded from the regular NAME_FILTER path either
+# way). Each line's points are numbered continuing on from this grain's
+# highest already-extracted spot number (e.g. Fe1..Fe7 -> spot1..spot7, then
+# a 15-point line -> spot8..spot22) — there's no reserved numbering scheme yet
+# for a grain that also needs Cr/V spots extracted in the same run; don't mix
+# them until one exists.
+EXPAND_LINE_SCANS = True
+XANES_RAW_DIR = _REPO_ROOT / 'inputs' / 'xanes_raw'
+
 # =============================================================================
 
-SPOT_NUM_RE = re.compile(r'spot0*(\d+)', re.IGNORECASE)
+# Trailing digits of the area name, regardless of tag word ('spot07', 'Fe7',
+# etc. all resolve by position, not by requiring a literal 'spot' prefix) —
+# matches this project's join convention of "trailing spot number + grain_id",
+# not the area's own name/tag.
+SPOT_NUM_RE = re.compile(r'(\d+)\s*$')
+
+LINE_ENDPOINT_RE = re.compile(r'^(.+)_line(start|stop)$', re.IGNORECASE)
+LINE_POINT_FILE_RE = re.compile(r'FeLine_(\d+)\.(\d+)$', re.IGNORECASE)
+STAGE_FINEX_RE = re.compile(r'SampleStage\.FineX:\s*([-\d.]+)')
+STAGE_FINEY_RE = re.compile(r'SampleStage\.FineY:\s*([-\d.]+)')
 
 
 def _scalar(ds):
@@ -279,6 +315,80 @@ def extract_zone_geochem(row_px_tiff, col_px_tiff, n_rows, n_cols,
     return result
 
 
+def find_line_prefixes(area_names):
+    """Pair up '<prefix>_linestart'/'<prefix>_linestop' area names — these two
+    markers never carry per-pixel geochemistry of their own, only the
+    endpoints of a line to expand via discover_line_point_files(), so this
+    looks at every area name regardless of NAME_FILTER."""
+    starts, stops = {}, {}
+    for n in area_names:
+        m = LINE_ENDPOINT_RE.match(n)
+        if not m:
+            continue
+        prefix, which = m.group(1), m.group(2).lower()
+        (starts if which == 'start' else stops)[prefix] = n
+
+    for p in sorted(set(starts) - set(stops)):
+        print(f"  WARNING: '{starts[p]}' has no matching linestop — skipping this line.")
+    for p in sorted(set(stops) - set(starts)):
+        print(f"  WARNING: '{stops[p]}' has no matching linestart — skipping this line.")
+    return sorted(set(starts) & set(stops))
+
+
+def discover_line_point_files(xanes_raw_dir, prefix):
+    """{line_point_number: path} for one line, picking the lowest repeat
+    suffix ('.001' before '.002', etc.) per point when it was rescanned."""
+    candidates = {}
+    for p in Path(xanes_raw_dir).glob(f'Fe_XANES_{prefix}_FeLine_*.*'):
+        m = LINE_POINT_FILE_RE.search(p.name)
+        if not m:
+            continue
+        num, rep = int(m.group(1)), m.group(2)
+        candidates.setdefault(num, []).append((rep, p))
+
+    points = {}
+    for num, files in sorted(candidates.items()):
+        files.sort(key=lambda rf: rf[0])
+        if len(files) > 1:
+            reps = ', '.join(r for r, _ in files)
+            print(f"  NOTE: line point {num} ('{prefix}') has {len(files)} repeat scan(s) "
+                  f"({reps}) — using .{files[0][0]}.")
+        points[num] = files[0][1]
+    return points
+
+
+def read_stage_position_mm(path):
+    """Parse SampleStage.FineX/FineY (mm) from a raw XANES point file's header."""
+    x = y = None
+    with open(path, 'r', errors='ignore') as fh:
+        for line in fh:
+            if not line.startswith('#'):
+                break
+            if x is None:
+                m = STAGE_FINEX_RE.search(line)
+                if m:
+                    x = float(m.group(1))
+            if y is None:
+                m = STAGE_FINEY_RE.search(line)
+                if m:
+                    y = float(m.group(1))
+    if x is None or y is None:
+        raise ValueError(f"SampleStage.FineX/FineY not found in header of {path}")
+    return x, y
+
+
+def mm_to_pixel_h5(x_mm, y_mm, start1, step1_mm, start2, step2_mm, n_rows, n_cols):
+    """Invert the scan's linear stage-position <-> pixel mapping (native HDF5
+    orientation, row 0 = bottom). Validated against every area-based spot's
+    own true pixel index (exact match, 0 px difference) for this project's
+    raster scans, which are perfectly uniform/linear in stage position."""
+    col_px = int(round((x_mm - start1) / step1_mm))
+    row_px = int(round((y_mm - start2) / step2_mm))
+    col_px = min(max(col_px, 0), n_cols - 1)
+    row_px = min(max(row_px, 0), n_rows - 1)
+    return row_px, col_px
+
+
 def process_grain(grain_id):
     h5_file = Path(H5_DIR) / f'{grain_id}_xrf.h5'
 
@@ -327,15 +437,22 @@ def process_grain(grain_id):
         classification = load_classification(CLASSIFICATION_DIR, grain_id)
 
         areas = f['xrmmap/areas']
-        names = list(areas.keys())
+        all_area_names = list(areas.keys())
+        line_prefixes = find_line_prefixes(all_area_names) if EXPAND_LINE_SCANS else []
+
+        names = all_area_names
         if NAME_FILTER is not None:
             pattern = re.compile(NAME_FILTER, re.IGNORECASE)
             names = [n for n in names if pattern.search(n)]
+        # linestart/linestop never carry per-pixel data themselves — they're
+        # only ever handled via the line-expansion path below, regardless of
+        # whether NAME_FILTER happens to also match them.
+        names = [n for n in names if not LINE_ENDPOINT_RE.match(n)]
         names.sort(key=spot_sort_key)
 
-        if not names:
-            print("No areas matched NAME_FILTER — nothing to extract.")
-            return
+        if not names and not line_prefixes:
+            print("No areas matched NAME_FILTER and no line scans found — nothing to extract.")
+            return None
 
         rows = []
         unmatched_classification = []
@@ -397,6 +514,72 @@ def process_grain(grain_id):
             row.update(zone)
             rows.append(row)
 
+        for prefix in line_prefixes:
+            used_nums = [r['spot'] for r in rows if r['spot'] is not None]
+            next_num = (max(used_nums) if used_nums else 0) + 1
+
+            line_files = discover_line_point_files(XANES_RAW_DIR, prefix)
+            if not line_files:
+                print(f"  WARNING: line '{prefix}' found in xrmmap/areas but no "
+                      f"'Fe_XANES_{prefix}_FeLine_*' files found in {XANES_RAW_DIR} — skipping.")
+                continue
+
+            point_nums = sorted(line_files)
+            expected = list(range(point_nums[0], point_nums[-1] + 1))
+            if point_nums != expected:
+                print(f"  WARNING: line '{prefix}' point numbers aren't contiguous "
+                      f"({point_nums}) — extracting whatever was found, in order.")
+
+            for line_num in point_nums:
+                path = line_files[line_num]
+                x_mm, y_mm = read_stage_position_mm(path)
+                row_px, col_px = mm_to_pixel_h5(x_mm, y_mm, start1, step1_mm,
+                                                 start2, step2_mm, n_rows, n_cols)
+                row_px_tiff = n_rows - 1 - row_px
+
+                spot_num = next_num
+                next_num += 1
+                spot_id = f"{grain_id}_spot{spot_num:02d}"
+
+                category, category_label = (np.nan, np.nan)
+                if spot_num in classification:
+                    category, category_label = classification[spot_num]
+                else:
+                    unmatched_classification.append(spot_num)
+
+                row = {
+                    'grain_id': grain_id,
+                    'spot': spot_num,
+                    'spot_id': spot_id,
+                    'area_name': f'{prefix}_FeLine_{line_num}',
+                    'category': category,
+                    'category_label': category_label,
+                    'pixel_count': 1,
+                    'row_px_h5': row_px,
+                    'col_px_h5': col_px,
+                    'row_px_tiff': row_px_tiff,
+                    'col_px_tiff': col_px,
+                    'row_matlab': row_px_tiff + 1,
+                    'col_matlab': col_px + 1,
+                    'x_mm': x_mm,
+                    'y_mm': y_mm,
+                    'x_rel_um': (x_mm - start1) * 1000,
+                    'y_rel_um': (y_mm - start2) * 1000,
+                }
+
+                zone = extract_zone_geochem(
+                    row_px_tiff, col_px, n_rows, n_cols,
+                    step_row_um, step_col_um, ZONE_RADIUS_UM,
+                    grain_mask, cl_img, sum_cor_ds, roi_indices,
+                    clock_arr, i0_arr,
+                )
+                row.update(zone)
+                rows.append(row)
+
+            first_num = next_num - len(point_nums)
+            print(f"  Expanded line '{prefix}' into {len(point_nums)} spot(s): "
+                  f"spot{first_num:02d}..spot{next_num - 1:02d}")
+
         if classification and unmatched_classification:
             print(f"\nNote: {len(unmatched_classification)} spot(s) had no matching row in "
                   f"the classification CSV: {sorted(set(unmatched_classification))}")
@@ -422,6 +605,8 @@ def process_grain(grain_id):
             output_csv.parent.mkdir(parents=True, exist_ok=True)
             df.to_csv(output_csv, index=False)
             print(f"\nWrote {len(df)} spot(s) to {output_csv}")
+
+        return df
 
 
 def main():

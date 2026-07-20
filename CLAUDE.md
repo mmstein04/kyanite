@@ -193,7 +193,17 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   See `kyanite_spot_analysis.py`'s handling below
 - `NAME_FILTER` (default `'spot'`) selects which `xrmmap/areas` entries to include;
   set to `None` to include drawn polygon regions too (their shape is discarded —
-  extraction is centered on the region's centroid, like a point spot)
+  extraction is centered on the region's centroid, like a point spot). Some grains
+  carry more than one family of point under `xrmmap/areas` — e.g. generic
+  `<prefix>_spotNN` points (used for Cr/V XANES, currently paused) alongside
+  dedicated `<prefix>-FeN` points
+  (Fe-only XANES) — `NAME_FILTER` picks which family a run extracts, e.g.
+  `r'-Fe\d+$'` to extract only the Fe-dedicated points from a grain that has both.
+  Spot numbers are always the area name's trailing digits regardless of which
+  family/tag word precedes them (`'Fe7'` and `'spot07'` both resolve to spot
+  number 7), so don't extract both families for the same grain in one run — their
+  spot numbers would collide. No collision scheme exists yet for Cr/V vs. Fe
+  numbering; decide one before resuming Cr/V XANES work
 - Note: spot numbering in the HDF5 area names doesn't necessarily share a prefix
   with exported XANES spot CSVs or `GRAIN_ID` (e.g. h5 area `LLF6-Area2-spot01` vs.
   grain `LLF6-01`) — everything joins on the trailing spot number + `GRAIN_ID`, not
@@ -601,6 +611,22 @@ so they carry local functions with the identical values hand-copied in —
 - `ELEMENTS` / `EXCLUDE_ROIS` — element ROIs to extract (`None` = all except known scaler channels)
 - `NORMALIZE_BY_CLOCK`, `NORMALIZE_BY_I0` — should match whatever was used for this grain's
   exported maps, for comparable units
+- `EXPAND_LINE_SCANS` (default `True`) — a XANES line scan is marked in `xrmmap/areas` as
+  just two single-pixel areas, `<prefix>_linestart`/`<prefix>_linestop`; the points in
+  between have no area entry of their own. When `True`, those intermediate points'
+  pixel locations are instead read from their raw per-point files — `Fe_XANES_
+  <prefix>_FeLine_<n>.<repeat>` in `XANES_RAW_DIR` (default `inputs/xanes_raw/`),
+  parsing each file's `SampleStage.FineX`/`FineY` header (mm) and inverting the scan's
+  linear stage-position-to-pixel mapping (exact — this project's raster scans are
+  perfectly uniform in stage position; validated to 0 px against every area-based
+  spot's own true pixel index). A line missing its raw files in `XANES_RAW_DIR`
+  degrades gracefully (warning, that line skipped) rather than blocking the batch.
+  `linestart`/`linestop` themselves are always excluded from the regular `NAME_FILTER`
+  path (they carry no per-pixel data of their own) regardless of this setting. Line
+  points are numbered continuing on from the grain's highest already-extracted spot
+  number (e.g. `Fe1`..`Fe7` -> spot1..spot7, then a 15-point line -> spot8..spot22) —
+  don't extract a grain's generic Cr/V spots in the same run as its line points until a
+  numbering scheme exists for that combination
 
 **`xrf_display.py`**
 - `MAPS_DIR`, `MASK_DIR` — where to find `<grain_id>_<el>_Ka.tif` (default `inputs/maps/`) and
