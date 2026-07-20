@@ -65,6 +65,8 @@ kyanite/
 ├── kyanite_rf_shap.py                 Step 7b — Random Forest / SHAP fit, exports CSVs only
 ├── kyanite_rf_shap_plots.py           Step 7c — figures from kyanite_rf_shap.py's CSVs
 ├── kyanite_sample_size_convergence.py  diagnostic for Step 7b's subsampling
+├── xanes_spot_csv_rename.py            Step 8.0 (optional) — rename processed XANES mu(E)
+│                                      CSVs into <grain_id>_spotNN.csv convention
 ├── xanes_plot.py                      Step 8.1 — plot pre-edge doublets for hand classification
 ├── xanes_classification_split.py      Step 8.2 — split hand classification CSV per grain
 ├── xrf_h5_extract_spots.py            Step 8.3 — per-spot geochemistry + CL + XANES class CSV
@@ -83,7 +85,15 @@ kyanite/
 │   ├── cl/                              raw CL micrographs (pre-registration):
 │   │                                    <grain_id>_CL_color.<ext>, and any alternative
 │   │                                    mask_image_file for CL_EPMA_registration.m
-│   ├── xanes/                           raw per-spot XANES spectrum CSVs
+│   ├── xanes/                           raw per-spot XANES spectrum CSVs, named
+│   │                                    <grain_id>_spotNN.csv (see xanes_spot_csv_rename.py
+│   │                                    if yours instead arrive named by beamline
+│   │                                    acquisition-time area identity)
+│   ├── xanes_raw/                       raw per-point XANES files (e.g. from a XANES line
+│   │                                    scan), used only to recover a line-scanned point's
+│   │                                    pixel location when it has no xrmmap/areas entry
+│   │                                    of its own (xrf_h5_extract_spots.py's
+│   │                                    EXPAND_LINE_SCANS/XANES_RAW_DIR)
 │   ├── xanes_classification/            hand (or auto) pre-edge classification CSVs,
 │   │                                    one per grain
 │   └── maps/<grain_id>/                 element-map TIFFs for one grain — the one exception
@@ -383,6 +393,14 @@ This sub-pipeline relates CL and chemistry to Fe²⁺/Fe³⁺ oxidation state at
 discrete spot locations, rather than full-grain maps, and is independent of
 Steps 3–7:
 
+0. **`xanes_spot_csv_rename.py`** (optional) — if processed per-spot XANES
+   mu(E) CSVs arrive named by their beamline acquisition-time area identity
+   (e.g. `Fe_XANES_G1287_Ky1-Fe1.001.csv`) rather than already in this
+   project's `<grain_id>_spotNN.csv` convention, this renames them into
+   `inputs/xanes/` — driven directly by `xrf_h5_extract_spots.py`'s own spot
+   numbering (see step 3 below, including its line-scan expansion), so the
+   two can never drift out of sync. Defaults to `DRY_RUN=True`/
+   `OVERWRITE=False` (preview the plan, never clobbers existing output).
 1. **`xanes_plot.py`** — reads raw per-spot spectrum CSVs from
    `XANES_INPUT` (default `inputs/xanes/`) and plots each spot's Fe K-edge
    pre-edge doublet as a small-multiples grid, for classification of peak
@@ -412,10 +430,27 @@ Steps 3–7:
    error.
    - Note: h5 area names do not need to share a naming scheme with
      `GRAIN_ID` (e.g. h5 area `LLF6-Area2-spot01` under grain `LLF6-01`);
-     matching is done on the trailing spot number against `NAME_FILTER`
-     (default regex requires the substring `spot`). If h5 areas use a
-     different naming scheme (`pt01`, `point3`, ...), `onboard_dataset.py`'s
-     h5 check reports which `NAME_FILTER` to use instead.
+     matching is done via `NAME_FILTER` (default regex requires the
+     substring `spot`). If h5 areas use a different naming scheme (`pt01`,
+     `point3`, ...), `onboard_dataset.py`'s h5 check reports which
+     `NAME_FILTER` to use instead. Some grains carry more than one family of
+     point in the same h5 — e.g. generic `spotNN` points alongside dedicated
+     `-FeN` points from a separate Fe-only XANES session — `NAME_FILTER`
+     picks which family a run extracts (e.g. `r'-Fe\d+$'` for Fe-only). A
+     spot's number is always the area name's *trailing digits*, regardless
+     of which family/tag word precedes them (`Fe7` and `spot07` both give
+     spot number 7) — don't extract both families for the same grain in one
+     run, since they'd collide on spot number.
+   - A XANES *line* scan is sometimes marked in the h5 as just two
+     single-pixel areas, `<prefix>_linestart`/`<prefix>_linestop` — the
+     points actually measured in between have no area entry of their own.
+     `EXPAND_LINE_SCANS = True` (default) recovers each intermediate point's
+     pixel location from its raw per-point file's stage-position header
+     (`XANES_RAW_DIR`, default `inputs/xanes_raw/`) instead, and extracts
+     each as its own spot, numbered continuing on from the grain's other
+     spots (e.g. `Fe1..Fe7` -> spot1..spot7, then a 15-point line ->
+     spot8..spot22). A line missing its raw files degrades gracefully
+     (warning, that line skipped) rather than blocking the batch.
    - Output: `figs/data/<grain_id>_spot_geochemistry.csv` — reusable data,
      read back by both `kyanite_spot_analysis.py` and `xanes_rf_classifier.py`.
 4. **`kyanite_spot_analysis.py`** — batch analysis pooling every grain's
@@ -522,6 +557,11 @@ colormap for signed and continuous-intensity quantities respectively.
 - **XANES auto-classification is disabled by default.** Manual
   classification of the pre-edge grids is required; `CLASSIFY = True` in
   `xanes_plot.py` is not a reliable substitute.
+- **Don't extract two point families (e.g. generic `spotNN` and dedicated
+  `-FeN`) for the same grain in one `xrf_h5_extract_spots.py` run.** Spot
+  numbers come from the area name's trailing digits regardless of family, so
+  both would start numbering from 1 and collide. No reserved
+  numbering/namespacing scheme exists yet for that case.
 - **Mask edits and region/domain extraction do not re-register the
   image.** If registration itself is inaccurate, rerun Step 2 rather than
   correcting for it downstream.
