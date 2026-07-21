@@ -685,21 +685,27 @@ so they carry local functions with the identical values hand-copied in —
   `WHOLE_GRAIN_OUTPUT_DIR`) and `ALL_GRAINS_LABEL` (default `'all_grains'`, the
   filename prefix) control where/how it's saved
 - Outlier removal on the element axis (applied per region in region mode), two
-  independent stages: (1) `SATURATION_FILTER` (default on) flags and excludes
-  pixels piled up near an element's own max value — the signature of a
-  saturated/clipped detector channel — controlled by `SATURATION_BAND_FRAC`/
-  `SATURATION_MIN_FRAC`/`SATURATION_MIN_COUNT`; only ever fires (with a printed
-  warning) on a genuine pileup, and only on the max side (a pileup near the min is
-  ordinary near-zero/below-detection-limit data, not saturation). (2) `OUTLIER_METHOD`
-  trims whatever's left: `'mad'` (default) — a robust modified z-score computed in
-  log-space (element concentrations are right-skewed, same assumption this project
-  already makes before PCA elsewhere), excluded where it exceeds `MAD_K_LO`/
-  `MAD_K_HI` (`None` disables that side; default has no low-side trim, and
-  `MAD_K_HI=4` — chosen as the project default after visually comparing candidate
-  configurations' excluded pixels with `kyanite_outlier_method_comparison.py`),
-  adapting to how spread out each element's own distribution actually is instead of
-  always chopping a fixed fraction; or `'percentile'` — legacy fixed-percentile
-  behavior via `PCT_LO`/`PCT_HI` (0/100 disables it)
+  independent stages, implemented in shared module `kyanite_outliers.py` (also used
+  by `kyanite_pca.py` — see its Key Parameters entry — so the two scripts can't
+  drift apart on what counts as an outlier): (1) `SATURATION_FILTER` (default on)
+  flags and excludes pixels piled up near an element's own max value — the
+  signature of a saturated/clipped detector channel — controlled by
+  `SATURATION_BAND_FRAC`/`SATURATION_MIN_FRAC`/`SATURATION_MIN_COUNT`; only ever
+  fires (with a printed warning) on a genuine pileup, and only on the max side (a
+  pileup near the min is ordinary near-zero/below-detection-limit data, not
+  saturation). (2) `OUTLIER_METHOD` trims whatever's left: `'mad'` (default) — a
+  robust modified z-score computed in log-space (element concentrations are
+  right-skewed, same assumption this project already makes before PCA elsewhere),
+  excluded where it exceeds `MAD_K_LO`/`MAD_K_HI` (`None` disables that side;
+  default has no low-side trim, and `MAD_K_HI=4` — chosen as the project default
+  after visually comparing candidate configurations' excluded pixels with
+  `kyanite_outlier_method_comparison.py`), adapting to how spread out each
+  element's own distribution actually is instead of always chopping a fixed
+  fraction; or `'percentile'` — legacy fixed-percentile behavior via `PCT_LO`/
+  `PCT_HI` (0/100 disables it). `kyanite_figures.py`'s own use of this module is
+  per-element/per-plot (each pairwise CL-vs-element figure can exclude a
+  different pixel set); `kyanite_pca.py` instead pools exclusions across every
+  element it uses (see its entry) since PCA needs one common pixel set
 - `OUTLIER_SPATIAL_QC` (default on, whole-grain CSVs only): every time the outlier
   logic above is applied to an element, also renders where it actually excluded
   pixels directly on the masked 2-D element map — one `<grain_id>_<element>_
@@ -739,7 +745,25 @@ so they carry local functions with the identical values hand-copied in —
   matching every other analysis/registration log in this project), independent
   of the other output dirs and of `CSV_INPUT`
 - `BELOW_DETECTION` / `MAX_BELOW_DETECTION_FRAC` — drop poorly-detected elements
+- `SATURATION_FILTER`/`SATURATION_BAND_FRAC`/`SATURATION_MIN_FRAC`/`SATURATION_MIN_COUNT`
+  and `OUTLIER_METHOD`/`MAD_K_LO`/`MAD_K_HI`/`PCT_LO`/`PCT_HI` — same two-stage
+  outlier removal as `kyanite_figures.py` (shared `kyanite_outliers.py` module,
+  same defaults: saturation filter on, `mad_hi4`), applied in `prepare_data()`
+  to each kept element's own raw distribution before log-transform/z-scoring.
+  Unlike `kyanite_figures.py`'s per-plot/per-element filtering, PCA needs one
+  common pixel set across every element, so `outlier_row_keep_mask()` pools
+  exclusions with AND across elements — a pixel is dropped if *any* of its
+  elements is flagged as an outlier by its own distribution. The exclusion
+  count is written to `<label>_pca_log.txt` ("Pixels excluded as outliers")
 - `LOG_TRANSFORM`, `PC_TO_PLOT`, `LOADING_THRESHOLD` — PCA options
+- `LOADINGS_GRID_LAYOUT` — whole-grain PCA only. `False` (default): one
+  `<grain_id>_pca_loadings_PC<n>.png` per `PC_TO_PLOT` entry, as before.
+  `True`: a single `<grain_id>_pca_loadings_grid.png` instead, with subplots
+  in the identical grid (same cols/rows formula, same PC order) as
+  `<grain_id>_pca_scores_vs_CL.png` — so PCi's loadings bar chart sits in the
+  same subplot position as PCi's scores-vs-CL scatter, for direct visual
+  comparison. Region PCA's per-PC loadings figures are unaffected (no
+  per-PC scatter grid exists there to line up with)
 - Region CSVs (`*_region_pixel_data.csv`, has a `Region` column) get one pooled-PCA
   analysis per grain instead of the whole-grain PCA above (skipped if the grain has
   fewer than 2 regions): a single PCA fit across all of a grain's regions together,
@@ -766,8 +790,9 @@ so they carry local functions with the identical values hand-copied in —
   `<grain_id>_regions_pca_log.txt` in `DIAGNOSTICS_DIR` (`figs/diagnostics/`)
 - Whole-grain PCA outputs, similarly split: `<grain_id>_pca_variance.csv`/
   `<grain_id>_pca_loadings.csv` in `DATA_OUTPUT_DIR` (`figs/data/`);
-  `<grain_id>_pca_scree.png`, `<grain_id>_pca_scores_vs_CL.png`, and
-  `<grain_id>_pca_loadings_PC<n>.png` (one per `PC_TO_PLOT`) in
+  `<grain_id>_pca_scree.png`, `<grain_id>_pca_scores_vs_CL.png`, and either
+  `<grain_id>_pca_loadings_PC<n>.png` (one per `PC_TO_PLOT`, default) or
+  `<grain_id>_pca_loadings_grid.png` (`LOADINGS_GRID_LAYOUT = True`) in
   `WHOLE_GRAIN_OUTPUT_DIR` (`figs/pca/`); `<grain_id>_pca_log.txt` in
   `DIAGNOSTICS_DIR` (`figs/diagnostics/`)
 

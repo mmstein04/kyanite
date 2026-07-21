@@ -53,6 +53,8 @@ from scipy.stats import f_oneway
 from scipy.spatial import ConvexHull
 from kyanite_palette import (BLUE, ORANG, element_colors as _element_colors,
                               region_colors as _shared_region_colors)
+from kyanite_outliers import (saturation_mask as _saturation_mask,
+                                outlier_keep_mask as _outlier_keep_mask)
 
 # =============================================================================
 # PARAMETERS — edit this section for each run
@@ -91,10 +93,35 @@ MAX_BELOW_DETECTION_FRAC = 0.2   # drop an element if more than this fraction of
 LOG_TRANSFORM            = True  # log10-transform element concentrations before PCA
 MIN_PIXELS               = 50    # skip a dataset/region if fewer valid pixels remain than this
 
+# Statistical outlier removal — same two-stage method (and same defaults) as
+# kyanite_figures.py, applied per-element to each element's own raw
+# distribution BEFORE log-transform/z-scoring, via the shared
+# kyanite_outliers module. Unlike kyanite_figures.py's pairwise CL-vs-element
+# plots, PCA needs one common pixel set across every element, so a pixel is
+# dropped here if ANY of its elements is flagged as an outlier by its own
+# distribution (see outlier_row_keep_mask below), not per-element
+# independently.
+OUTLIER_METHOD = 'mad'   # 'mad' or 'percentile' — see kyanite_outliers.py
+MAD_K_LO = None
+MAD_K_HI = 4
+PCT_LO   = 0
+PCT_HI   = 99
+
+SATURATION_FILTER    = True     # detect+exclude near-max pileups (detector saturation/clipping)
+SATURATION_BAND_FRAC = 0.001    # width of the "near max" band, as a fraction of the element's own [min, max] range
+SATURATION_MIN_FRAC  = 0.005    # minimum fraction of all pixels in that band to call it a pileup (0.5%)
+SATURATION_MIN_COUNT = 5        # ...and at least this many pixels, so tiny grains/regions don't trigger on noise
+
 # --- PCA ---
 N_PCS_SCREE       = 10          # number of PCs shown on the scree plot
 PC_TO_PLOT        = [1, 2, 3, 4]   # which PC(s) to scatter against CL / show loadings for
 LOADING_THRESHOLD = 0.3         # |loading| >= this is highlighted as a significant contributor
+
+# False (default): one _pca_loadings_PC<n>.png per PC, as before. True: a
+# single _pca_loadings_grid.png with the same subplot grid (cols/rows/order)
+# as _pca_scores_vs_CL.png, so PCi's loadings sit in the same subplot
+# position as PCi's scores-vs-CL scatter for direct visual comparison.
+LOADINGS_GRID_LAYOUT = False
 
 # --- Region PCA (region CSVs only) ---
 # A single PCA fit pooled across ALL of a grain's regions, with every region
@@ -135,11 +162,36 @@ RUN_TIMESTAMP = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 # DATA PREP
 # =============================================================================
 
+def outlier_row_keep_mask(X, elements, verbose=True):
+    """Boolean mask aligned to X's row order, True to keep. A pixel is
+    dropped if ANY of its elements is flagged as an outlier — detector
+    saturation or a log-space MAD trim, evaluated independently per element
+    on that element's own raw distribution via the shared kyanite_outliers
+    module — then pooled with AND. PCA needs one common pixel set across
+    every feature, unlike kyanite_figures.py's per-element pairwise
+    scatter/violin filtering, which can drop different pixels per plot."""
+    keep = np.ones(len(X), dtype=bool)
+    for e in elements:
+        x = X[e].values
+        sat = _saturation_mask(x, e, SATURATION_BAND_FRAC, SATURATION_MIN_FRAC,
+                                SATURATION_MIN_COUNT, verbose=verbose) if SATURATION_FILTER \
+            else np.zeros(len(x), dtype=bool)
+        stat_keep = np.ones(len(x), dtype=bool)
+        rest_idx = np.where(~sat)[0]
+        if len(rest_idx):
+            stat_keep[rest_idx] = _outlier_keep_mask(x[rest_idx], OUTLIER_METHOD, MAD_K_LO,
+                                                       MAD_K_HI, PCT_LO, PCT_HI)
+        keep &= (~sat) & stat_keep
+    return keep
+
+
 def prepare_data(df, elements):
-    """Drop poorly-detected elements, log-transform, and drop incomplete rows.
-    Returns (X_df, y, kept_elements, dropped_elements, valid_mask). valid_mask
-    is aligned to df's index, so e.g. df['Region'][valid] recovers the region
-    label for each surviving row."""
+    """Drop poorly-detected elements, remove statistical outliers (same
+    method as kyanite_figures.py, pooled across elements — see
+    outlier_row_keep_mask), log-transform, and drop incomplete rows.
+    Returns (X_df, y, kept_elements, dropped_elements, valid_mask,
+    n_outliers). valid_mask is aligned to df's index, so e.g.
+    df['Region'][valid] recovers the region label for each surviving row."""
     X = df[elements].astype(float).copy()
     y = df['CL'].astype(float).values
 
@@ -148,15 +200,23 @@ def prepare_data(df, elements):
         kept = [e for e in elements if frac_below[e] < MAX_BELOW_DETECTION_FRAC]
         dropped = [e for e in elements if e not in kept]
         X = X[kept]
-        X = X.where(X > BELOW_DETECTION)   # remaining below-detection values -> NaN
     else:
         kept, dropped = list(elements), []
+
+    # Computed on the raw (pre-NaN, pre-log) kept-element columns, same as
+    # kyanite_figures.py operates on raw CSV values.
+    outlier_keep = outlier_row_keep_mask(X, kept)
+
+    if BELOW_DETECTION is not None:
+        X = X.where(X > BELOW_DETECTION)   # remaining below-detection values -> NaN
 
     if LOG_TRANSFORM:
         X = np.log10(X)
 
-    valid = np.isfinite(X).all(axis=1) & np.isfinite(y)
-    return X[valid], y[valid], kept, dropped, valid
+    finite = np.isfinite(X).all(axis=1) & np.isfinite(y)
+    valid = finite & outlier_keep
+    n_outliers = int((finite & ~outlier_keep).sum())
+    return X[valid], y[valid], kept, dropped, valid, n_outliers
 
 # =============================================================================
 # PCA
@@ -183,7 +243,7 @@ def plot_scree(explained):
     return fig
 
 
-def plot_loadings(loadings, elements, pc):
+def _draw_loadings_bar(ax, loadings, elements, pc):
     vals = loadings[:, pc - 1]
     order = np.argsort(vals)[::-1]
     sorted_vals = vals[order]
@@ -196,7 +256,6 @@ def plot_loadings(loadings, elements, pc):
     edge_colors = ['black' if abs(v) >= LOADING_THRESHOLD else 'none' for v in sorted_vals]
     edge_widths = [1.5 if abs(v) >= LOADING_THRESHOLD else 0 for v in sorted_vals]
 
-    fig, ax = plt.subplots(figsize=(max(6, 0.4 * len(elements)), 4))
     ax.bar(range(len(sorted_vals)), sorted_vals, color=[fill_colors[n] for n in sorted_names],
            edgecolor=edge_colors, linewidth=edge_widths)
     ax.axhline(0, color='k', lw=1)
@@ -205,6 +264,31 @@ def plot_loadings(loadings, elements, pc):
     ax.set_xticks(range(len(sorted_names)))
     ax.set_xticklabels(sorted_names, rotation=40, ha='right', fontsize=8)
     ax.set_ylabel(f'Loading on PC{pc}')
+
+
+def plot_loadings(loadings, elements, pc):
+    fig, ax = plt.subplots(figsize=(max(6, 0.4 * len(elements)), 4))
+    _draw_loadings_bar(ax, loadings, elements, pc)
+    return fig
+
+
+def plot_loadings_grid(loadings, elements, pcs):
+    # Same bar charts as plot_loadings, laid out in the identical subplot
+    # grid (same cols/rows formula, same order of pcs) as plot_pc_vs_cl's
+    # scores-vs-CL scatter grid, so PCi's loadings land in the same subplot
+    # position as PCi's scatter in the companion figure.
+    n = len(pcs)
+    cols = min(3, n)
+    rows = int(np.ceil(n / cols))
+    fig, axes = plt.subplots(rows, cols, figsize=(4.5 * cols, 4 * rows))
+    axes = np.atleast_1d(axes).ravel()
+
+    for ax, pc in zip(axes, pcs):
+        _draw_loadings_bar(ax, loadings, elements, pc)
+        ax.grid(True, alpha=0.25, linewidth=0.5)
+
+    for ax in axes[n:]:
+        ax.axis('off')
     return fig
 
 
@@ -357,7 +441,8 @@ def region_separation_stats(scores, regions, pcs):
 # PER-DATASET DRIVER
 # =============================================================================
 
-def build_log_header(label, csv_path, requested, missing, kept, dropped, n_valid, n_total):
+def build_log_header(label, csv_path, requested, missing, kept, dropped, n_valid, n_total,
+                      n_outliers=None):
     lines = [
         f'kyanite_pca.py — {label}',
         f'Run date: {RUN_TIMESTAMP}',
@@ -367,16 +452,22 @@ def build_log_header(label, csv_path, requested, missing, kept, dropped, n_valid
         f'  ELEMENTS (requested): {requested if requested is not None else "all (auto-detected)"}',
         f'  BELOW_DETECTION: {BELOW_DETECTION}',
         f'  MAX_BELOW_DETECTION_FRAC: {MAX_BELOW_DETECTION_FRAC}',
+        f'  SATURATION_FILTER: {SATURATION_FILTER}',
+        f'  OUTLIER_METHOD: {OUTLIER_METHOD}',
+        f'  MAD_K_LO: {MAD_K_LO}, MAD_K_HI: {MAD_K_HI}',
         f'  LOG_TRANSFORM: {LOG_TRANSFORM}',
         f'  MIN_PIXELS: {MIN_PIXELS}',
         f'  N_PCS_SCREE: {N_PCS_SCREE}',
         f'  PC_TO_PLOT: {PC_TO_PLOT}',
         f'  LOADING_THRESHOLD: {LOADING_THRESHOLD}',
+        f'  LOADINGS_GRID_LAYOUT: {LOADINGS_GRID_LAYOUT}',
         '',
         f'Columns not found in CSV: {missing}' if missing else 'Columns not found in CSV: none',
         f'Elements used ({len(kept)}): {kept}',
         f'Elements dropped ({len(dropped)}, >{MAX_BELOW_DETECTION_FRAC:.0%} below detection): {dropped}'
         if BELOW_DETECTION is not None else 'Elements dropped: none (BELOW_DETECTION disabled)',
+        f'Pixels excluded as outliers (saturation/{OUTLIER_METHOD}): {n_outliers:,}'
+        if n_outliers is not None else 'Pixels excluded as outliers: n/a',
         f'Valid pixels: {n_valid:,} of {n_total:,} total',
         '',
     ]
@@ -385,16 +476,18 @@ def build_log_header(label, csv_path, requested, missing, kept, dropped, n_valid
 
 def analyze(df, elements, label, out_dir, data_dir, diagnostics_dir, csv_path, missing=()):
     print(f'\n--- {label} ({len(df):,} px) ---')
-    X_df, y, kept, dropped, _valid = prepare_data(df, elements)
+    X_df, y, kept, dropped, _valid, n_outliers = prepare_data(df, elements)
 
     if dropped:
         print(f'  Dropped (>{MAX_BELOW_DETECTION_FRAC:.0%} below detection): {dropped}')
+    if n_outliers:
+        print(f'  Excluded {n_outliers:,} px as outliers (saturation/{OUTLIER_METHOD})')
     if len(X_df) < MIN_PIXELS:
         print(f'  WARNING: only {len(X_df)} valid pixels (< MIN_PIXELS={MIN_PIXELS}), skipping.')
         return
 
     log_lines = build_log_header(label, csv_path, ELEMENTS, list(missing), kept, dropped,
-                                  len(X_df), len(df))
+                                  len(X_df), len(df), n_outliers)
 
     print('  Running PCA...')
     scores, explained, loadings = run_pca(X_df)
@@ -427,12 +520,19 @@ def analyze(df, elements, label, out_dir, data_dir, diagnostics_dir, csv_path, m
         fig.tight_layout()
         fig.savefig(out_dir / f'{label}_pca_scores_vs_CL.png', dpi=200, bbox_inches='tight')
 
-        for pc in PC_TO_PLOT:
-            fig = plot_loadings(loadings, kept, pc)
+        if LOADINGS_GRID_LAYOUT:
+            fig = plot_loadings_grid(loadings, kept, PC_TO_PLOT)
             if SHOW_TITLE:
-                fig.suptitle(f'{label} — PC{pc} loadings')
+                fig.suptitle(f'{label} — PC loadings')
             fig.tight_layout()
-            fig.savefig(out_dir / f'{label}_pca_loadings_PC{pc}.png', dpi=200, bbox_inches='tight')
+            fig.savefig(out_dir / f'{label}_pca_loadings_grid.png', dpi=200, bbox_inches='tight')
+        else:
+            for pc in PC_TO_PLOT:
+                fig = plot_loadings(loadings, kept, pc)
+                if SHOW_TITLE:
+                    fig.suptitle(f'{label} — PC{pc} loadings')
+                fig.tight_layout()
+                fig.savefig(out_dir / f'{label}_pca_loadings_PC{pc}.png', dpi=200, bbox_inches='tight')
         plt.close('all')
 
     print(f'  Saved PCA outputs for {label}')
@@ -451,11 +551,13 @@ def analyze_region_pca(df, elements, grain_id, out_dir, data_dir, diagnostics_di
     label = f'{grain_id}_regions_pca'
     print(f'\n--- {label} ({len(df):,} px, {df["Region"].nunique()} regions) ---')
 
-    X_df, y, kept, dropped, valid = prepare_data(df, elements)
+    X_df, y, kept, dropped, valid, n_outliers = prepare_data(df, elements)
     regions = df['Region'].values[valid.values]
 
     if dropped:
         print(f'  Dropped (>{MAX_BELOW_DETECTION_FRAC:.0%} below detection): {dropped}')
+    if n_outliers:
+        print(f'  Excluded {n_outliers:,} px as outliers (saturation/{OUTLIER_METHOD})')
     if len(X_df) < MIN_PIXELS:
         print(f'  WARNING: only {len(X_df)} valid pixels (< MIN_PIXELS={MIN_PIXELS}), skipping.')
         return
@@ -470,6 +572,9 @@ def analyze_region_pca(df, elements, grain_id, out_dir, data_dir, diagnostics_di
         f'  ELEMENTS (requested): {ELEMENTS if ELEMENTS is not None else "all (auto-detected)"}',
         f'  BELOW_DETECTION: {BELOW_DETECTION}',
         f'  MAX_BELOW_DETECTION_FRAC: {MAX_BELOW_DETECTION_FRAC}',
+        f'  SATURATION_FILTER: {SATURATION_FILTER}',
+        f'  OUTLIER_METHOD: {OUTLIER_METHOD}',
+        f'  MAD_K_LO: {MAD_K_LO}, MAD_K_HI: {MAD_K_HI}',
         f'  LOG_TRANSFORM: {LOG_TRANSFORM}',
         f'  MIN_PIXELS: {MIN_PIXELS}',
         f'  REGION_PCA_PCS: {REGION_PCA_PCS}',
@@ -479,6 +584,7 @@ def analyze_region_pca(df, elements, grain_id, out_dir, data_dir, diagnostics_di
         f'Elements used ({len(kept)}): {kept}',
         f'Elements dropped ({len(dropped)}, >{MAX_BELOW_DETECTION_FRAC:.0%} below detection): {dropped}'
         if BELOW_DETECTION is not None else 'Elements dropped: none (BELOW_DETECTION disabled)',
+        f'Pixels excluded as outliers (saturation/{OUTLIER_METHOD}): {n_outliers:,}',
         f'Valid pixels: {len(X_df):,} of {len(df):,} total',
         '',
         f'Regions ({df["Region"].nunique()}): ' +

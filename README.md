@@ -77,6 +77,10 @@ kyanite/
 ├── kyanite_palette.py                 shared colors (element/region/category/colormap
 │                                      conventions) — imported by the Python scripts above;
 │                                      the MATLAB scripts keep local copies of the same values
+├── kyanite_outliers.py                 shared outlier detection (saturation + log-space MAD
+│                                      trim) — imported by kyanite_figures.py and kyanite_pca.py
+│                                      so the two scripts can't drift apart on what counts as
+│                                      an outlier
 ├── kyanite.sh                          example SLURM batch script (HPC) — activates a venv,
 │                                      runs one Python step non-interactively
 │
@@ -338,17 +342,30 @@ Reads `figs/data/<grain_id>_pixel_data.csv` (or a directory of several
 files, pooled) and runs PCA (dimensionality/structure of the trace-element
 space): scree plot, per-PC loadings, and PC score vs. CL intensity.
 `BELOW_DETECTION`/`MAX_BELOW_DETECTION_FRAC` exclude elements that are
-mostly below detection before fitting. Region CSVs (from Step 4) get a
-different treatment: one PCA fit pooled across all of a grain's regions, so
-every region is projected into the same PC space and can be tested for
-separation (scree/loadings/PC1-vs-PC2 scatter/biplot, plus ANOVA and
-centroid-distance stats). Figures go to `WHOLE_GRAIN_OUTPUT_DIR`/
-`REGION_OUTPUT_DIR` (default `figs/pca/`/`figs/regions/`); the reusable CSV
-tables (variance, loadings, and — region CSVs only — scores/centroid
-distances) go to `DATA_OUTPUT_DIR` (default `figs/data/`, alongside the
-pixel-data CSVs); the run log goes to `DIAGNOSTICS_DIR` (default
-`figs/diagnostics/`, matching every other analysis log in this project).
-All independent of `CSV_INPUT`.
+mostly below detection before fitting. Before log-transform/z-scoring, each
+element also goes through the same saturation + log-space MAD outlier trim
+as `kyanite_figures.py` (shared `kyanite_outliers.py` module, same defaults:
+saturation filter on, `MAD_K_HI=4`) — but since PCA needs one shared pixel
+set across every element (unlike `kyanite_figures.py`'s independent
+per-element pairwise plots), a pixel is dropped if *any* of its elements
+flags it as an outlier on that element's own distribution. This pooling
+compounds across elements — e.g. 5 elements each independently excluding a
+couple percent can add up to a ~10% total exclusion rate — which is
+expected given the "outlier in any element" pooling rule, not a bug; the
+exclusion count is written to `<label>_pca_log.txt`. `LOADINGS_GRID_LAYOUT`
+(whole-grain PCA only) optionally combines the per-PC loadings figures into
+one grid matching the PC-vs-CL scatter's own subplot layout, so the same PC
+occupies the same subplot position in both figures for direct comparison.
+Region CSVs (from Step 4) get a different treatment: one PCA fit pooled
+across all of a grain's regions, so every region is projected into the same
+PC space and can be tested for separation (scree/loadings/PC1-vs-PC2
+scatter/biplot, plus ANOVA and centroid-distance stats). Figures go to
+`WHOLE_GRAIN_OUTPUT_DIR`/`REGION_OUTPUT_DIR` (default `figs/pca/`/
+`figs/regions/`); the reusable CSV tables (variance, loadings, and — region
+CSVs only — scores/centroid distances) go to `DATA_OUTPUT_DIR` (default
+`figs/data/`, alongside the pixel-data CSVs); the run log goes to
+`DIAGNOSTICS_DIR` (default `figs/diagnostics/`, matching every other
+analysis log in this project). All independent of `CSV_INPUT`.
 
 **Step 7b — `kyanite_rf_shap.py`**
 
