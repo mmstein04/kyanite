@@ -677,6 +677,10 @@ so they carry local functions with the identical values hand-copied in —
   regardless of input bit depth) — compatible with `CL_EPMA_registration.m`'s `epma_dir` input
 
 **`kyanite_figures.py`**
+- `GRAIN_FILTER` — only used when `CSV_INPUT` is a directory: list of
+  `grain_id`s to restrict to, or `None` (default) for every grain found
+  (mirrors `kyanite_rf_shap_plots.py`'s `GRAIN_FILTER`); `summary`/
+  `distributions` pool whichever grains survive the filter
 - `CSV_INPUT`, `ELEMENTS`, `PLOT_TYPE` (`scatter`, `violin`, `boxplot`, `contour`,
   `heatmap`, `corrmatrix`, `element_corrmatrix`, `summary`, `distributions`, `all`,
   or a list of these). `corrmatrix` is CL-vs-element-ratio correlation (see above);

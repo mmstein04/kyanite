@@ -102,9 +102,15 @@ from kyanite_outliers import (saturation_mask as _saturation_mask,
 # checked out on.
 _REPO_ROOT = Path(__file__).resolve().parent
 
-CSV_INPUT = _REPO_ROOT / 'figs' / 'data' / 'NA-GS-P84-06_pixel_data.csv'   # file or directory
+CSV_INPUT = _REPO_ROOT / 'figs' / 'data'   # file or directory
 ELEMENTS  = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Mn_Ka', 'Ti_Ka']          # CSV column names
-PLOT_TYPE = 'all'      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix', 'element_corrmatrix', 'summary', 'distributions', 'all', or a list of these
+PLOT_TYPE = 'element_corrmatrix'      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix', 'element_corrmatrix', 'summary', 'distributions', 'all', or a list of these
+
+# Only used when CSV_INPUT is a directory: list of grain_ids to restrict to
+# (matches kyanite_rf_shap_plots.py's GRAIN_FILTER), or None for every grain
+# found. 'summary'/'distributions' pool whatever grains survive this filter,
+# same as they'd pool an unfiltered directory.
+GRAIN_FILTER = None
 
 # Where figures are saved — independent of CSV_INPUT, so pointing CSV_INPUT
 # at figs/data/ (where the pixel-data CSVs actually live) never dumps PNGs
@@ -245,11 +251,28 @@ AXIS_MATCH_PLOT_TYPES = ['scatter', 'contour', 'heatmap']
 # RESOLVE INPUT → list of CSV paths
 # =============================================================================
 
+def _grain_id_from_csv_path(p):
+    stem = p.stem
+    if stem.endswith('_region_pixel_data'):
+        return stem[:-len('_region_pixel_data')]
+    if stem.endswith('_pixel_data'):
+        return stem[:-len('_pixel_data')]
+    return stem
+
+
 input_path = Path(CSV_INPUT)
 if input_path.is_dir():
     csv_files = sorted(input_path.glob('*_pixel_data.csv'))
     if not csv_files:
         raise FileNotFoundError(f'No *_pixel_data.csv files found in {input_path}')
+    if GRAIN_FILTER is not None:
+        found_grains = {_grain_id_from_csv_path(p) for p in csv_files}
+        missing_grains = [g for g in GRAIN_FILTER if g not in found_grains]
+        if missing_grains:
+            print(f'WARNING: GRAIN_FILTER entries not found in {input_path}: {missing_grains}')
+        csv_files = [p for p in csv_files if _grain_id_from_csv_path(p) in GRAIN_FILTER]
+        if not csv_files:
+            raise FileNotFoundError(f'No CSVs in {input_path} matched GRAIN_FILTER={GRAIN_FILTER}')
 else:
     csv_files = [input_path]
 
