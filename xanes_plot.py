@@ -74,7 +74,7 @@ OUT_DIR     = _REPO_ROOT / 'figs' / 'xanes'
 
 EDGE_ENERGY      = None          # Fe K edge (eV), reference line; None to disable
 XANES_WINDOW     = (7000, 7250)    # eV, full-window overlay plot
-PRE_EDGE_WINDOW  = (7112, 7116)    # eV, zoom window for pre-edge peak
+PRE_EDGE_WINDOW  = (7109, 7118)    # eV, zoom window for pre-edge peak
 
 # expected pre-edge peak positions (eV, label, color) — drawn as reference lines
 PRE_EDGE_REFS = [
