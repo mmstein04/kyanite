@@ -43,10 +43,9 @@ WORKFLOW (per grain):
   4. Derive per-pixel slope and Pearson r maps for every element from those
      sums; mask out pixels outside the grain or with too few valid
      neighbors in the window.
-  5. Save maps (.npz + long-format .csv, in figs/data/) and QC figures
-     (slope map grid, R map grid, window-coverage map, in
-     figs/diagnostics/); the one true analysis-result figure (Cr R-vs-CL)
-     is saved directly in figs/local_regression/.
+  5. Save maps (.npz + long-format .csv, in figs/data/), the window-coverage
+     QC figure (figs/diagnostics/), and the analysis-result figures (slope
+     map grid, R map grid, and Cr R-vs-CL) in figs/local_regression/.
 
 Note: RowIdx/ColIdx in the pixel-data CSV are 0-based (numpy convention),
 unlike the original MATLAB script's 1-based indices — nothing downstream
@@ -55,10 +54,10 @@ joins on them, so there's no MATLAB-side consumer to stay compatible with.
 Output (per grain):
   figs/data/<grain_id>_local_regression.npz            — slope/R/n maps + metadata
   figs/data/<grain_id>_local_regression_pixel_data.csv — long-format per-pixel table
-  figs/diagnostics/<grain_id>_local_regression_slope_QC.png
-  figs/diagnostics/<grain_id>_local_regression_R_QC.png
   figs/diagnostics/<grain_id>_local_regression_n_map.png
   figs/diagnostics/<grain_id>_local_regression_analysis_log.txt
+  figs/local_regression/<grain_id>_local_regression_slope_map.png
+  figs/local_regression/<grain_id>_local_regression_R_map.png
   figs/local_regression/<grain_id>_local_regression_R_Cr_vs_CL.png (skipped
     with a warning if no Cr element map is found)
 """
@@ -82,16 +81,17 @@ _REPO_ROOT = Path(__file__).resolve().parent
 # Grain selection. A single string, a list for batch processing, or None to
 # auto-discover every grain that has a registered CL image (INPUT_DIR), a
 # mask (DATA_DIR), and an EPMA/XRF maps folder (MAPS_DIR/<grain_id>/).
-GRAIN_IDS = 'NA-GS-P84-06'
+GRAIN_IDS = None
 
 # Directory containing the outputs of CL_EPMA_registration.m (registered CL
 # TIFFs and the grain mask TIFF).
 INPUT_DIR = _REPO_ROOT / 'figs'
 
 # Reusable data (mask, pixel data, etc.) lives in its own subfolder of
-# INPUT_DIR, per CL_EPMA_registration.m's convention. QC-only figures
-# (slope/R grids, window-coverage map) and the log go in DIAGNOSTICS_DIR;
-# OUTPUT_DIR holds only the true analysis-result figure (Cr R-vs-CL).
+# INPUT_DIR, per CL_EPMA_registration.m's convention. The window-coverage
+# (n) map is the only true QC figure and goes in DIAGNOSTICS_DIR along with
+# the log; OUTPUT_DIR holds the analysis-result figures — the slope/R map
+# grids (spatial CL-vs-element relationships) and the Cr R-vs-CL figure.
 DATA_DIR        = INPUT_DIR / 'data'
 DIAGNOSTICS_DIR = INPUT_DIR / 'diagnostics'
 OUTPUT_DIR      = _REPO_ROOT / 'figs' / 'local_regression'
@@ -493,10 +493,10 @@ def process_grain(grain_id):
     for ax in axes.flat[n_elements:]:
         ax.axis('off')
     fig.suptitle(f'{grain_id} — local CL-vs-element slope (r = {WINDOW_RADIUS_UM:.1f} um)')
-    slope_qc_file = DIAGNOSTICS_DIR / f'{grain_id}_local_regression_slope_QC.png'
-    fig.savefig(slope_qc_file, dpi=150, bbox_inches='tight')
+    slope_map_file = OUTPUT_DIR / f'{grain_id}_local_regression_slope_map.png'
+    fig.savefig(slope_map_file, dpi=150, bbox_inches='tight')
     plt.close(fig)
-    print(f'  Slope QC figure saved to: {slope_qc_file}')
+    print(f'  Slope map figure saved to: {slope_map_file}')
 
     # ---- R map grid -----------------------------------------------------------
     fig, axes = plt.subplots(n_rows2, n_cols2, figsize=(3.8 * n_cols2, 3.4 * n_rows2), squeeze=False)
@@ -511,10 +511,10 @@ def process_grain(grain_id):
     for ax in axes.flat[n_elements:]:
         ax.axis('off')
     fig.suptitle(f'{grain_id} — local CL-vs-element Pearson R (r = {WINDOW_RADIUS_UM:.1f} um)')
-    r_qc_file = DIAGNOSTICS_DIR / f'{grain_id}_local_regression_R_QC.png'
-    fig.savefig(r_qc_file, dpi=150, bbox_inches='tight')
+    r_map_file = OUTPUT_DIR / f'{grain_id}_local_regression_R_map.png'
+    fig.savefig(r_map_file, dpi=150, bbox_inches='tight')
     plt.close(fig)
-    print(f'  R QC figure saved to: {r_qc_file}')
+    print(f'  R map figure saved to: {r_map_file}')
 
     # ---- Chromium-specific figure: local R map next to the CL image ---------
     # Cr3+ is a known CL activator in kyanite, so this pairing is inspected on
@@ -559,8 +559,8 @@ def process_grain(grain_id):
     im = ax.imshow(disp_n, cmap=SEQUENTIAL_CMAP)
     ax.axis('off')
     fig.colorbar(im, ax=ax)
-    ax.set_title(f'{grain_id} — window coverage (n, radius = {WINDOW_RADIUS_UM:.1f} um) | '
-                 f'min valid = {min_window_px}', fontsize=10, pad=10)
+    fig.suptitle(f'{grain_id} — window coverage (n, radius = {WINDOW_RADIUS_UM:.1f} um) | '
+                 f'min valid = {min_window_px}', fontsize=10)
     n_map_file = DIAGNOSTICS_DIR / f'{grain_id}_local_regression_n_map.png'
     fig.savefig(n_map_file, dpi=150, bbox_inches='tight')
     plt.close(fig)
@@ -575,8 +575,8 @@ def process_grain(grain_id):
     print(f'  diagnostics/{grain_id}_local_regression_analysis_log.txt')
     print(f'  data/{grain_id}_local_regression.npz')
     print(f'  data/{grain_id}_local_regression_pixel_data.csv')
-    print(f'  diagnostics/{grain_id}_local_regression_slope_QC.png')
-    print(f'  diagnostics/{grain_id}_local_regression_R_QC.png')
+    print(f'  local_regression/{grain_id}_local_regression_slope_map.png')
+    print(f'  local_regression/{grain_id}_local_regression_R_map.png')
     if cr_cl_r_file is not None:
         print(f'  {cr_cl_r_file.name}')
     print(f'  diagnostics/{grain_id}_local_regression_n_map.png')

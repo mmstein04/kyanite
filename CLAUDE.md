@@ -300,9 +300,10 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   for `CL_region_extraction.m`'s region-mode QC: `<grain_id>_region_analysis_log.txt`,
   `<grain_id>_regions_overlay.png`, `<grain_id>_regions_all_maps_QC.png` (or the
   `_texture_domains_*` equivalents in `classification_mode`). Same idea again for
-  `CL_local_regression_map.py`: `<grain_id>_local_regression_analysis_log.txt`,
-  `<grain_id>_local_regression_slope_QC.png`, `<grain_id>_local_regression_R_QC.png`,
-  `<grain_id>_local_regression_n_map.png`. Same idea again for `kyanite_pca.py`
+  `CL_local_regression_map.py`'s true QC output: `<grain_id>_local_regression_analysis_log.txt`,
+  `<grain_id>_local_regression_n_map.png` (the window-coverage map — its slope/R
+  map grids are analysis-result figures, not QC, and live in `figs/local_regression/`
+  instead; see below). Same idea again for `kyanite_pca.py`
   (`<label>_pca_log.txt` whole-grain, `<grain_id>_regions_pca_log.txt` region-mode),
   `kyanite_rf_shap.py` (`<grain_id>_rf_shap_log.txt`), and `xanes_rf_classifier.py`
   (`<OUTPUT_LABEL>_rf_classifier_log.txt`) — their run logs live in
@@ -330,8 +331,9 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   diagnostic (not a pipeline step), so it has no dedicated analysis-family
   folder at all — its raw sweep CSV, convergence figures, and log all go to
   `figs/diagnostics/` (`DIAGNOSTICS_DIR`).
-  `CL_local_regression_map.py`'s one true result figure
-  (`<grain_id>_local_regression_R_Cr_vs_CL.png`) → `figs/local_regression/`,
+  `CL_local_regression_map.py`'s analysis-result figures
+  (`<grain_id>_local_regression_slope_map.png`, `<grain_id>_local_regression_R_map.png`,
+  `<grain_id>_local_regression_R_Cr_vs_CL.png`) → `figs/local_regression/`,
   `kyanite_spot_analysis.py` and `xanes_rf_classifier.py` → `figs/spot_analysis/`
   (shared — both pool the same per-spot CSVs and fall under the same
   "spot analysis" umbrella, even though they're two different analyses),
@@ -380,8 +382,10 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `figs/mask_edit_backups/<grain_id>_<timestamp>/` before each run
 - Local regression outputs (`CL_local_regression_map.py`): `data/<grain_id>_local_regression.npz`,
   `data/<grain_id>_local_regression_pixel_data.csv`, `diagnostics/<grain_id>_local_regression_analysis_log.txt`,
-  `diagnostics/<grain_id>_local_regression_{slope,R}_QC.png`, `diagnostics/<grain_id>_local_regression_n_map.png`,
-  and the one true result figure, `<grain_id>_local_regression_R_Cr_vs_CL.png`, directly in `figs/local_regression/`
+  `diagnostics/<grain_id>_local_regression_n_map.png` (the one true QC figure — window
+  coverage, not a chemistry result); analysis-result figures
+  `<grain_id>_local_regression_{slope,R}_map.png` and `<grain_id>_local_regression_R_Cr_vs_CL.png`
+  go directly in `figs/local_regression/`
 - Spot coordinate exports: `<grain_id>_spot_coordinates.csv`
 - Spot geochemistry/CL/XANES-class exports: `figs/data/<grain_id>_spot_geochemistry.csv`
   (reusable — read back by `kyanite_spot_analysis.py` and `xanes_rf_classifier.py`)
@@ -558,8 +562,9 @@ so they carry local functions with the identical values hand-copied in —
   one); a grain that fails partway (missing input, size mismatch, etc.) is skipped with a warning
   rather than aborting the batch
 - `INPUT_DIR` — folder holding each grain's registered CL TIFFs + mask TIFF (default `figs/`);
-  `DATA_DIR`/`DIAGNOSTICS_DIR`/`OUTPUT_DIR` — where reusable data, QC figures/log, and the one
-  true result figure are saved respectively (defaults `figs/data/`, `figs/diagnostics/`,
+  `DATA_DIR`/`DIAGNOSTICS_DIR`/`OUTPUT_DIR` — where reusable data, the true QC figure/log
+  (window-coverage map + analysis log), and the analysis-result figures (slope map, R map,
+  Cr R-vs-CL) are saved respectively (defaults `figs/data/`, `figs/diagnostics/`,
   `figs/local_regression/`); `MAPS_DIR` — base EPMA/XRF map folder, same one used during
   registration (per-grain maps live in `MAPS_DIR/<grain_id>/`)
 - `WINDOW_RADIUS_UM` — physical radius of the circular regression window; `MIN_WINDOW_PX`
@@ -581,7 +586,7 @@ so they carry local functions with the identical values hand-copied in —
   clipping line (`r_e = max(min(r_e, 1), -1)`) relies on MATLAB's `max`/`min` returning the
   non-NaN operand when one input is NaN, which silently resurrects every masked-out/invalid pixel
   in `r_maps` as exactly `1.0` instead of leaving it `NaN` — visible as a spurious red halo in the
-  old `_local_regression_R_QC.png`/`_local_regression_R_Cr_vs_CL.png` figures near the grain-mask
+  old `_local_regression_R_map.png`/`_local_regression_R_Cr_vs_CL.png` figures near the grain-mask
   boundary (within one window radius of the edge). The Python port uses `np.clip`, which
   correctly preserves `NaN`, so this halo is gone in the new figures. The pixel-data CSV was never
   affected (its rows are already filtered on slope validity, which this bug didn't touch) — only
