@@ -114,7 +114,7 @@ SATURATION_MIN_COUNT = 5        # ...and at least this many pixels, so tiny grai
 
 # --- PCA ---
 N_PCS_SCREE       = 10          # number of PCs shown on the scree plot
-PC_TO_PLOT        = [1, 2, 3, 4]   # which PC(s) to scatter against CL / show loadings for
+PC_TO_PLOT        = [1, 2, 3, 4, 5]   # which PC(s) to scatter against CL / show loadings for
 LOADING_THRESHOLD = 0.3         # |loading| >= this is highlighted as a significant contributor
 
 # False (default): one _pca_loadings_PC<n>.png per PC, as before. True: a
@@ -231,6 +231,17 @@ def run_pca(X_df):
     return scores, explained, loadings
 
 
+def _pc_axis_label(pc, explained=None, prefix='', suffix=''):
+    """'PC{pc}' (or 'Loading on PC{pc}', 'PC{pc} score', etc. via prefix/suffix),
+    with '(xx.x% var.)' appended whenever the PC's explained-variance array is
+    available, so every loadings/scatter axis reports how much variance that PC
+    actually carries rather than just its bare index."""
+    label = f'{prefix}PC{pc}{suffix}'
+    if explained is not None:
+        label += f' ({explained[pc - 1]:.1f}% var.)'
+    return label
+
+
 def plot_scree(explained):
     n = min(N_PCS_SCREE, len(explained))
     fig, ax = plt.subplots(figsize=(6, 4))
@@ -243,7 +254,7 @@ def plot_scree(explained):
     return fig
 
 
-def _draw_loadings_bar(ax, loadings, elements, pc):
+def _draw_loadings_bar(ax, loadings, elements, pc, explained=None):
     vals = loadings[:, pc - 1]
     order = np.argsort(vals)[::-1]
     sorted_vals = vals[order]
@@ -263,16 +274,16 @@ def _draw_loadings_bar(ax, loadings, elements, pc):
     ax.axhline(-LOADING_THRESHOLD, color='k', ls='--', lw=0.5)
     ax.set_xticks(range(len(sorted_names)))
     ax.set_xticklabels(sorted_names, rotation=40, ha='right', fontsize=8)
-    ax.set_ylabel(f'Loading on PC{pc}')
+    ax.set_ylabel(_pc_axis_label(pc, explained, prefix='Loading on '))
 
 
-def plot_loadings(loadings, elements, pc):
+def plot_loadings(loadings, elements, pc, explained=None):
     fig, ax = plt.subplots(figsize=(max(6, 0.4 * len(elements)), 4))
-    _draw_loadings_bar(ax, loadings, elements, pc)
+    _draw_loadings_bar(ax, loadings, elements, pc, explained)
     return fig
 
 
-def plot_loadings_grid(loadings, elements, pcs):
+def plot_loadings_grid(loadings, elements, pcs, explained=None):
     # Same bar charts as plot_loadings, laid out in the identical subplot
     # grid (same cols/rows formula, same order of pcs) as plot_pc_vs_cl's
     # scores-vs-CL scatter grid, so PCi's loadings land in the same subplot
@@ -284,7 +295,7 @@ def plot_loadings_grid(loadings, elements, pcs):
     axes = np.atleast_1d(axes).ravel()
 
     for ax, pc in zip(axes, pcs):
-        _draw_loadings_bar(ax, loadings, elements, pc)
+        _draw_loadings_bar(ax, loadings, elements, pc, explained)
         ax.grid(True, alpha=0.25, linewidth=0.5)
 
     for ax in axes[n:]:
@@ -292,7 +303,7 @@ def plot_loadings_grid(loadings, elements, pcs):
     return fig
 
 
-def plot_pc_vs_cl(scores, y, pcs):
+def plot_pc_vs_cl(scores, y, pcs, explained=None):
     n = len(pcs)
     cols = min(3, n)
     rows = int(np.ceil(n / cols))
@@ -308,7 +319,7 @@ def plot_pc_vs_cl(scores, y, pcs):
         r = np.corrcoef(x, y)[0, 1]
         ax.text(0.05, 0.95, f'r = {r:.3f}\nn = {len(x):,}',
                 transform=ax.transAxes, va='top', fontsize=9)
-        ax.set_xlabel(f'PC{pc} score')
+        ax.set_xlabel(_pc_axis_label(pc, explained, suffix=' score'))
         ax.set_ylabel('CL intensity (norm.)')
         ax.set_ylim(0, 1)   # CL is normalized to [0, 1]; fixed rather than
                             # autoscaled so the fit line's extrapolated
@@ -344,7 +355,7 @@ def _draw_region_hull(ax, pts, color, alpha=0.12):
             edgecolor=color, linewidth=1.5)
 
 
-def plot_region_pca_scatter(scores, regions, pcs, hulls=True):
+def plot_region_pca_scatter(scores, regions, pcs, hulls=True, explained=None):
     """PC_i vs. PC_j scores from a single shared PCA fit, colored by region,
     with an optional convex-hull outline per region so each region's
     footprint in PC space is easy to compare."""
@@ -361,8 +372,8 @@ def plot_region_pca_scatter(scores, regions, pcs, hulls=True):
         if hulls:
             _draw_region_hull(ax, np.column_stack([x[mask], y[mask]]), colors[r])
 
-    ax.set_xlabel(f'PC{pc_x} score')
-    ax.set_ylabel(f'PC{pc_y} score')
+    ax.set_xlabel(_pc_axis_label(pc_x, explained, suffix=' score'))
+    ax.set_ylabel(_pc_axis_label(pc_y, explained, suffix=' score'))
     ax.grid(True, alpha=0.25, linewidth=0.5)
     ax.legend(fontsize=8, markerscale=2, loc='best')
     return fig
@@ -408,8 +419,8 @@ def plot_region_pca_biplot(scores, loadings, explained, regions, elements, pcs, 
 
     ax.axhline(0, color='0.7', lw=0.5, zorder=0)
     ax.axvline(0, color='0.7', lw=0.5, zorder=0)
-    ax.set_xlabel(f'PC{pc_x} ({explained[ix]:.1f}% var.)')
-    ax.set_ylabel(f'PC{pc_y} ({explained[iy]:.1f}% var.)')
+    ax.set_xlabel(_pc_axis_label(pc_x, explained))
+    ax.set_ylabel(_pc_axis_label(pc_y, explained))
     ax.legend(fontsize=8, loc='upper left', bbox_to_anchor=(1.02, 1), borderaxespad=0)
     ax.grid(True, alpha=0.25, linewidth=0.5)
     return fig
@@ -518,21 +529,21 @@ def analyze(df, elements, label, out_dir, data_dir, diagnostics_dir, csv_path, m
         fig.tight_layout()
         fig.savefig(out_dir / f'{label}_pca_scree.png', dpi=200, bbox_inches='tight')
 
-        fig = plot_pc_vs_cl(scores, y, PC_TO_PLOT)
+        fig = plot_pc_vs_cl(scores, y, PC_TO_PLOT, explained)
         if SHOW_TITLE:
             fig.suptitle(f'{label} — PC scores vs. CL intensity')
         fig.tight_layout()
         fig.savefig(out_dir / f'{label}_pca_scores_vs_CL.png', dpi=200, bbox_inches='tight')
 
         if LOADINGS_GRID_LAYOUT:
-            fig = plot_loadings_grid(loadings, kept, PC_TO_PLOT)
+            fig = plot_loadings_grid(loadings, kept, PC_TO_PLOT, explained)
             if SHOW_TITLE:
                 fig.suptitle(f'{label} — PC loadings')
             fig.tight_layout()
             fig.savefig(out_dir / f'{label}_pca_loadings_grid.png', dpi=200, bbox_inches='tight')
         else:
             for pc in PC_TO_PLOT:
-                fig = plot_loadings(loadings, kept, pc)
+                fig = plot_loadings(loadings, kept, pc, explained)
                 if SHOW_TITLE:
                     fig.suptitle(f'{label} — PC{pc} loadings')
                 fig.tight_layout()
@@ -630,13 +641,14 @@ def analyze_region_pca(df, elements, grain_id, out_dir, data_dir, diagnostics_di
         fig.savefig(out_dir / f'{label}_pca_scree.png', dpi=200, bbox_inches='tight')
 
         for pc in REGION_PCA_PCS:
-            fig = plot_loadings(loadings, kept, pc)
+            fig = plot_loadings(loadings, kept, pc, explained)
             if SHOW_TITLE:
                 fig.suptitle(f'{label} — PC{pc} loadings')
             fig.tight_layout()
             fig.savefig(out_dir / f'{label}_pca_loadings_PC{pc}.png', dpi=200, bbox_inches='tight')
 
-        fig = plot_region_pca_scatter(scores, regions, REGION_PCA_PCS, hulls=REGION_PCA_HULLS)
+        fig = plot_region_pca_scatter(scores, regions, REGION_PCA_PCS, hulls=REGION_PCA_HULLS,
+                                       explained=explained)
         if SHOW_TITLE:
             fig.suptitle(f'{label} — PC{REGION_PCA_PCS[0]} vs PC{REGION_PCA_PCS[1]} by region')
         fig.tight_layout()
