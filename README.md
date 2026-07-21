@@ -128,7 +128,8 @@ kyanite/
     │                                   diagnostic, so it has no dedicated folder of its own)
     ├── mask_edit_backups/               pre-edit snapshots written automatically by CL_mask_edit.m
     ├── whole_grain/                     kyanite_figures.py's whole-grain pixel-CSV figures
-    │                                   (scatter/violin/boxplot/contour/heatmap/corrmatrix)
+    │                                   (scatter/violin/boxplot/contour/heatmap/corrmatrix/
+    │                                   element_corrmatrix)
     ├── pca/                             kyanite_pca.py's whole-grain PCA figures (scree,
     │                                   loadings, PC-vs-CL scatter)
     ├── rf/                               kyanite_rf_shap_plots.py's RF figures
@@ -325,9 +326,10 @@ Standalone; requires only `figs/data/<grain_id>_pixel_data.csv` from Step
 2 (or `_region_pixel_data.csv` from Step 4 — both live in `figs/data/`,
 so pointing `CSV_INPUT` at that directory picks up and auto-routes both
 kinds). Set `CSV_INPUT`, `ELEMENTS`, `PLOT_TYPE` (`scatter`/`violin`/
-`boxplot`/`contour`/`heatmap`/`corrmatrix`/`all`), and binning
+`boxplot`/`contour`/`heatmap`/`corrmatrix`/`element_corrmatrix`/`all`), and binning
 (`N_BINS`/`BIN_EDGES`) or percentile trim (`PCT_LO`/`PCT_HI`) as needed.
-Also produces element-ratio correlation-matrix figures. Figures are saved
+Also produces element-ratio-vs-CL (`corrmatrix`) and element-vs-element
+(`element_corrmatrix`) correlation-matrix figures. Figures are saved
 to `WHOLE_GRAIN_OUTPUT_DIR`/`REGION_OUTPUT_DIR` (default `figs/whole_grain/`/
 `figs/regions/`) — independent of wherever `CSV_INPUT` points, so pointing
 it at `figs/data/` never dumps PNGs in among the reusable data files.

@@ -480,7 +480,7 @@ so they carry local functions with the identical values hand-copied in —
   and adding its own grey-fallback key).
 - **Diverging colormap** (`kyanite_palette.DIVERGING_CMAP = 'RdBu_r'`) —
   every signed, zero-centered quantity: correlation matrices
-  (`kyanite_figures.py`'s `corrmatrix`), local-regression slope/R maps
+  (`kyanite_figures.py`'s `corrmatrix`/`element_corrmatrix`), local-regression slope/R maps
   (`CL_local_regression_map.py`'s slope/R map grids and its Cr-vs-CL figure) —
   now imported directly rather than hand-rolled, since (as of the Python port)
   no script in this project needs a MATLAB-compatible stand-in for it.
@@ -673,7 +673,20 @@ so they carry local functions with the identical values hand-copied in —
 
 **`kyanite_figures.py`**
 - `CSV_INPUT`, `ELEMENTS`, `PLOT_TYPE` (`scatter`, `violin`, `boxplot`, `contour`,
-  `heatmap`, `corrmatrix`, `summary`, `distributions`, `all`, or a list of these)
+  `heatmap`, `corrmatrix`, `element_corrmatrix`, `summary`, `distributions`, `all`,
+  or a list of these). `corrmatrix` is CL-vs-element-ratio correlation (see above);
+  `element_corrmatrix` is a separate grid of plain Pearson r between each pair of
+  elements themselves (not vs. CL) — how the trace elements covary with each other.
+  Its cells all come from one common pixel set pooled across every element in
+  `ELEMENTS` (a pixel dropped if any one element flags it as an outlier under
+  `SATURATION_FILTER`/`OUTLIER_METHOD`, same AND-pooling `kyanite_pca.py` uses),
+  unlike `corrmatrix`'s per-cell-filtered ratios — so every cell is directly
+  comparable to every other. The matrix is symmetric and the diagonal is always 1
+  (self-correlation), so it's drawn lower-triangle-only — upper triangle left
+  blank, diagonal grayed out rather than colored on the -1..1 scale — the same
+  redundancy-avoiding convention as `kyanite_rf_shap_plots.py`'s
+  `plot_shap_interactions`. Region mode: one subplot per region (each region's own
+  common pixel set, not pooled across regions), annotated with that region's kept n
 - `WHOLE_GRAIN_OUTPUT_DIR` / `REGION_OUTPUT_DIR` — where figures are saved
   (default `figs/whole_grain/` / `figs/regions/`), independent of `CSV_INPUT`
 - `N_BINS` / `BIN_EDGES`

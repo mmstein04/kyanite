@@ -13,6 +13,15 @@
 # Pearson r of that ratio vs. CL as one annotated, color-mapped grid cell
 # (self-ratio cells on the diagonal are masked out as meaningless).
 #
+# element_corrmatrix is a separate grid, also not looped per element: the
+# plain Pearson r of each pair of elements against EACH OTHER (not vs. CL) —
+# how the trace elements themselves covary, e.g. to spot a shared substitution
+# mechanism or a common contaminant phase. Unlike corrmatrix's per-cell
+# filtering (each ratio/element gets its own outlier mask), every cell here is
+# computed from one common pixel set pooled across all of ELEMENTS (a pixel
+# is dropped if any one element flags it as an outlier — same pooling
+# kyanite_pca.py uses), so every cell in the grid is comparable to every other.
+#
 # Two input formats are auto-detected by column name:
 #   - Whole-grain CSVs from CL_EPMA_registration.m (*_pixel_data.csv):
 #     one figure per element/plot-type for the whole grain.
@@ -95,7 +104,7 @@ _REPO_ROOT = Path(__file__).resolve().parent
 
 CSV_INPUT = _REPO_ROOT / 'figs' / 'data' / 'NA-GS-P84-06_pixel_data.csv'   # file or directory
 ELEMENTS  = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Mn_Ka', 'Ti_Ka']          # CSV column names
-PLOT_TYPE = 'all'      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix', 'summary', 'distributions', 'all', or a list of these
+PLOT_TYPE = 'all'      # 'scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix', 'element_corrmatrix', 'summary', 'distributions', 'all', or a list of these
 
 # Where figures are saved — independent of CSV_INPUT, so pointing CSV_INPUT
 # at figs/data/ (where the pixel-data CSVs actually live) never dumps PNGs
@@ -113,9 +122,11 @@ REGION_OUTPUT_DIR      = _REPO_ROOT / 'figs' / 'regions'
 SUMMARY_OUTPUT_DIR = None
 ALL_GRAINS_LABEL   = 'all_grains'
 
-# 'corrmatrix' ignores the per-element looping above and instead builds one
-# grid per grain (or per region) from every ordered pair of elements in
-# ELEMENTS — set ELEMENTS to the full list of columns to compare (needs >=2).
+# 'corrmatrix' and 'element_corrmatrix' both ignore the per-element looping
+# above and instead build one grid per grain (or per region) from every pair
+# of elements in ELEMENTS — set ELEMENTS to the full list of columns to
+# compare (needs >=2). Same colormap for both — both are Pearson r grids
+# centered at 0.
 CORRMATRIX_CMAP = DIVERGING_CMAP   # diverging colormap, centered at r = 0 (see kyanite_palette.py)
 
 # A ratio's highlight figure (see plot_element_highlights) requires beating
@@ -246,7 +257,7 @@ print(f'Processing {len(csv_files)} CSV(s):')
 for p in csv_files:
     print(f'  {p.name}')
 
-ALL_PLOT_TYPES = ['scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix', 'summary', 'distributions']
+ALL_PLOT_TYPES = ['scatter', 'violin', 'boxplot', 'contour', 'heatmap', 'corrmatrix', 'element_corrmatrix', 'summary', 'distributions']
 
 if PLOT_TYPE == 'all':
     plot_types = ALL_PLOT_TYPES
@@ -428,6 +439,26 @@ def outlier_keep_mask(x):
     return _outlier_keep_mask(x, OUTLIER_METHOD, MAD_K_LO, MAD_K_HI, PCT_LO, PCT_HI)
 
 
+def outlier_row_keep_mask(elements, df):
+    # Boolean mask aligned to df's row order, True to keep. A pixel is
+    # dropped if ANY of `elements` flags it as an outlier (saturation or
+    # statistical trim) on that element's own distribution, pooled with AND —
+    # same approach kyanite_pca.py uses for its one-common-pixel-set need.
+    # Needed for element_corrmatrix (unlike this script's usual per-element
+    # pairwise filtering) since every cell of that grid must be computed from
+    # the same pixels to be comparable to every other cell.
+    keep = np.ones(len(df), dtype=bool)
+    for e in elements:
+        x = df[e].values
+        sat = saturation_mask(x, e, verbose=False)
+        stat_keep = np.ones(len(x), dtype=bool)
+        rest_idx = np.where(~sat)[0]
+        if len(rest_idx):
+            stat_keep[rest_idx] = outlier_keep_mask(x[rest_idx])
+        keep &= (~sat) & stat_keep
+    return keep
+
+
 def filtered_xy(df, element):
     x_all = df[element].values
     y_all = df['CL'].values
@@ -574,6 +605,61 @@ def plot_corr_matrix(ax, elements, df, rdf=None):
     for lbl in ax.get_xticklabels():
         lbl.set_ha('right')
     return rdf
+
+
+def compute_element_corr_matrix(elements, df):
+    # Plain Pearson r between each pair of elements themselves (not vs. CL) —
+    # how the trace elements covary with each other. One common pixel set,
+    # pooled across every element via outlier_row_keep_mask, so every cell
+    # comes from the same n and is comparable to every other cell (unlike
+    # compute_corr_matrix's per-cell filtering).
+    keep = outlier_row_keep_mask(elements, df)
+    sub = df.loc[keep, elements]
+    n = len(sub)
+    if n < 2:
+        return pd.DataFrame(np.full((len(elements), len(elements)), np.nan),
+                             index=elements, columns=elements), n
+    return sub.corr(), n
+
+
+def plot_element_corr_matrix(ax, elements, df, rdf=None, n=None):
+    # The matrix is symmetric (r(i,j) == r(j,i)) and the diagonal is always 1
+    # (self-correlation, uninformative) — same redundancy as
+    # kyanite_rf_shap_plots.py's plot_shap_interactions, so this mirrors that
+    # plot's lower-triangle-only style: upper triangle left blank, diagonal
+    # grayed out rather than colored on the -1..1 scale.
+    if rdf is None:
+        rdf, n = compute_element_corr_matrix(elements, df)
+    values = rdf.values
+    n_e = len(elements)
+    strict_lower = np.tril(np.ones((n_e, n_e), dtype=bool), k=-1)
+
+    cmap = plt.colormaps[CORRMATRIX_CMAP].copy()
+    cmap.set_bad('white')   # upper triangle: left blank
+
+    masked = np.ma.masked_array(values, mask=~strict_lower | ~np.isfinite(values))
+    im = ax.imshow(masked, cmap=cmap, vmin=-1, vmax=1)
+    ax.set_xticks(range(n_e)); ax.set_xticklabels(elements, rotation=45, ha='right', fontsize=8)
+    ax.set_yticks(range(n_e)); ax.set_yticklabels(elements, fontsize=8)
+    ax.set_aspect('equal')
+
+    for i in range(n_e):
+        for j in range(i + 1):   # lower triangle + diagonal only
+            r = values[i, j]
+            if i == j:
+                ax.add_patch(plt.Rectangle((j - 0.5, i - 0.5), 1, 1,
+                                            facecolor='0.85', edgecolor='none', zorder=1))
+                color = 'black'
+            else:
+                color = 'white' if np.isfinite(r) and abs(r) >= 0.6 else 'black'
+            label = f'{r:.2f}' if np.isfinite(r) else 'n/a'
+            ax.text(j, i, label, ha='center', va='center',
+                    color=color, fontsize=8, zorder=2)
+
+    ax.figure.colorbar(im, ax=ax, label='Pearson r', fraction=0.046, pad=0.04)
+    ax.set_xlabel('element')
+    ax.set_ylabel('element')
+    return rdf, n
 
 
 def compute_summary_matrix(elements, grain_dfs):
@@ -796,7 +882,8 @@ for csv_path in csv_files:
     if missing:
         print(f'  WARNING: columns not found, skipping: {missing}')
 
-    element_plot_types = [pt for pt in plot_types if pt not in ('corrmatrix', 'summary', 'distributions')]
+    element_plot_types = [pt for pt in plot_types
+                           if pt not in ('corrmatrix', 'element_corrmatrix', 'summary', 'distributions')]
 
     for element in available:
 
@@ -928,6 +1015,42 @@ for csv_path in csv_files:
             # Ratios that beat both of their raw component elements get
             # their own highlight figure (whole-grain mode only).
             plot_element_highlights(available, df, rdf, grain_id, out_dir)
+
+    # 'element_corrmatrix' isn't per-element either — one grid per grain (or
+    # per region) of every pair of elements' Pearson r against EACH OTHER.
+    if 'element_corrmatrix' in plot_types:
+        if len(available) < 2:
+            print(f'  WARNING: element_corrmatrix needs >=2 ELEMENTS columns, got {len(available)}; skipping')
+        elif region_mode:
+            n_r = len(regions)
+            fig, axes = plt.subplots(1, n_r, figsize=(5 * len(available) * n_r / 3 + 2, 5 * len(available) / 3 + 1))
+            axes = np.atleast_1d(axes)
+            for ax, region in zip(axes, regions):
+                sub = df[df['Region'] == region]
+                _, n_kept = plot_element_corr_matrix(ax, available, sub)
+                ax.set_title(f'{region} (n={n_kept:,})', fontsize=10)
+            if SHOW_TITLE:
+                fig.suptitle(f'{grain_id} — element-vs-element correlation by region', fontsize=12)
+            plt.tight_layout()
+
+            if SAVE_FIG:
+                out = out_dir / f'{grain_id}_element_corrmatrix_by_region.png'
+                fig.savefig(out, dpi=200, bbox_inches='tight')
+                print(f'  Saved: {out.name}')
+
+        else:
+            rdf, n_kept = compute_element_corr_matrix(available, df)
+
+            fig, ax = plt.subplots(figsize=(len(available) * 0.9 + 2, len(available) * 0.8 + 2))
+            plot_element_corr_matrix(ax, available, df, rdf=rdf, n=n_kept)
+            if SHOW_TITLE:
+                ax.set_title(f'{grain_id} — element-vs-element correlation (n={n_kept:,})', fontsize=11)
+            plt.tight_layout()
+
+            if SAVE_FIG:
+                out = out_dir / f'{grain_id}_element_corrmatrix.png'
+                fig.savefig(out, dpi=200, bbox_inches='tight')
+                print(f'  Saved: {out.name}')
 
 # 'summary' isn't per-CSV — one heatmap pooling every whole-grain (non-region)
 # CSV found across the whole CSV_INPUT directory, so it's handled once here
