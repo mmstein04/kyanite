@@ -65,7 +65,7 @@ from kyanite_outliers import (saturation_mask as _saturation_mask,
 # checked out on.
 _REPO_ROOT = Path(__file__).resolve().parent
 
-CSV_INPUT = _REPO_ROOT / 'figs' / 'data' / 'NA-GS-P84-06_pixel_data.csv'   # file or directory
+CSV_INPUT = _REPO_ROOT / 'figs' / 'data'   # file or directory
 ELEMENTS  = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Mn_Ka', 'Ti_Ka']      # list of CSV column names to include; None = all columns except CL/Region
 
 # Where figures are saved — independent of CSV_INPUT, so pointing CSV_INPUT
@@ -121,7 +121,7 @@ LOADING_THRESHOLD = 0.3         # |loading| >= this is highlighted as a signific
 # single _pca_loadings_grid.png with the same subplot grid (cols/rows/order)
 # as _pca_scores_vs_CL.png, so PCi's loadings sit in the same subplot
 # position as PCi's scores-vs-CL scatter for direct visual comparison.
-LOADINGS_GRID_LAYOUT = False
+LOADINGS_GRID_LAYOUT = True
 
 # --- Region PCA (region CSVs only) ---
 # A single PCA fit pooled across ALL of a grain's regions, with every region
@@ -310,6 +310,10 @@ def plot_pc_vs_cl(scores, y, pcs):
                 transform=ax.transAxes, va='top', fontsize=9)
         ax.set_xlabel(f'PC{pc} score')
         ax.set_ylabel('CL intensity (norm.)')
+        ax.set_ylim(0, 1)   # CL is normalized to [0, 1]; fixed rather than
+                            # autoscaled so the fit line's extrapolated
+                            # endpoints can't stretch a weakly-correlated
+                            # PC's axis beyond the data's true range
         ax.grid(True, alpha=0.25, linewidth=0.5)
 
     for ax in axes[n:]:
