@@ -245,6 +245,23 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   Unlike `map`, spots here are **not labeled**: the numbers crowd each other
   wherever spots cluster and say nothing about the mapped quantity, so the
   numbering lives in its own `spot_index` diagnostic instead),
+  `centroid_hist` (the continuous counterpart to `pie` — where that summarizes
+  each grain's qualitative Type 1/2/3 split, this summarizes the same grains'
+  quantitative centroid distributions: one histogram row per grain, stacked on a
+  single **shared** energy axis with identical bin edges and axis limits
+  throughout, so a shift between grains reads as one vertical scan. Y axis is
+  fraction of that grain's spots, not raw count, so grains with different spot
+  counts stay comparable in shape. Bars are colored by their own bin centre
+  through the same colormap/limits the centroid maps use, so a bar's color matches
+  the spots at that energy; an orange median line per row aids comparison of
+  central tendency. Off-grain spots are excluded, same as `pie` — and note this
+  needs an *explicit* filter, unlike every other analysis here: a centroid comes
+  from the XANES fit rather than the XRF zone, so an off-grain spot has a
+  perfectly real `fit_centroid` and would otherwise sail through. Bin range
+  defaults to the pooled valid-centroid range, deliberately independent of the
+  maps' color limits — those clamp outliers for display, but a histogram should
+  show every value where it actually falls. Output:
+  `centroid_histogram_by_grain.png`),
   `spot_index` (per-grain diagnostic: the registered CL image with every spot in
   one neutral color — `SPOT_INDEX_COLOR`, deliberately uniform so nothing in the
   figure reads as encoded data — labeled with its spot number, and nothing else.
@@ -273,7 +290,14 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
     wins, with a count printed
   - Merged onto the grain's spot frame as `fit_centroid`, `fit_centroid_stderr`,
     `fit_r2`, `centroid_ok` — all four listed in `METADATA_COLS` so
-    `detect_elements()` can't mistake them for element ROI columns
+    `detect_elements()` can't mistake them for element ROI columns. A grain can
+    have spots with no fit row at all (`NA-CM-G12B7-02` spots 3, 8, 11): those
+    merge in as NaN and are treated as failed fits. `centroid_ok` is explicitly
+    cast to a real `bool` dtype at merge time for exactly that reason — left as
+    object dtype, `~centroid_ok` would be integer bitwise NOT (`~True == -2`),
+    not logical negation, and downstream masks would silently go wrong
+  - Spot numbers are not necessarily zero-padded — `-05`/`-07` write `spot01`,
+    `NA-CM-G12B7-02` writes `spot1`; the trailing-digits rule handles both
   - A fit is flagged `centroid_ok = False` (and drawn GREY, exactly like a
     `'Bad data'`/unclassified spot on the class map) when `fit_centroid_stderr` is
     NaN — lmfit could not estimate the uncertainty, which in practice marks a
@@ -294,15 +318,20 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   grains cut from the same thin section. Since the color scale was already pooled
   across grains, this adds no new normalization; it just draws the panels together
   and the scale once. Notes:
-  - `CENTROID_PANEL_TRUE_SCALE` (default `True`) draws every panel at the same
-    µm per inch, using each grain's own µm/px from the metadata sidecar, so grains
-    appear at their **true relative size** — registered CL images differ in pixel
-    dimensions (e.g. 701² vs. 501² for `RH-XA-57081P-05`/`-07`) *and* grains in this
-    project are imaged at different µm/px (1.0 vs. 2.0), so neither pixel count
-    alone nor a single hardcoded µm/px would scale the panels honestly. Panels are
-    **padded** to a common physical window (`CENTROID_PANEL_PAD_COLOR`, black to
-    blend with the CL background), never stretched. `False` gives each panel its own
-    box instead, for grains too different in size to tile usefully
+  - `CENTROID_PANEL_TRUE_SCALE` — **`False` (the current default)** gives each
+    panel its own box, so every grain is drawn at a usable size regardless of how
+    large it actually is; relative grain size is then NOT readable from the figure,
+    and each panel carries its own scale bar accordingly. `True` instead draws
+    every panel at the same µm per inch, using each grain's own µm/px from the
+    metadata sidecar, so grains appear at their **true relative size** — registered
+    CL images differ in pixel dimensions (701², 501², 1101×901 for the three fitted
+    grains) *and* grains in this project are imaged at different µm/px (1.0 vs.
+    2.0), so neither pixel count alone nor a single hardcoded µm/px would scale the
+    panels honestly. In that mode panels are **padded** to a common physical window
+    (`CENTROID_PANEL_PAD_COLOR`, black to blend with the CL background), never
+    stretched, and one shared scale bar is drawn. The default is `False` because
+    `NA-CM-G12B7-02` is ~2.2× the linear size of `RH-XA-57081P-07`, which under
+    true scale shrank the smaller grains to a small fraction of their panels
   - `draw_scalebar` draws one bar on the first panel in true-scale mode (all panels
     share a scale, so more would be redundant) and one per panel otherwise
   - A group is skipped with a warning if fewer than 2 of its grains have fits or a
@@ -477,6 +506,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `CL_vs_<element>_scatter.png`, `<element>_by_class_boxplot.png`,
   `pca_pc1_pc2_scatter.png`, `pca_scree.png`, `pca_loadings_pc1_pc2.png`,
   `pca_biplot.png`, `<grain_id>_spot_map.png`, `<grain_id>_centroid_map.png`,
+  `centroid_histogram_by_grain.png` (one combined figure, like the pie grid),
   `<label>_centroid_map_panel.png` (multi-grain shared-colorbar panel; `<label>` is
   `all_grains`, the `CENTROID_PANEL_GROUPS` dict key, or the joined grain ids).
   The `spot_index` numbering figure is the exception — being a lookup aid rather
@@ -1015,8 +1045,8 @@ so they carry local functions with the identical values hand-copied in —
   (default `inputs/prepeak_fits/`); a grain without one just gets no `centroid_map`.
   A stray `*_prepeak_fits.csv` sitting directly in `inputs/` instead is reported by
   name, since it would otherwise be silently ignored
-- `ANALYSES` — `pie`, `scatter`, `box`, `map`, `centroid_map`, `spot_index`, `pca`,
-  `all`, or a list of these
+- `ANALYSES` — `pie`, `scatter`, `box`, `map`, `centroid_map`, `centroid_hist`,
+  `spot_index`, `pca`, `all`, or a list of these
 - `SCATTER_ELEMENTS` — element columns for the CL-vs-element and by-class box plots (`None` = auto-detect all)
 - `PCA_ELEMENTS`, `PCA_LOG_TRANSFORM` — element list for the PCA scatter/scree/loadings/biplot, and
   whether to log10-transform elements before z-scoring/PCA (independent of `SCATTER_ELEMENTS`)
@@ -1031,9 +1061,15 @@ so they carry local functions with the identical values hand-copied in —
   `CENTROID_RANGE_PCT` (default `(2, 98)`) percentiles of every valid centroid
   **pooled across all input grains**, so the maps stay comparable grain to grain;
   out-of-range values are clamped, not dropped
-- `CENTROID_MAX_STDERR` (default `None`) — additionally reject any fit whose
-  `fit_centroid_stderr` exceeds this (eV). A NaN stderr is always treated as a
-  failed fit regardless of this setting
+- `CENTROID_MAX_STDERR` (default `0.20` eV) — additionally reject any fit whose
+  `fit_centroid_stderr` exceeds this. A NaN stderr is always treated as a failed
+  fit regardless of this setting. The 0.20 default exists because
+  `NA-CM-G12B7-02` carries two physically impossible centroids (spot 9 at
+  7118.28 eV, ~5 eV above the pre-edge region, and spot 17 at 7113.83 eV), both
+  reporting a far larger stderr (0.35, 0.37) than any other fit in the project;
+  0.20 sits in the clean gap above the next largest (0.19). Every
+  `RH-XA-57081P-05`/`-07` fit is well under it (max stderr 0.019 and 0.098), so
+  the screen changes nothing for those grains
 - `CENTROID_PANEL_GROUPS` (default `'all'`) — which grains to tile into a combined
   shared-colorbar panel figure. `None` = per-grain maps only; `'all'` = one figure
   with every grain that has fits; `['g1','g2']` = one figure with those grains;
@@ -1043,9 +1079,17 @@ so they carry local functions with the identical values hand-copied in —
 - `CENTROID_PANEL_NCOLS` (default `None` = one row, wrapping past 4 grains),
   `CENTROID_PANEL_SIZE_IN` (largest panel's long edge, inches),
   `CENTROID_PANEL_PAD_COLOR`
-- `CENTROID_PANEL_TRUE_SCALE` (default `True`) — draw panels at true relative
-  physical size (see details above); `CENTROID_PANEL_SCALEBAR_UM` (default `200`,
-  `None` to omit)
+- `CENTROID_PANEL_TRUE_SCALE` (default `False`) — `False`: each panel fills its
+  own box, every grain legible, relative size not readable, one scale bar per
+  panel. `True`: true relative physical size, one shared scale bar (see details
+  above). `CENTROID_PANEL_SCALEBAR_UM` (default `200`, `None` to omit)
+- `CENTROID_HIST_BINS` (default `20`) / `CENTROID_HIST_RANGE` (default `None` =
+  pooled valid-centroid range) — shared bin count and energy range for the
+  `centroid_hist` summary; every grain always uses the same edges
+- `CENTROID_HIST_COLOR_BY_VALUE` (default `True` — bars colored by bin centre
+  through the maps' colormap/limits; `False` = flat house `BLUE`),
+  `CENTROID_HIST_SHOW_MEDIAN` (default `True`), `CENTROID_HIST_WIDTH_IN`,
+  `CENTROID_HIST_ROW_HEIGHT_IN`
 - `MAPS_DIR` / `CENTROID_PANEL_PIXEL_UM_FROM_SIDECAR` / `CENTROID_PANEL_PIXEL_UM` —
   per-grain µm/px for `CENTROID_PANEL_TRUE_SCALE`, read from `xrf_h5_to_tiff.py`'s
   metadata sidecar (same mechanism/regex as `xrf_display.py`), with the constant as

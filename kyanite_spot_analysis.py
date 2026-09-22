@@ -96,8 +96,8 @@ DIAGNOSTICS_DIR = _REPO_ROOT / 'figs' / 'diagnostics'
 # centroid map; the rest are skipped silently.
 PREPEAK_DIR = _REPO_ROOT / 'inputs' / 'prepeak_fits'
 
-ANALYSES = 'all'   # 'pie', 'scatter', 'box', 'map', 'centroid_map', 'spot_index',
-                   # 'pca', 'all', or a list of these
+ANALYSES = 'all'   # 'pie', 'scatter', 'box', 'map', 'centroid_map', 'centroid_hist',
+                   # 'spot_index', 'pca', 'all', or a list of these
 
 # Marker fill for the 'spot_index' diagnostic. A single neutral color on purpose:
 # that figure is a numbering key, so nothing in it should read as encoded data.
@@ -144,7 +144,13 @@ CENTROID_RANGE_PCT = (2, 98)   # robust limits; values outside are clamped, not 
 #     treated as a failed fit
 #   - CENTROID_MAX_STDERR: additionally reject any fit whose centroid stderr (eV)
 #     exceeds this; None disables that extra check
-CENTROID_MAX_STDERR = None
+# 0.20 eV: NA-CM-G12B7-02 carries two fits that are physically impossible for an Fe
+# pre-edge centroid (spot 9 at 7118.28 eV, ~5 eV above the pre-edge region, and spot
+# 17 at 7113.83 eV), and both report a far larger stderr (0.35, 0.37) than any other
+# fit in the project. 0.20 sits in the clean gap above the next largest (0.19) and
+# drops exactly those two. Every RH-XA-57081P-05/-07 fit is well under it (max
+# stderr 0.019 and 0.098), so this screen changes nothing for those grains.
+CENTROID_MAX_STDERR = 0.20
 
 # --- Multi-grain centroid panel figure ---
 # Grains cut from the same thin section are most easily compared side by side under
@@ -166,7 +172,7 @@ CENTROID_PANEL_SIZE_IN = 5.0   # display size (inches) of the largest panel's lo
 # grains from one section. Panels are padded (not stretched) to a common physical
 # window, so a smaller grain simply gets more empty margin. False: each panel fills
 # its own box instead, ignoring relative size — better when grains differ wildly.
-CENTROID_PANEL_TRUE_SCALE = True
+CENTROID_PANEL_TRUE_SCALE = False
 CENTROID_PANEL_SCALEBAR_UM = 200    # scale bar length in µm; None to omit
 CENTROID_PANEL_PAD_COLOR = 'black'  # fill behind a grain smaller than the common window;
                                     # black to blend with the CL image's own dark background
@@ -180,6 +186,23 @@ CENTROID_PANEL_PAD_COLOR = 'black'  # fill behind a grain smaller than the commo
 MAPS_DIR = _REPO_ROOT / 'inputs' / 'maps'
 CENTROID_PANEL_PIXEL_UM_FROM_SIDECAR = True
 CENTROID_PANEL_PIXEL_UM = 2.0
+
+# --- Centroid distribution summary ---
+# The continuous counterpart to the XANES class pie grid: one histogram row per
+# grain, stacked on a single shared energy axis so a shift between grains reads as
+# one vertical scan. Every grain uses identical bin edges and identical axis
+# limits — a histogram comparison is meaningless otherwise.
+CENTROID_HIST_BINS = 20
+CENTROID_HIST_RANGE = None        # (lo, hi) in eV; None = pooled valid-centroid range.
+                                   # Deliberately independent of the maps' color limits:
+                                   # those clamp outliers for display, but a histogram
+                                   # should show every value where it actually falls.
+# Color each bar by its own bin centre, through the same colormap/limits the maps
+# use, so a bar's color matches the spots at that energy. False = flat house BLUE.
+CENTROID_HIST_COLOR_BY_VALUE = True
+CENTROID_HIST_SHOW_MEDIAN = True   # per-grain median line, for comparing central tendency
+CENTROID_HIST_WIDTH_IN = 7.0
+CENTROID_HIST_ROW_HEIGHT_IN = 1.1
 
 # Filename prefix for a combined figure over every grain, matching
 # kyanite_figures.py's ALL_GRAINS_LABEL convention.
@@ -322,6 +345,11 @@ for grain_id, df in grain_frames.items():
     if fits is None:
         continue
     merged = df.merge(fits, on='spot', how='left', validate='one_to_one')
+    # A spot with no row in the fit report merges in as NaN, which makes
+    # centroid_ok object dtype — and `~` on an object Series of Python bools is
+    # integer bitwise NOT (~True == -2), not logical negation, so downstream
+    # masks silently go wrong. Coerce to a real bool dtype once, here.
+    merged['centroid_ok'] = merged['centroid_ok'].fillna(False).astype(bool)
     unmatched = sorted(set(fits['spot']) - set(df['spot']))
     if unmatched:
         print(f'  WARNING: {grain_id}: {len(unmatched)} fitted spot(s) have no row in the '
@@ -854,13 +882,18 @@ def centroid_extend(n_below, n_above):
     return 'neither'
 
 
+def format_ev_axis(axis):
+    """Absolute photon energies, so show the full value on every tick. Matplotlib's
+    default would factor out the shared ~7113 eV as a '+7.113e3' offset label,
+    leaving ticks reading '0.25', '0.30', ... which is unreadable as an energy.
+    Needed on any axis carrying centroid values — colorbar or x-axis alike."""
+    axis.set_major_formatter(FuncFormatter(lambda v, _: f'{v:.2f}'))
+
+
 def style_centroid_colorbar(cbar):
     cbar.set_label(CENTROID_CBAR_LABEL, fontsize=9)
     cbar.ax.tick_params(labelsize=8)
-    # Absolute photon energies, so show the full value on every tick. Matplotlib's
-    # default would factor out the shared ~7113 eV as a '+7.113e3' offset label,
-    # leaving ticks reading '0.25', '0.30', ... which is unreadable as an energy.
-    cbar.ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{v:.2f}'))
+    format_ev_axis(cbar.ax.yaxis)
 
 
 def centroid_legend_handles(df, n_bad):
@@ -1064,6 +1097,92 @@ def plot_centroid_panel(label, panels, vmin, vmax):
 
 
 # =============================================================================
+# ANALYSIS 6c — centroid distribution summary across grains
+#
+# The continuous counterpart to ANALYSIS 1's XANES class pie grid: where that
+# summarizes each grain's qualitative Type 1/2/3 split, this summarizes the same
+# grains' quantitative centroid distributions. One histogram row per grain on a
+# single shared energy axis, identical bin edges and axis limits throughout.
+#
+# Off-grain spots are excluded, for the same reason the pie chart excludes them:
+# this characterizes THIS grain's own Fe speciation, and an off-grain spot
+# measured some other phase. Note that this needs an explicit filter here —
+# unlike CL and the element means, a centroid comes from the XANES fit rather
+# than the XRF zone, so an off-grain spot has a perfectly real centroid and
+# would otherwise sail through into the histogram.
+# =============================================================================
+
+def centroid_hist_values(df):
+    """(on-grain valid centroids, n_off_grain_dropped, n_failed_fits) for one grain."""
+    ok = df['centroid_ok'].fillna(False)
+    on_grain = on_grain_mask(df)
+    values = df.loc[ok & on_grain, 'fit_centroid'].dropna().to_numpy()
+    return values, int((ok & ~on_grain).sum()), int((~ok).sum())
+
+
+def plot_centroid_histograms(grain_values, vmin, vmax):
+    """grain_values: ordered {grain_id: array of that grain's valid centroids}."""
+    grain_ids = list(grain_values)
+    n = len(grain_ids)
+
+    pooled = np.concatenate([v for v in grain_values.values() if len(v)])
+    if CENTROID_HIST_RANGE is not None:
+        lo, hi = CENTROID_HIST_RANGE
+    else:
+        lo, hi = float(pooled.min()), float(pooled.max())
+    if lo == hi:
+        lo, hi = lo - 0.05, hi + 0.05
+    edges = np.linspace(lo, hi, int(CENTROID_HIST_BINS) + 1)
+    centers = (edges[:-1] + edges[1:]) / 2
+    width = edges[1] - edges[0]
+
+    if CENTROID_HIST_COLOR_BY_VALUE:
+        cmap = plt.get_cmap(CENTROID_CMAP)
+        norm = Normalize(vmin=vmin, vmax=vmax)
+        bar_color = [cmap(norm(c)) for c in centers]
+    else:
+        bar_color = BLUE
+
+    fig, axes = plt.subplots(
+        n, 1, sharex=True, sharey=True, squeeze=False, layout='constrained',
+        figsize=(CENTROID_HIST_WIDTH_IN, CENTROID_HIST_ROW_HEIGHT_IN * n + 1.0))
+    axes = axes.ravel()
+
+    for ax, grain_id in zip(axes, grain_ids):
+        values = grain_values[grain_id]
+        if len(values):
+            counts = np.histogram(values, bins=edges)[0]
+            ax.bar(centers, counts / counts.sum(), width=width * 0.92,
+                   color=bar_color, edgecolor='black', linewidth=0.3)
+            if CENTROID_HIST_SHOW_MEDIAN:
+                ax.axvline(float(np.median(values)), color=ORANG, lw=1.4, zorder=4)
+        else:
+            ax.text(0.5, 0.5, 'no usable fits', ha='center', va='center',
+                    fontsize=8, color='gray', transform=ax.transAxes)
+        # Grain id as a row label rather than a per-panel title — keeps the rows
+        # tight against each other so the shared energy axis stays easy to read down.
+        ax.set_ylabel(grain_id, rotation=0, ha='right', va='center', fontsize=9)
+        ax.yaxis.set_major_locator(plt.MaxNLocator(3))
+        ax.tick_params(labelsize=8)
+        for side in ('top', 'right'):
+            ax.spines[side].set_visible(False)
+
+    axes[-1].set_xlim(lo - width / 2, hi + width / 2)
+    axes[-1].set_xlabel(CENTROID_CBAR_LABEL, fontsize=10)
+    format_ev_axis(axes[-1].xaxis)
+    fig.supylabel('Fraction of spots', fontsize=10)
+
+    if CENTROID_HIST_SHOW_MEDIAN:
+        # 'outside upper right' keeps the key clear of the suptitle; it needs the
+        # constrained layout engine this figure is built with.
+        fig.legend(handles=[plt.Line2D([0], [0], color=ORANG, lw=1.4, label='Median')],
+                   loc='outside upper right', fontsize=8, frameon=False)
+    if SHOW_TITLE:
+        fig.suptitle(f'{CENTROID_TITLE} distribution by grain', fontsize=12)
+    return fig, (lo, hi), width
+
+
+# =============================================================================
 # ANALYSIS 7 — per-grain spot-numbering diagnostic
 #
 # Just the numbering: the registered CL image with every spot plotted in one
@@ -1099,7 +1218,8 @@ def plot_spot_index_map(grain_id, df, cl_img):
 # RUN
 # =============================================================================
 
-ALL_ANALYSES = ['pie', 'scatter', 'box', 'map', 'centroid_map', 'spot_index', 'pca']
+ALL_ANALYSES = ['pie', 'scatter', 'box', 'map', 'centroid_map', 'centroid_hist',
+                'spot_index', 'pca']
 if ANALYSES == 'all':
     analyses = ALL_ANALYSES
 elif isinstance(ANALYSES, (list, tuple)):
@@ -1220,14 +1340,19 @@ if 'map' in analyses:
             fig.savefig(out, dpi=200, bbox_inches='tight')
             print(f'  Saved: {out.name}')
 
+# Shared by 'centroid_map' and 'centroid_hist' — both key their colors to the same
+# pooled scale, so it's derived once here rather than per analysis.
+centroid_grains = {g: df for g, df in grain_frames.items() if 'centroid_ok' in df.columns}
+centroid_limits = centroid_color_limits(centroid_grains) if centroid_grains else None
+NO_CENTROIDS_MSG = (f'  No grain has a usable pre-edge fit centroid '
+                    f'(looked in {PREPEAK_DIR}) — skipping.')
+
 if 'centroid_map' in analyses:
     print('\n--- pre-edge fit centroid maps ---')
-    centroid_grains = {g: df for g, df in grain_frames.items() if 'centroid_ok' in df.columns}
-    limits = centroid_color_limits(centroid_grains) if centroid_grains else None
-    if limits is None:
-        print(f'  No grain has a usable pre-edge fit centroid (looked in {PREPEAK_DIR}) — skipping.')
+    if centroid_limits is None:
+        print(NO_CENTROIDS_MSG)
     else:
-        vmin, vmax = limits
+        vmin, vmax = centroid_limits
         how = ('explicit CENTROID_VMIN/VMAX'
                if CENTROID_VMIN is not None and CENTROID_VMAX is not None
                else f'pooled {CENTROID_RANGE_PCT[0]}/{CENTROID_RANGE_PCT[1]} percentiles')
@@ -1287,6 +1412,40 @@ if 'centroid_map' in analyses:
                 out = out_dir / f'{label}_centroid_map_panel.png'
                 fig.savefig(out, dpi=200, bbox_inches='tight')
                 print(f'    Saved: {out.name}')
+
+if 'centroid_hist' in analyses:
+    print('\n--- pre-edge fit centroid distribution by grain ---')
+    if centroid_limits is None:
+        print(NO_CENTROIDS_MSG)
+    else:
+        vmin, vmax = centroid_limits
+        grain_values, skipped = {}, []
+        for grain_id in sorted(centroid_grains):
+            values, n_off, n_failed = centroid_hist_values(centroid_grains[grain_id])
+            if not len(values):
+                skipped.append(grain_id)
+                continue
+            grain_values[grain_id] = values
+            notes = []
+            if n_off:
+                notes.append(f'{n_off} off-grain excluded')
+            if n_failed:
+                notes.append(f'{n_failed} without a usable fit')
+            print(f'  {grain_id}: n={len(values)}, median {np.median(values):.3f} eV, '
+                  f'range {values.min():.3f}-{values.max():.3f} eV'
+                  + (f' ({"; ".join(notes)})' if notes else ''))
+        if skipped:
+            print(f'  WARNING: no on-grain spot with a usable fit for {skipped} — omitted.')
+        if not grain_values:
+            print('  No grain has an on-grain spot with a usable fit — skipping.')
+        else:
+            fig, (lo, hi), width = plot_centroid_histograms(grain_values, vmin, vmax)
+            print(f'  {len(grain_values)} grain(s), {CENTROID_HIST_BINS} shared bins over '
+                  f'{lo:.3f}-{hi:.3f} eV ({width * 1000:.1f} meV/bin)')
+            if SAVE_FIG:
+                out = out_dir / 'centroid_histogram_by_grain.png'
+                fig.savefig(out, dpi=200, bbox_inches='tight')
+                print(f'  Saved: {out.name}')
 
 if 'spot_index' in analyses:
     print(f'\n--- spot numbering diagnostics ({len(grain_frames)} grain(s)) ---')
