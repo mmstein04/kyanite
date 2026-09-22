@@ -23,6 +23,13 @@
 #     each spot plotted at its pixel location, colored by XANES class and
 #     labeled with its spot number — off-grain spots are shown too, marked
 #     with a distinct shape (still colored by class) rather than dropped
+#   - the same per-grain map again, but with each spot colored on a
+#     continuous scale by its Lorentzian pre-edge fit centroid (eV) — the
+#     quantitative version of the Type 1/2/3 class — read from
+#     inputs/prepeak_fits/<grain_id>_prepeak_fits.csv and joined on spot
+#     number. Only grains that have a fit report get one. The color scale is
+#     pooled across every input grain so the maps are comparable; a spot
+#     whose fit failed is drawn grey, like a 'Bad data' spot on the class map
 #   - a PCA scatter (PC1 vs PC2) over a chosen element list (PCA_ELEMENTS),
 #     pooling spots from all input grains, colored by XANES class ('Bad
 #     data' / unclassified spots ARE included, as grey points, same as the
@@ -50,16 +57,21 @@
 # read by xanes_rf_classifier.py) and live in figs/data/.
 # =============================================================================
 
+import re
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
 import tifffile
 from pathlib import Path
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
+from matplotlib.ticker import FuncFormatter
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from scipy.spatial import ConvexHull, QhullError
-from kyanite_palette import (BLUE, ORANG, GREY, CATEGORY_ORDER, element_colors as _element_colors,
+from kyanite_palette import (BLUE, ORANG, GREY, CATEGORY_ORDER, OVERLAY_CMAP,
+                              element_colors as _element_colors,
                               CATEGORY_COLORS as _SHARED_CATEGORY_COLORS)
 
 # =============================================================================
@@ -74,8 +86,22 @@ _REPO_ROOT = Path(__file__).resolve().parent
 CSV_INPUT = _REPO_ROOT / 'figs' / 'data'    # file or directory of *_spot_geochemistry.csv
 FIGS_DIR  = _REPO_ROOT / 'figs'             # where <grain_id>_CL_registered.tif live
 OUT_DIR   = _REPO_ROOT / 'figs' / 'spot_analysis'
+# Spot-numbering reference figures — a QC/lookup aid, not an analysis result, so
+# they follow the project's "diagnostics live in figs/diagnostics/" rule rather
+# than sitting alongside the analysis figures in OUT_DIR.
+DIAGNOSTICS_DIR = _REPO_ROOT / 'figs' / 'diagnostics'
 
-ANALYSES = 'all'   # 'pie', 'scatter', 'box', 'map', 'pca', 'all', or a list of these
+# Raw Lorentzian pre-edge fit reports, <grain_id>_prepeak_fits.csv, one per grain
+# (Athena/Larch "Pre-edge Peak Fit Report" export). Only grains that have one get a
+# centroid map; the rest are skipped silently.
+PREPEAK_DIR = _REPO_ROOT / 'inputs' / 'prepeak_fits'
+
+ANALYSES = 'all'   # 'pie', 'scatter', 'box', 'map', 'centroid_map', 'spot_index',
+                   # 'pca', 'all', or a list of these
+
+# Marker fill for the 'spot_index' diagnostic. A single neutral color on purpose:
+# that figure is a numbering key, so nothing in it should read as encoded data.
+SPOT_INDEX_COLOR = 'white'
 
 # Columns to make a pooled "CL vs element" scatter plot for.
 # None = auto-detect every element ROI column present in the union of all input files.
@@ -96,6 +122,69 @@ PCA_CLUSTER_CLASSES  = None   # which category_label values get an outline; None
                                # (i.e. skip 'Bad data'/unclassified — not a real class to contour)
 PCA_CLUSTER_ALPHA    = 0.12   # hull fill alpha (edge is drawn solid at full class color)
 
+# --- Pre-edge fit centroid map (the continuous analog of the Type 1/2/3 spot map) ---
+# The centroid is an absolute energy, not a signed/zero-centered quantity, so it takes
+# a sequential colormap (see CLAUDE.md "Color conventions"), not the diverging one —
+# specifically OVERLAY_CMAP ('viridis'), the project's sequential colormap for markers
+# drawn over a dark CL image, whose low end stays legible on that background.
+CENTROID_CMAP = OVERLAY_CMAP
+# Color-scale limits, in eV. None = derive from CENTROID_RANGE_PCT percentiles of every
+# valid centroid POOLED ACROSS ALL INPUT GRAINS, so one eV value is one color in every
+# grain's map and the maps are directly comparable (the same reason the XANES class
+# colors are fixed). Set explicitly to lock a scale across separate runs.
+CENTROID_VMIN = None
+CENTROID_VMAX = None
+CENTROID_RANGE_PCT = (2, 98)   # robust limits; values outside are clamped, not dropped
+                                # (the colorbar grows arrows to show clamping happened)
+
+# Fit-quality screen. A fit flagged here is drawn in GREY at its real location, exactly
+# like a 'Bad data'/unclassified spot on the XANES class map, and is excluded from the
+# color-scale percentiles above.
+#   - a NaN fit_centroid_stderr (lmfit could not estimate the uncertainty) is ALWAYS
+#     treated as a failed fit
+#   - CENTROID_MAX_STDERR: additionally reject any fit whose centroid stderr (eV)
+#     exceeds this; None disables that extra check
+CENTROID_MAX_STDERR = None
+
+# --- Multi-grain centroid panel figure ---
+# Grains cut from the same thin section are most easily compared side by side under
+# one color scale, so 'centroid_map' can additionally emit a combined multipanel
+# figure. The scale is already pooled across grains (above); this just puts the
+# panels in one figure with a single shared colorbar.
+#   None            — per-grain maps only, no combined figure
+#   'all'           — one figure holding every grain that has a fit report
+#   ['g1', 'g2']    — one figure holding just those grains
+#   [['g1','g2'], ['g3','g4']]  — one figure per sub-list
+#   {'section_A': ['g1','g2']}  — same, but naming the output file
+# Output: <label>_centroid_map_panel.png
+CENTROID_PANEL_GROUPS = 'all'
+CENTROID_PANEL_NCOLS = None    # panel columns; None = one row, wrapping past 4 grains
+CENTROID_PANEL_SIZE_IN = 5.0   # display size (inches) of the largest panel's long edge
+
+# True: every panel is drawn at the same µm per inch, using each grain's own
+# µm/px, so grains appear at their true relative size — the point of comparing
+# grains from one section. Panels are padded (not stretched) to a common physical
+# window, so a smaller grain simply gets more empty margin. False: each panel fills
+# its own box instead, ignoring relative size — better when grains differ wildly.
+CENTROID_PANEL_TRUE_SCALE = True
+CENTROID_PANEL_SCALEBAR_UM = 200    # scale bar length in µm; None to omit
+CENTROID_PANEL_PAD_COLOR = 'black'  # fill behind a grain smaller than the common window;
+                                    # black to blend with the CL image's own dark background
+
+# µm/px for CENTROID_PANEL_TRUE_SCALE. Read per grain from xrf_h5_to_tiff.py's
+# metadata sidecar (<grain_id>_<el>_Ka.txt's step_size_pos1_um), the same mechanism
+# xrf_display.py and CL_local_regression_map.py use — grains in this project are
+# imaged at different resolutions (1.0 vs 2.0 µm/px), so a single hardcoded constant
+# would silently draw them at the wrong relative size. CENTROID_PANEL_PIXEL_UM is
+# only the fallback, used with a warning, if no sidecar is found/parseable.
+MAPS_DIR = _REPO_ROOT / 'inputs' / 'maps'
+CENTROID_PANEL_PIXEL_UM_FROM_SIDECAR = True
+CENTROID_PANEL_PIXEL_UM = 2.0
+
+# Filename prefix for a combined figure over every grain, matching
+# kyanite_figures.py's ALL_GRAINS_LABEL convention.
+ALL_GRAINS_LABEL = 'all_grains'
+
 SAVE_FIG   = True
 SHOW_TITLE = True
 
@@ -114,6 +203,9 @@ METADATA_COLS = [
     'pixel_count', 'row_px_h5', 'col_px_h5', 'row_px_tiff', 'col_px_tiff',
     'row_matlab', 'col_matlab', 'x_mm', 'y_mm', 'x_rel_um', 'y_rel_um',
     'zone_radius_um', 'zone_pixel_count', 'zone_mask_px_count', 'on_grain', 'CL',
+    # merged in from <grain_id>_prepeak_fits.csv (see load_prepeak_fits) — listed here
+    # so detect_elements() doesn't mistake them for element ROI columns
+    'fit_centroid', 'fit_centroid_stderr', 'fit_r2', 'centroid_ok',
 ]
 
 SPOT_LABEL_FONTSIZE = 6
@@ -147,14 +239,111 @@ for path in csv_files:
     grain_frames[grain_id] = df
     print(f'  {grain_id}: {len(df)} spot(s)')
 
+
+# --- Lorentzian pre-edge fit centroids ------------------------------------------
+# A separate, later-arriving measurement per spot: the quantitative/continuous
+# version of the hand-assigned Type 1/2/3 pre-edge class. Joined onto the spot
+# CSVs on spot number, the same key everything else in this project joins on.
+
+def _prepeak_spot_number(dataset_name):
+    """Spot number from a fit report's 'Data Set' name, e.g.
+    'FeXAFS_57081P-Ky5-spot01.001' -> 1. The trailing '.NNN' is the scan repeat
+    suffix, not the spot, so it's stripped before taking the trailing digits —
+    after which this is the same 'spot number = trailing digits, whatever tag
+    word precedes it' rule xrf_h5_extract_spots.py uses for h5 area names."""
+    name = re.sub(r'\.\d+\s*$', '', str(dataset_name).strip())
+    match = re.search(r'(\d+)\s*$', name)
+    return int(match.group(1)) if match else None
+
+
+def load_prepeak_fits(grain_id):
+    """Parse <grain_id>_prepeak_fits.csv into a spot-indexed frame of centroid,
+    centroid stderr, R^2 and a centroid_ok fit-quality flag. Returns None if the
+    grain has no fit report."""
+    path = Path(PREPEAK_DIR) / f'{grain_id}_prepeak_fits.csv'
+    if not path.exists():
+        return None
+
+    # The report opens with a few '#' comment lines, the last of which is the real
+    # (also '#'-prefixed) header. Find it rather than assuming a fixed line count.
+    with open(path) as fh:
+        lines = fh.readlines()
+    header_idx = next((i for i, line in enumerate(lines) if re.match(r'^#\s*Data Set', line)), None)
+    if header_idx is None:
+        print(f'  WARNING: {path.name} has no "# Data Set" header line — skipping.')
+        return None
+
+    fits = pd.read_csv(path, skiprows=header_idx, skipinitialspace=True)
+    fits.columns = [c.lstrip('#').strip() for c in fits.columns]
+    missing = [c for c in ('Data Set', 'fit_centroid') if c not in fits.columns]
+    if missing:
+        print(f'  WARNING: {path.name} is missing column(s) {missing} — skipping.')
+        return None
+
+    fits['spot'] = fits['Data Set'].map(_prepeak_spot_number)
+    unparsed = int(fits['spot'].isna().sum())
+    if unparsed:
+        print(f'  WARNING: {path.name}: {unparsed} row(s) with no parseable spot number — dropped.')
+        fits = fits[fits['spot'].notna()]
+    fits['spot'] = fits['spot'].astype(int)
+
+    # Re-fitting a spot in a later session appends a second row for it rather than
+    # replacing the first; keep the last (most recent) fit of each spot.
+    n_dup = int(fits['spot'].duplicated().sum())
+    if n_dup:
+        print(f'  {path.name}: {n_dup} duplicate spot row(s) (re-fits) — keeping the last of each.')
+        fits = fits.drop_duplicates('spot', keep='last')
+
+    stderr = pd.to_numeric(fits.get('fit_centroid_stderr'), errors='coerce')
+    ok = pd.to_numeric(fits['fit_centroid'], errors='coerce').notna() & stderr.notna()
+    if CENTROID_MAX_STDERR is not None:
+        ok &= stderr <= CENTROID_MAX_STDERR
+
+    out = pd.DataFrame({
+        'spot': fits['spot'].values,
+        'fit_centroid': pd.to_numeric(fits['fit_centroid'], errors='coerce').values,
+        'fit_centroid_stderr': stderr.values,
+        'fit_r2': pd.to_numeric(fits.get('R^2'), errors='coerce').values
+                  if 'R^2' in fits.columns else np.nan,
+        'centroid_ok': ok.values,
+    })
+    return out.sort_values('spot').reset_index(drop=True)
+
+
+_stray = sorted(Path(PREPEAK_DIR).parent.glob('*_prepeak_fits.csv'))
+if _stray:
+    print(f'\nWARNING: {len(_stray)} *_prepeak_fits.csv file(s) sit directly in '
+          f'{Path(PREPEAK_DIR).parent}/ and will be ignored — move them into '
+          f'{Path(PREPEAK_DIR).name}/: {[p.name for p in _stray]}')
+
+_with_fits = []
+for grain_id, df in grain_frames.items():
+    fits = load_prepeak_fits(grain_id)
+    if fits is None:
+        continue
+    merged = df.merge(fits, on='spot', how='left', validate='one_to_one')
+    unmatched = sorted(set(fits['spot']) - set(df['spot']))
+    if unmatched:
+        print(f'  WARNING: {grain_id}: {len(unmatched)} fitted spot(s) have no row in the '
+              f'spot geochemistry CSV and are not mapped: {unmatched}')
+    grain_frames[grain_id] = merged
+    n_ok = int(merged['centroid_ok'].fillna(False).sum())
+    _with_fits.append(f'{grain_id} ({n_ok}/{len(merged)} spots fitted OK)')
+if _with_fits:
+    print(f'Pre-edge fit centroids loaded for: {", ".join(_with_fits)}')
+else:
+    print(f'No *_prepeak_fits.csv found in {PREPEAK_DIR} — centroid maps will be skipped.')
+
 # pd.concat(sort=False) over frames with differing element columns (ROI lists vary
 # per grain) produces the column union, NaN-filling rows from grains that lack a
 # given column — exactly what the pooled per-element scatter needs.
 combined = pd.concat(grain_frames.values(), ignore_index=True, sort=False)
 
 out_dir = Path(OUT_DIR)
+diagnostics_dir = Path(DIAGNOSTICS_DIR)
 if SAVE_FIG:
     out_dir.mkdir(parents=True, exist_ok=True)
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
 # =============================================================================
 # HELPERS
@@ -528,29 +717,50 @@ def best_legend_corner(df, img_shape, margin_frac=LEGEND_CORNER_MARGIN_FRAC):
     return min(counts, key=counts.get)
 
 
-def plot_spot_map(grain_id, df, cl_img):
-    fig, ax = plt.subplots(figsize=(8, 8))
-    ax.imshow(cl_img, cmap='gray', origin='upper')
+def image_extent(cl_img, scale):
+    """imshow extent for an image whose data coordinates are multiplied by `scale`
+    (1.0 = pixels, µm/px = microns). Matplotlib's default extent puts pixel CENTRES
+    on integer coordinates, which is where draw_spot plots row/col_px_tiff — so the
+    half-pixel offsets are kept here rather than using a plain (0, w, h, 0) box,
+    which would shift every spot half a pixel off its real location."""
+    nrows, ncols = cl_img.shape[:2]
+    return (-0.5 * scale, (ncols - 0.5) * scale,
+            (nrows - 0.5) * scale, -0.5 * scale)
+
+
+def draw_cl_background(ax, cl_img, scale=1.0):
+    ax.imshow(cl_img, cmap='gray', origin='upper', extent=image_extent(cl_img, scale))
     # Deliberately NO ax.invert_yaxis() here. origin='upper' already puts row 0 at
     # the top, matching row_px_tiff/col_px_tiff's "row 0 = top" convention (same as
     # MATLAB's imagesc default used in xrf_display.m). Adding invert_yaxis() would
     # silently flip every spot vertically relative to the image.
+    ax.set_aspect('equal')
+    ax.set_xticks([])
+    ax.set_yticks([])
 
-    on_grain = on_grain_mask(df)
-    for row, is_on_grain in zip(df.itertuples(), on_grain):
-        color = resolved_color(row.category_label)
-        marker = 'o' if is_on_grain else OFF_GRAIN_MARKER
-        ax.scatter(row.col_px_tiff, row.row_px_tiff, s=28, color=color, marker=marker,
-                   edgecolors='black', linewidths=0.5, zorder=3)
-        ax.annotate(str(int(row.spot)), (row.col_px_tiff, row.row_px_tiff),
+
+def draw_spot(ax, row, color, marker, scale=1.0, label=True):
+    """One spot marker at its registered pixel location, optionally labeled with
+    its spot number."""
+    x, y = row.col_px_tiff * scale, row.row_px_tiff * scale
+    ax.scatter(x, y, s=28, color=color, marker=marker,
+               edgecolors='black', linewidths=0.5, zorder=3)
+    if label:
+        ax.annotate(str(int(row.spot)), (x, y),
                     xytext=SPOT_LABEL_OFFSET, textcoords='offset points',
                     fontsize=SPOT_LABEL_FONTSIZE, color='white',
                     path_effects=[pe.withStroke(linewidth=1.5, foreground='black')],
                     zorder=4)
 
-    ax.set_aspect('equal')
-    ax.set_xticks([])
-    ax.set_yticks([])
+
+def plot_spot_map(grain_id, df, cl_img):
+    fig, ax = plt.subplots(figsize=(8, 8))
+    draw_cl_background(ax, cl_img)
+
+    for row, is_on_grain in zip(df.itertuples(), on_grain_mask(df)):
+        draw_spot(ax, row, resolved_color(row.category_label),
+                  'o' if is_on_grain else OFF_GRAIN_MARKER)
+
     handles = [plt.Line2D([0], [0], marker='o', linestyle='', markerfacecolor=CATEGORY_COLORS[c],
                           markeredgecolor='black', label=c) for c in CATEGORY_ORDER]
     handles.append(plt.Line2D([0], [0], marker='o', linestyle='', markerfacecolor=GREY,
@@ -566,10 +776,330 @@ def plot_spot_map(grain_id, df, cl_img):
 
 
 # =============================================================================
+# ANALYSIS 6 — per-grain pre-edge fit centroid map
+#
+# Same overlay as ANALYSIS 5, but each spot is colored by its Lorentzian
+# pre-edge fit centroid (eV) on a continuous scale instead of by its
+# hand-assigned Type 1/2/3 class — a quantitative measure of Fe speciation
+# rather than a qualitative one. Everything else is deliberately identical:
+# same pixel coordinates, same spot-number labels, same off-grain 'X' marker,
+# same grey for a spot with no usable value.
+# =============================================================================
+
+def centroid_color_limits(grain_frames):
+    """(vmin, vmax) in eV, from valid centroids pooled across every input grain,
+    so one energy is one color in every grain's map. Returns None if no grain has
+    a usable centroid."""
+    if CENTROID_VMIN is not None and CENTROID_VMAX is not None:
+        return CENTROID_VMIN, CENTROID_VMAX
+    pooled = pd.concat(
+        [df.loc[df['centroid_ok'].fillna(False), 'fit_centroid']
+         for df in grain_frames.values() if 'centroid_ok' in df.columns],
+        ignore_index=True) if any('centroid_ok' in df.columns for df in grain_frames.values()) \
+        else pd.Series(dtype=float)
+    pooled = pooled.dropna()
+    if pooled.empty:
+        return None
+    lo_pct, hi_pct = CENTROID_RANGE_PCT
+    vmin = CENTROID_VMIN if CENTROID_VMIN is not None else float(np.percentile(pooled, lo_pct))
+    vmax = CENTROID_VMAX if CENTROID_VMAX is not None else float(np.percentile(pooled, hi_pct))
+    if vmin == vmax:      # degenerate (one spot, or all identical) — give the bar width
+        vmin, vmax = vmin - 0.05, vmax + 0.05
+    return vmin, vmax
+
+
+# Figure text stays publication-clean: the quantity and the grain, nothing else.
+# Run metadata — how many spots were fitted, how many failed, whether the scale is
+# shared — is reported on the console (and, for the numbering, in the spot_index
+# diagnostic), not printed onto a figure that could go into a paper.
+CENTROID_CBAR_LABEL = 'Fe pre-edge fit centroid (eV)'
+CENTROID_TITLE = 'Fe pre-edge fit centroid'
+
+
+def draw_centroid_spots(ax, df, mappable, vmin, vmax, scale=1.0):
+    """Every spot of one grain, colored by fit centroid. Spots are deliberately
+    NOT labeled — the numbers crowd each other badly wherever spots cluster, and
+    they carry no information about the quantity being mapped. The 'spot_index'
+    analysis renders a separate diagnostic figure that is just the numbering, to
+    be read alongside these. Returns
+    (n_ok, n_bad, n_below, n_above) — the last two count values clamped to the
+    ends of the shared scale, so the colorbar can grow the matching arrows."""
+    ok = df['centroid_ok'].fillna(False)
+    n_bad = n_below = n_above = 0
+    for row, is_on_grain, is_ok in zip(df.itertuples(), on_grain_mask(df), ok):
+        if is_ok:
+            # Normalize clamps out-of-range values to the end colors rather than
+            # dropping them; count them so the clamping is visible on the colorbar.
+            if row.fit_centroid < vmin:
+                n_below += 1
+            elif row.fit_centroid > vmax:
+                n_above += 1
+            color = mappable.to_rgba(row.fit_centroid)
+        else:
+            color = GREY   # failed/absent fit — same grey the class map uses for 'Bad data'
+            n_bad += 1
+        draw_spot(ax, row, color, 'o' if is_on_grain else OFF_GRAIN_MARKER,
+                  scale=scale, label=False)
+    return int(ok.sum()), n_bad, n_below, n_above
+
+
+def centroid_extend(n_below, n_above):
+    """Which colorbar end(s) need an arrow, given how many values clamped where."""
+    if n_below and n_above:
+        return 'both'
+    if n_below:
+        return 'min'
+    if n_above:
+        return 'max'
+    return 'neither'
+
+
+def style_centroid_colorbar(cbar):
+    cbar.set_label(CENTROID_CBAR_LABEL, fontsize=9)
+    cbar.ax.tick_params(labelsize=8)
+    # Absolute photon energies, so show the full value on every tick. Matplotlib's
+    # default would factor out the shared ~7113 eV as a '+7.113e3' offset label,
+    # leaving ticks reading '0.25', '0.30', ... which is unreadable as an energy.
+    cbar.ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{v:.2f}'))
+
+
+def centroid_legend_handles(df, n_bad):
+    handles = []
+    if n_bad:
+        handles.append(plt.Line2D([0], [0], marker='o', linestyle='', markerfacecolor=GREY,
+                                  markeredgecolor='black', label='No usable fit'))
+    if (~on_grain_mask(df)).any():
+        handles.append(plt.Line2D([0], [0], marker=OFF_GRAIN_MARKER, linestyle='',
+                                  markerfacecolor='0.5', markeredgecolor='black',
+                                  label='Off-grain (other phase) —\ncolor = centroid still shown'))
+    return handles
+
+
+def plot_centroid_map(grain_id, df, cl_img, vmin, vmax):
+    mappable = ScalarMappable(norm=Normalize(vmin=vmin, vmax=vmax), cmap=CENTROID_CMAP)
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    draw_cl_background(ax, cl_img)
+    n_ok, n_bad, n_below, n_above = draw_centroid_spots(ax, df, mappable, vmin, vmax)
+
+    cbar = fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.02,
+                        extend=centroid_extend(n_below, n_above))
+    style_centroid_colorbar(cbar)
+
+    handles = centroid_legend_handles(df, n_bad)
+    if handles:
+        ax.legend(handles=handles, loc=best_legend_corner(df, cl_img.shape),
+                  fontsize=7, framealpha=0.7)
+
+    if SHOW_TITLE:
+        ax.set_title(f'{grain_id} — {CENTROID_TITLE}', fontsize=11)
+    plt.tight_layout()
+    return fig, n_ok, n_bad, n_below + n_above
+
+
+# =============================================================================
+# ANALYSIS 6b — multi-grain centroid panel figure
+#
+# The same maps as ANALYSIS 6, tiled into one figure under a single shared
+# colorbar, for comparing grains cut from the same thin section. The color
+# scale is already pooled across grains, so this adds no new normalization —
+# it just puts the panels side by side and draws the scale once.
+# =============================================================================
+
+# Same field and same sidecar convention xrf_display.py reads pixel size from.
+_SIDECAR_PIXEL_UM_RE = re.compile(r'step_size_pos1_um\s*:\s*([-\d.eE]+)')
+
+
+def read_pixel_um_from_sidecar(tif_path):
+    """Fast-axis (X, pos1) pixel size in microns from xrf_h5_to_tiff.py's metadata
+    sidecar for this TIFF (same base name, .txt extension). None if the sidecar is
+    missing or the field can't be parsed."""
+    sidecar = tif_path.with_suffix('.txt')
+    if not sidecar.exists():
+        return None
+    m = _SIDECAR_PIXEL_UM_RE.search(sidecar.read_text())
+    return float(m.group(1)) if m else None
+
+
+def grain_pixel_um(grain_id):
+    """(µm/px, from_sidecar) for one grain, from the first of its element maps that
+    carries a parseable sidecar. Falls back to CENTROID_PANEL_PIXEL_UM."""
+    if CENTROID_PANEL_PIXEL_UM_FROM_SIDECAR:
+        folder = Path(MAPS_DIR) / grain_id
+        if folder.is_dir():
+            for tif in sorted(folder.glob('*.tif')):
+                found = read_pixel_um_from_sidecar(tif)
+                if found:
+                    return found, True
+    return CENTROID_PANEL_PIXEL_UM, False
+
+
+def centroid_panel_groups(available):
+    """Normalize CENTROID_PANEL_GROUPS into an ordered {label: [grain_id]} dict,
+    dropping (with a warning) any grain that has no pre-edge fits."""
+    spec = CENTROID_PANEL_GROUPS
+    if spec is None:
+        return {}
+    if isinstance(spec, str):
+        if spec != 'all':
+            raise ValueError(f"CENTROID_PANEL_GROUPS={spec!r}; the only string accepted is 'all'.")
+        groups = {ALL_GRAINS_LABEL: list(available)}
+    elif isinstance(spec, dict):
+        groups = {str(k): list(v) for k, v in spec.items()}
+    else:
+        seq = list(spec)
+        if seq and all(isinstance(x, str) for x in seq):
+            seq = [seq]           # a flat list of grain ids is a single group
+        groups = {}
+        for grains in seq:
+            grains = list(grains)
+            # Join short groups for a self-describing filename; fall back to a count
+            # rather than generating an unusable 300-character name for a long one.
+            label = '_'.join(grains) if len(grains) <= 3 else f'{len(grains)}_grains'
+            groups[label] = grains
+
+    resolved = {}
+    for label, grains in groups.items():
+        keep = [g for g in grains if g in available]
+        dropped = [g for g in grains if g not in available]
+        if dropped:
+            print(f"  WARNING: panel group '{label}': no pre-edge fits for {dropped} — omitted.")
+        if len(keep) < 2:
+            print(f"  WARNING: panel group '{label}' has {len(keep)} grain(s) with fits "
+                  f"— skipping (a panel figure needs at least 2).")
+            continue
+        resolved[label] = keep
+    return resolved
+
+
+def draw_scalebar(ax, length_um, scale, cl_img, px_um):
+    """Horizontal scale bar in the lower-left of a panel. `scale` is the panel's
+    data units per pixel (µm/px in true-scale mode, 1.0 in pixel mode), so the bar
+    is length_um/px_um pixels long either way."""
+    x0, x1, y1, y0 = image_extent(cl_img, scale)
+    bar = (length_um / px_um) * scale
+    mx, my = 0.05 * (x1 - x0), 0.05 * (y1 - y0)
+    bx, by = x0 + mx, y1 - my
+    ax.plot([bx, bx + bar], [by, by], color='white', lw=2.5, solid_capstyle='butt',
+            zorder=5, path_effects=[pe.withStroke(linewidth=4.5, foreground='black')])
+    ax.text(bx + bar / 2, by - 0.012 * (y1 - y0), f'{length_um:g} µm', color='white',
+            ha='center', va='bottom', fontsize=7, zorder=5,
+            path_effects=[pe.withStroke(linewidth=1.8, foreground='black')])
+
+
+def plot_centroid_panel(label, panels, vmin, vmax):
+    """panels: list of (grain_id, df, cl_img, px_um, px_from_sidecar)."""
+    n = len(panels)
+    ncols = CENTROID_PANEL_NCOLS or min(n, 4)
+    ncols = max(1, min(int(ncols), n))
+    nrows = int(np.ceil(n / ncols))
+    mappable = ScalarMappable(norm=Normalize(vmin=vmin, vmax=vmax), cmap=CENTROID_CMAP)
+
+    # In true-scale mode every panel shows the same physical window, sized to the
+    # largest grain, so grains are drawn at their real relative size rather than
+    # each being stretched to fill its own box.
+    true_scale = CENTROID_PANEL_TRUE_SCALE
+    if true_scale:
+        win_w = max(img.shape[1] * px for _, _, img, px, _ in panels)
+        win_h = max(img.shape[0] * px for _, _, img, px, _ in panels)
+        long_edge = max(win_w, win_h)
+        panel_w = CENTROID_PANEL_SIZE_IN * win_w / long_edge
+        panel_h = CENTROID_PANEL_SIZE_IN * win_h / long_edge
+    else:
+        panel_w = panel_h = CENTROID_PANEL_SIZE_IN
+
+    fig, axes = plt.subplots(nrows, ncols, squeeze=False, layout='constrained',
+                             figsize=(ncols * panel_w + 1.6, nrows * panel_h + 0.9))
+    flat = axes.ravel()
+
+    totals = {'ok': 0, 'bad': 0, 'below': 0, 'above': 0, 'spots': 0}
+    legend_handles, seen_labels = [], set()
+    for ax, (grain_id, df, cl_img, px_um, _) in zip(flat, panels):
+        scale = px_um if true_scale else 1.0
+        ax.set_facecolor(CENTROID_PANEL_PAD_COLOR)
+        draw_cl_background(ax, cl_img, scale=scale)
+        n_ok, n_bad, n_below, n_above = draw_centroid_spots(
+            ax, df, mappable, vmin, vmax, scale=scale)
+        totals['ok'] += n_ok
+        totals['bad'] += n_bad
+        totals['below'] += n_below
+        totals['above'] += n_above
+        totals['spots'] += len(df)
+
+        if true_scale:
+            # Centre each grain in the shared window. Y limits stay inverted
+            # (row 0 at top), matching draw_cl_background's origin='upper'.
+            cx = (cl_img.shape[1] - 1) / 2 * scale
+            cy = (cl_img.shape[0] - 1) / 2 * scale
+            ax.set_xlim(cx - win_w / 2, cx + win_w / 2)
+            ax.set_ylim(cy + win_h / 2, cy - win_h / 2)
+
+        ax.set_title(grain_id, fontsize=9)
+        for handle in centroid_legend_handles(df, n_bad):
+            if handle.get_label() not in seen_labels:
+                seen_labels.add(handle.get_label())
+                legend_handles.append(handle)
+
+    if CENTROID_PANEL_SCALEBAR_UM:
+        # One bar is enough when every panel shares a scale; otherwise each panel
+        # has its own and needs its own bar.
+        bar_axes = [(flat[0], panels[0])] if true_scale else list(zip(flat, panels))
+        for ax, (_, _, cl_img, px_um, _) in bar_axes:
+            draw_scalebar(ax, CENTROID_PANEL_SCALEBAR_UM,
+                          px_um if true_scale else 1.0, cl_img, px_um)
+
+    for ax in flat[n:]:
+        ax.axis('off')
+
+    cbar = fig.colorbar(mappable, ax=axes.ravel().tolist(), fraction=0.03, pad=0.015,
+                        extend=centroid_extend(totals['below'], totals['above']))
+    style_centroid_colorbar(cbar)
+
+    if legend_handles:
+        fig.legend(handles=legend_handles, loc='lower left', fontsize=7,
+                   framealpha=0.7, ncols=len(legend_handles))
+    if SHOW_TITLE:
+        fig.suptitle(CENTROID_TITLE, fontsize=12)
+    return fig, totals
+
+
+# =============================================================================
+# ANALYSIS 7 — per-grain spot-numbering diagnostic
+#
+# Just the numbering: the registered CL image with every spot plotted in one
+# neutral color and labeled with its spot number. The centroid maps deliberately
+# leave their spots unlabeled (the numbers crowd each other wherever spots
+# cluster, and say nothing about the mapped quantity), so this is the key you
+# read alongside them to find a given spot. A QC/lookup aid rather than an
+# analysis result, so it goes to figs/diagnostics/.
+# =============================================================================
+
+def plot_spot_index_map(grain_id, df, cl_img):
+    fig, ax = plt.subplots(figsize=(8, 8))
+    draw_cl_background(ax, cl_img)
+
+    on_grain = on_grain_mask(df)
+    for row, is_on_grain in zip(df.itertuples(), on_grain):
+        draw_spot(ax, row, SPOT_INDEX_COLOR,
+                  'o' if is_on_grain else OFF_GRAIN_MARKER, label=True)
+
+    n_off = int((~on_grain).sum())
+    if n_off:
+        ax.legend(handles=[plt.Line2D([0], [0], marker=OFF_GRAIN_MARKER, linestyle='',
+                                      markerfacecolor=SPOT_INDEX_COLOR, markeredgecolor='black',
+                                      label='Off-grain (other phase)')],
+                  loc=best_legend_corner(df, cl_img.shape), fontsize=7, framealpha=0.7)
+    if SHOW_TITLE:
+        ax.set_title(f'{grain_id} — spot numbering ({len(df)} spots)', fontsize=11)
+    plt.tight_layout()
+    return fig, n_off
+
+
+# =============================================================================
 # RUN
 # =============================================================================
 
-ALL_ANALYSES = ['pie', 'scatter', 'box', 'map', 'pca']
+ALL_ANALYSES = ['pie', 'scatter', 'box', 'map', 'centroid_map', 'spot_index', 'pca']
 if ANALYSES == 'all':
     analyses = ALL_ANALYSES
 elif isinstance(ANALYSES, (list, tuple)):
@@ -687,6 +1217,88 @@ if 'map' in analyses:
         fig = plot_spot_map(grain_id, df, cl_img)
         if SAVE_FIG:
             out = out_dir / f'{grain_id}_spot_map.png'
+            fig.savefig(out, dpi=200, bbox_inches='tight')
+            print(f'  Saved: {out.name}')
+
+if 'centroid_map' in analyses:
+    print('\n--- pre-edge fit centroid maps ---')
+    centroid_grains = {g: df for g, df in grain_frames.items() if 'centroid_ok' in df.columns}
+    limits = centroid_color_limits(centroid_grains) if centroid_grains else None
+    if limits is None:
+        print(f'  No grain has a usable pre-edge fit centroid (looked in {PREPEAK_DIR}) — skipping.')
+    else:
+        vmin, vmax = limits
+        how = ('explicit CENTROID_VMIN/VMAX'
+               if CENTROID_VMIN is not None and CENTROID_VMAX is not None
+               else f'pooled {CENTROID_RANGE_PCT[0]}/{CENTROID_RANGE_PCT[1]} percentiles')
+        print(f'  Shared color scale across {len(centroid_grains)} grain(s): '
+              f'{vmin:.3f}-{vmax:.3f} eV ({how})')
+        for grain_id, df in centroid_grains.items():
+            cl_img = load_cl_background(grain_id)
+            if cl_img is None:
+                continue
+            fig, n_ok, n_bad, n_clamped = plot_centroid_map(grain_id, df, cl_img, vmin, vmax)
+            notes = []
+            if n_bad:
+                notes.append(f'{n_bad} without a usable fit (grey)')
+            if n_clamped:
+                notes.append(f'{n_clamped} clamped to the scale ends')
+            print(f'  {grain_id}: {n_ok}/{len(df)} spot(s) colored by centroid'
+                  + (f'; {", ".join(notes)}' if notes else ''))
+            if SAVE_FIG:
+                out = out_dir / f'{grain_id}_centroid_map.png'
+                fig.savefig(out, dpi=200, bbox_inches='tight')
+                print(f'  Saved: {out.name}')
+
+        groups = centroid_panel_groups(list(centroid_grains))
+        for label, grain_ids in groups.items():
+            panels = []
+            for grain_id in grain_ids:
+                cl_img = load_cl_background(grain_id)
+                if cl_img is None:
+                    continue
+                px_um, from_sidecar = grain_pixel_um(grain_id)
+                panels.append((grain_id, centroid_grains[grain_id], cl_img, px_um, from_sidecar))
+            if len(panels) < 2:
+                print(f"  WARNING: panel group '{label}': fewer than 2 grains have a "
+                      f'registered CL image — skipping.')
+                continue
+
+            if CENTROID_PANEL_TRUE_SCALE:
+                no_sidecar = [g for g, _, _, _, ok in panels if not ok]
+                if no_sidecar:
+                    print(f'  WARNING: no metadata sidecar found/parseable for {no_sidecar} — '
+                          f'falling back to CENTROID_PANEL_PIXEL_UM='
+                          f'{CENTROID_PANEL_PIXEL_UM:.4g} µm/px for those, so relative panel '
+                          f'sizes may be wrong.')
+                sizes = {g: px for g, _, _, px, _ in panels}
+                print(f'  Panel group \'{label}\': {len(panels)} grain(s) at true relative '
+                      f'scale, µm/px = ' + ', '.join(f'{g} {px:.4g}' for g, px in sizes.items()))
+            else:
+                print(f"  Panel group '{label}': {len(panels)} grain(s), each panel scaled "
+                      f'to its own box (not comparable in size)')
+
+            fig, totals = plot_centroid_panel(label, panels, vmin, vmax)
+            print(f"    {totals['ok']}/{totals['spots']} spot(s) colored by centroid"
+                  + (f"; {totals['bad']} without a usable fit (grey)" if totals['bad'] else '')
+                  + (f"; {totals['below'] + totals['above']} clamped to the scale ends"
+                     if totals['below'] + totals['above'] else ''))
+            if SAVE_FIG:
+                out = out_dir / f'{label}_centroid_map_panel.png'
+                fig.savefig(out, dpi=200, bbox_inches='tight')
+                print(f'    Saved: {out.name}')
+
+if 'spot_index' in analyses:
+    print(f'\n--- spot numbering diagnostics ({len(grain_frames)} grain(s)) ---')
+    for grain_id, df in grain_frames.items():
+        cl_img = load_cl_background(grain_id)
+        if cl_img is None:
+            continue
+        fig, n_off = plot_spot_index_map(grain_id, df, cl_img)
+        print(f'  {grain_id}: {len(df)} spot(s) labeled'
+              + (f' ({n_off} off-grain)' if n_off else ''))
+        if SAVE_FIG:
+            out = diagnostics_dir / f'{grain_id}_spot_index_map.png'
             fig.savefig(out, dpi=200, bbox_inches='tight')
             print(f'  Saved: {out.name}')
 

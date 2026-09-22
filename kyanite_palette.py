@@ -95,5 +95,15 @@ GREY = '#999999'
 # colors, since MATLAB can't import it directly). SEQUENTIAL_CMAP is for
 # continuous-intensity roles (KDE density, SHAP magnitude, dependence-plot
 # coloring).
+#
+# OVERLAY_CMAP is a third, deliberate exception: a sequential colormap for
+# continuous values drawn as MARKERS ON TOP OF a dark CL image, rather than as
+# an image in their own right. SEQUENTIAL_CMAP ('inferno') runs to near-black
+# at its low end, which disappears against dark CL; viridis's low end is a dark
+# blue-green that stays legible on that background without needing a halo or
+# outline around every marker. Anything rendered as its own raster still uses
+# SEQUENTIAL_CMAP — this is only for the markers-over-CL case (currently
+# kyanite_spot_analysis.py's pre-edge fit centroid maps).
 DIVERGING_CMAP  = 'RdBu_r'
 SEQUENTIAL_CMAP = 'inferno'
+OVERLAY_CMAP    = 'viridis'

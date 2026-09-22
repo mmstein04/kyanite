@@ -32,7 +32,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | `kyanite_rf_shap.py` | Python | Cross-validated Random Forest regression and TreeSHAP importance/interactions of CL vs. trace elements from whole-grain CSV pixel data; fits models and exports CSVs only, no figures — region CSVs are skipped by default, too computationally expensive to run per region (`ANALYZE_REGIONS=True` opts in; region-level analysis is otherwise `kyanite_pca.py`'s cheap pooled region-PCA) |
 | `kyanite_rf_shap_plots.py` | Python | Figure generation from `kyanite_rf_shap.py`'s CSV outputs (observed-vs-predicted, permutation/SHAP importance, SHAP interactions, SHAP dependence) — decoupled from model fitting so a figure can be regenerated or restyled without retraining |
 | `kyanite_sample_size_convergence.py` | Python | Diagnostic: sweeps RF/SHAP over a range of pixel subsample sizes for one grain to check whether importance estimates have converged below `kyanite_rf_shap.py`'s `MAX_SAMPLES`/`SHAP_SAMPLES`, or would still change with more data |
-| `kyanite_spot_analysis.py` | Python | Batch analysis of `<grain_id>_spot_geochemistry.csv` files: XANES class distribution pie-chart grid, pooled CL-vs-element scatter plots colored by class, element-by-class box plots, PCA (PC1/PC2 scatter, scree, loadings, biplot) colored by class, and per-grain labeled spot-location maps on the registered CL image |
+| `kyanite_spot_analysis.py` | Python | Batch analysis of `<grain_id>_spot_geochemistry.csv` files: XANES class distribution pie-chart grid, pooled CL-vs-element scatter plots colored by class, element-by-class box plots, PCA (PC1/PC2 scatter, scree, loadings, biplot) colored by class, per-grain labeled spot-location maps on the registered CL image, and the same maps colored instead by Lorentzian pre-edge **fit centroid** (the continuous analog of the Type 1/2/3 class) |
 | `xanes_rf_classifier.py` | Python | Cross-validated Random Forest classification of XANES pre-edge class (Type 1/2/3) from per-spot trace-element geochemistry, pooled across grains — the classification analog of `kyanite_rf_shap.py` |
 | `xrf_display.py` | Python | Visualize XRF element-map TIFFs with grain mask overlay and optional element-ratio maps, using this project's shared `SEQUENTIAL_CMAP` and MAD outlier conventions for the display range |
 | `sum_epma_maps.py` | Python | Sum two or more element maps into a combined TIFF (e.g. Zr_La + Zr_Lb) |
@@ -235,7 +235,84 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   PC1-vs-PC2 biplot with loading vectors — all colored by XANES class the same way
   as `scatter` — `'Bad data'`/unclassified spots ARE included as grey points;
   spots missing any `PCA_ELEMENTS` value are dropped, which — same as `scatter` —
-  already excludes off-grain spots without any separate filtering)
+  already excludes off-grain spots without any separate filtering),
+  `centroid_map` (per-grain spot map on the same pixel coordinates as `map`, with
+  the same off-grain `'X'` marker, but each spot colored on a continuous colormap
+  by its Lorentzian pre-edge **fit centroid** in eV — the quantitative/continuous
+  measure of Fe speciation — rather than by its hand-assigned Type 1/2/3 class;
+  plus, optionally, a combined multipanel figure tiling several grains under a
+  single shared colorbar, for comparing grains cut from the same thin section.
+  Unlike `map`, spots here are **not labeled**: the numbers crowd each other
+  wherever spots cluster and say nothing about the mapped quantity, so the
+  numbering lives in its own `spot_index` diagnostic instead),
+  `spot_index` (per-grain diagnostic: the registered CL image with every spot in
+  one neutral color — `SPOT_INDEX_COLOR`, deliberately uniform so nothing in the
+  figure reads as encoded data — labeled with its spot number, and nothing else.
+  A numbering key to read alongside the unlabeled centroid figures, so it's a
+  QC/lookup aid rather than an analysis result and goes to `figs/diagnostics/`
+  (`DIAGNOSTICS_DIR`), not `OUT_DIR`. Off-grain spots keep the `'X'` marker. The
+  `map` analysis's own class-colored spot map keeps its labels — only the centroid
+  figures dropped them)
+- **Pre-edge fit centroids** are a separate, later-arriving per-spot measurement,
+  read from `inputs/prepeak_fits/<grain_id>_prepeak_fits.csv` (`PREPEAK_DIR`) — the
+  raw Larch/Athena "Pre-edge Peak Fit Report" export, unmodified. Only grains that
+  have one get a `centroid_map`; the rest are skipped silently (no warning — most
+  grains legitimately have no fits yet). Parsing/joining notes:
+  - The report's real header is itself a `#`-prefixed line (`# Data Set, ...`),
+    found by pattern rather than by a fixed skiprows count, and **column order
+    differs between exports** (e.g. `-05` writes `bpoly`/`bpeak` before
+    `loren1`/`loren2`, `-07` the reverse), so everything is read by column name
+  - Spot number comes from the `Data Set` name's trailing digits *after* stripping
+    the trailing `.NNN` scan-repeat suffix (`FeXAFS_57081P-Ky5-spot01.001` -> 1) —
+    otherwise the repeat suffix would be read as the spot number. Same "trailing
+    digits, whatever tag word precedes them" rule `xrf_h5_extract_spots.py` uses
+    for h5 area names, and the same key everything else in this project joins on
+  - Re-fitting a spot in a later session **appends** a second row for it rather
+    than replacing the first (all 60 of `RH-XA-57081P-07`'s spots but one are
+    duplicated this way, values identical to ~1e-7); the last row per spot number
+    wins, with a count printed
+  - Merged onto the grain's spot frame as `fit_centroid`, `fit_centroid_stderr`,
+    `fit_r2`, `centroid_ok` — all four listed in `METADATA_COLS` so
+    `detect_elements()` can't mistake them for element ROI columns
+  - A fit is flagged `centroid_ok = False` (and drawn GREY, exactly like a
+    `'Bad data'`/unclassified spot on the class map) when `fit_centroid_stderr` is
+    NaN — lmfit could not estimate the uncertainty, which in practice marks a
+    failed fit — or, if `CENTROID_MAX_STDERR` is set, when the stderr exceeds it.
+    This is what keeps `RH-XA-57081P-07` spot 19 (centroid 7111.66 eV, ~1.6 eV
+    below every other spot, NaN stderr) from blowing out the shared color scale
+  - The color scale is derived **pooled across every input grain** (default: 2nd/98th
+    percentile of all valid centroids), not per grain, so one energy is one color in
+    every grain's map — the same cross-grain comparability rule the fixed XANES class
+    colors serve. Values outside the range are clamped rather than dropped, and the
+    colorbar grows `extend` arrows to show it happened
+  - Colorbar ticks are forced to full absolute energies; matplotlib's default would
+    factor out the shared ~7113 eV as a `+7.113e3` offset and label ticks `0.25`,
+    `0.30`, ... which is unreadable as an energy
+- **Multi-grain centroid panel** (`CENTROID_PANEL_GROUPS`, part of the same
+  `centroid_map` analysis): tiles several grains' centroid maps into one figure
+  under a single shared colorbar — `<label>_centroid_map_panel.png` — for comparing
+  grains cut from the same thin section. Since the color scale was already pooled
+  across grains, this adds no new normalization; it just draws the panels together
+  and the scale once. Notes:
+  - `CENTROID_PANEL_TRUE_SCALE` (default `True`) draws every panel at the same
+    µm per inch, using each grain's own µm/px from the metadata sidecar, so grains
+    appear at their **true relative size** — registered CL images differ in pixel
+    dimensions (e.g. 701² vs. 501² for `RH-XA-57081P-05`/`-07`) *and* grains in this
+    project are imaged at different µm/px (1.0 vs. 2.0), so neither pixel count
+    alone nor a single hardcoded µm/px would scale the panels honestly. Panels are
+    **padded** to a common physical window (`CENTROID_PANEL_PAD_COLOR`, black to
+    blend with the CL background), never stretched. `False` gives each panel its own
+    box instead, for grains too different in size to tile usefully
+  - `draw_scalebar` draws one bar on the first panel in true-scale mode (all panels
+    share a scale, so more would be redundant) and one per panel otherwise
+  - A group is skipped with a warning if fewer than 2 of its grains have fits or a
+    registered CL image; grains named in a group but lacking fits are dropped from
+    it with a warning listing them
+  - `image_extent()` scales the imshow extent while preserving matplotlib's
+    half-pixel offsets (pixel *centres* on integer coordinates, which is where
+    `draw_spot` plots `row`/`col_px_tiff`) — a plain `(0, w, h, 0)` box would shift
+    every spot half a pixel off its real location. At `scale=1.0` it reproduces
+    matplotlib's default extent exactly, so the single-grain maps are unchanged
 - `on_grain` (written by `xrf_h5_extract_spots.py`): `False` means the spot's CL/
   element means are `NaN` because it sampled a different phase, not kyanite — its
   `category_label` (XANES pre-edge class / oxidation state) stays intact and
@@ -280,7 +357,9 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   alternative `mask_image_file` for `CL_EPMA_registration.m`),
   `inputs/xanes/<grain_id>_spotNN.csv` (raw per-spot XANES spectra),
   `inputs/xanes_classification/<grain_id>_pre_edge_classification.csv` (hand-assigned
-  pre-edge class labels). `inputs/maps/<grain_id>/*.tif` is the one exception —
+  pre-edge class labels), `inputs/prepeak_fits/<grain_id>_prepeak_fits.csv` (raw
+  Larch/Athena "Pre-edge Peak Fit Report" export — Lorentzian pre-edge fit parameters
+  per spot, including `fit_centroid` in eV). `inputs/maps/<grain_id>/*.tif` is the one exception —
   it's generated by `xrf_h5_to_tiff.py` from `inputs/xrf/`, not raw — but every
   downstream script (`CL_EPMA_registration.m` and friends) only ever reads it as
   `epma_dir`, never writes to it, so it lives alongside the rest of `inputs/`
@@ -310,6 +389,11 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `figs/diagnostics/` (`DIAGNOSTICS_DIR`) even though their figures/CSVs go
   elsewhere (`figs/pca/`+`figs/regions/`, `figs/data/`, and
   `figs/spot_analysis/`+`figs/data/`, respectively).
+  `kyanite_spot_analysis.py` follows the same split for one figure rather than a
+  log: its `spot_index` spot-numbering key (`<grain_id>_spot_index_map.png`) is a
+  lookup aid, not an analysis result, so it goes to `figs/diagnostics/`
+  (`DIAGNOSTICS_DIR`) while the rest of that script's figures go to
+  `figs/spot_analysis/`.
   `kyanite_figures.py`'s own outlier-exclusion
   QC (see its Key Parameters entry) follows the same idea: `<grain_id>_<element>_
   outlier_exclusion_QC.png` in `figs/diagnostics/`, not alongside its analysis figures
@@ -392,7 +476,12 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 - Spot analysis figures saved to `figs/spot_analysis/`: `xanes_class_pie_grid.png`,
   `CL_vs_<element>_scatter.png`, `<element>_by_class_boxplot.png`,
   `pca_pc1_pc2_scatter.png`, `pca_scree.png`, `pca_loadings_pc1_pc2.png`,
-  `pca_biplot.png`, `<grain_id>_spot_map.png`
+  `pca_biplot.png`, `<grain_id>_spot_map.png`, `<grain_id>_centroid_map.png`,
+  `<label>_centroid_map_panel.png` (multi-grain shared-colorbar panel; `<label>` is
+  `all_grains`, the `CENTROID_PANEL_GROUPS` dict key, or the joined grain ids).
+  The `spot_index` numbering figure is the exception — being a lookup aid rather
+  than an analysis result, `<grain_id>_spot_index_map.png` goes to
+  `figs/diagnostics/` (`DIAGNOSTICS_DIR`) instead
 - XANES pre-edge classification figures saved to `figs/xanes/` (`xanes_plot.py`):
   `<grain_id>_pre_edge_grid.png`, `<grain_id>_pre_edge_overlay.png`, `<grain_id>_xanes_overlay.png`
 - XANES RF classifier outputs (`xanes_rf_classifier.py`, all prefixed with
@@ -413,6 +502,18 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `dataset_manifest.yaml` (or any name — set in `onboard_dataset.py`'s `MANIFEST_FILE`)
 - Onboarding audit log: `inputs/<grain_id>_onboarding_log.txt` (written by `onboard_dataset.py`,
   only on a non-dry-run execution)
+
+## Figure text conventions
+Figures from this project are made to be publishable, so their on-image text stays
+limited to the quantity and the sample identity. Keep OUT of titles, axis labels
+and colorbar labels: spot/pixel counts ("48/48 spots fitted"), how many grains a
+panel holds, whether a color scale is shared, and interpretive glosses on the axis
+("lower = more reduced"). That information is reported on the console during the
+run, or belongs in a figure caption the author writes — not baked into the image.
+Default to `<sample id> — <quantity>` for a title and `<quantity> (<unit>)` for a
+colorbar/axis label. Figures that are explicitly diagnostics (anything in
+`figs/diagnostics/`, e.g. `kyanite_spot_analysis.py`'s `spot_index` numbering key)
+are exempt — counts and run state are the point there.
 
 ## Color conventions
 One canonical spec per color role, so the same category/element/quantity
@@ -493,6 +594,17 @@ so they carry local functions with the identical values hand-copied in —
   `heatmap`), SHAP interaction magnitude and dependence-plot coloring
   (`kyanite_rf_shap_plots.py`), `xrf_display.py`'s element/ratio map display
   range, and `CL_local_regression_map.py`'s window-coverage (n) map.
+- **Overlay colormap** (`kyanite_palette.OVERLAY_CMAP = 'viridis'`) — a second
+  sequential colormap, for a continuous quantity drawn as **markers on top of a
+  dark CL image** rather than as a raster in its own right. `SEQUENTIAL_CMAP`
+  ('inferno') runs to near-black at its low end, which disappears against dark
+  CL; viridis's low end is a dark blue-green that stays legible there without
+  needing a halo or extra outline on every marker. Anything rendered as its own
+  raster still uses `SEQUENTIAL_CMAP` — this is only the markers-over-CL case,
+  currently just `kyanite_spot_analysis.py`'s pre-edge fit centroid maps
+  (`CENTROID_CMAP`). (The centroid is an absolute energy, not a signed or
+  zero-centered quantity, so it takes a sequential colormap rather than
+  `DIVERGING_CMAP`.)
 
 ## Key parameters (set per-grain at top of each script)
 
@@ -895,13 +1007,49 @@ so they carry local functions with the identical values hand-copied in —
 - `CSV_INPUT` — file/directory of `*_spot_geochemistry.csv` (defaults to `figs/data/`,
   where `xrf_h5_extract_spots.py` writes it as reusable data)
 - `FIGS_DIR`, `OUT_DIR` — where to find `<grain_id>_CL_registered.tif` / save figures
-- `ANALYSES` — `pie`, `scatter`, `box`, `map`, `pca`, `all`, or a list of these
+- `DIAGNOSTICS_DIR` — where the `spot_index` numbering figures go (default
+  `figs/diagnostics/`), independent of `OUT_DIR`; they're a lookup aid, not an
+  analysis result, so they follow the same rule as every other diagnostic here
+- `SPOT_INDEX_COLOR` — single neutral marker fill for the `spot_index` figure
+- `PREPEAK_DIR` — folder of raw `<grain_id>_prepeak_fits.csv` pre-edge fit reports
+  (default `inputs/prepeak_fits/`); a grain without one just gets no `centroid_map`.
+  A stray `*_prepeak_fits.csv` sitting directly in `inputs/` instead is reported by
+  name, since it would otherwise be silently ignored
+- `ANALYSES` — `pie`, `scatter`, `box`, `map`, `centroid_map`, `spot_index`, `pca`,
+  `all`, or a list of these
 - `SCATTER_ELEMENTS` — element columns for the CL-vs-element and by-class box plots (`None` = auto-detect all)
 - `PCA_ELEMENTS`, `PCA_LOG_TRANSFORM` — element list for the PCA scatter/scree/loadings/biplot, and
   whether to log10-transform elements before z-scoring/PCA (independent of `SCATTER_ELEMENTS`)
 - `PCA_N_PCS_SCREE`, `PCA_LOADING_THRESHOLD` — how many PCs the scree plot shows (`None` = all), and
   the `|loading|` cutoff highlighted on the PC1/PC2 loadings bars
 - `CATEGORY_ORDER` / `CATEGORY_COLORS` — fixed XANES class order/coloring, shared across all figures
+- `CENTROID_CMAP` — colormap for the `centroid_map` overlay; defaults to
+  `kyanite_palette.SEQUENTIAL_CMAP` (`'inferno'`), since the fit centroid is an
+  absolute energy, not a signed/zero-centered quantity
+- `CENTROID_VMIN`/`CENTROID_VMAX` (default `None` both) — explicit eV color-scale
+  limits, e.g. to lock one scale across separate runs. `None` derives them from
+  `CENTROID_RANGE_PCT` (default `(2, 98)`) percentiles of every valid centroid
+  **pooled across all input grains**, so the maps stay comparable grain to grain;
+  out-of-range values are clamped, not dropped
+- `CENTROID_MAX_STDERR` (default `None`) — additionally reject any fit whose
+  `fit_centroid_stderr` exceeds this (eV). A NaN stderr is always treated as a
+  failed fit regardless of this setting
+- `CENTROID_PANEL_GROUPS` (default `'all'`) — which grains to tile into a combined
+  shared-colorbar panel figure. `None` = per-grain maps only; `'all'` = one figure
+  with every grain that has fits; `['g1','g2']` = one figure with those grains;
+  `[['g1','g2'],['g3','g4']]` = one figure per sub-list; `{'label': ['g1','g2']}` =
+  same, naming the output file. Auto-labels join the grain ids for groups of ≤3,
+  else `<n>_grains`
+- `CENTROID_PANEL_NCOLS` (default `None` = one row, wrapping past 4 grains),
+  `CENTROID_PANEL_SIZE_IN` (largest panel's long edge, inches),
+  `CENTROID_PANEL_PAD_COLOR`
+- `CENTROID_PANEL_TRUE_SCALE` (default `True`) — draw panels at true relative
+  physical size (see details above); `CENTROID_PANEL_SCALEBAR_UM` (default `200`,
+  `None` to omit)
+- `MAPS_DIR` / `CENTROID_PANEL_PIXEL_UM_FROM_SIDECAR` / `CENTROID_PANEL_PIXEL_UM` —
+  per-grain µm/px for `CENTROID_PANEL_TRUE_SCALE`, read from `xrf_h5_to_tiff.py`'s
+  metadata sidecar (same mechanism/regex as `xrf_display.py`), with the constant as
+  a warned fallback
 
 **`xanes_rf_classifier.py`**
 - `CSV_INPUT` — file/directory of `*_spot_geochemistry.csv` (defaults to `figs/data/`, same as `kyanite_spot_analysis.py`)
