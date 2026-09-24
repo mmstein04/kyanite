@@ -13,6 +13,10 @@
 #   from kyanite_palette import BLUE, ORANG, element_colors, region_colors
 # =============================================================================
 
+import numpy as _np
+from matplotlib import colormaps as _mpl_colormaps
+from matplotlib.colors import ListedColormap as _ListedColormap
+
 # --- House palette -----------------------------------------------------------
 # General-purpose roles reused across whole-grain/region figures: BLUE for the
 # main data cloud/bar, ORANG for a fit line, highlight, or "above threshold"
@@ -99,11 +103,17 @@ GREY = '#999999'
 # OVERLAY_CMAP is a third, deliberate exception: a sequential colormap for
 # continuous values drawn as MARKERS ON TOP OF a dark CL image, rather than as
 # an image in their own right. SEQUENTIAL_CMAP ('inferno') runs to near-black
-# at its low end, which disappears against dark CL; viridis's low end is a dark
-# blue-green that stays legible on that background without needing a halo or
-# outline around every marker. Anything rendered as its own raster still uses
-# SEQUENTIAL_CMAP — this is only for the markers-over-CL case (currently
+# at its low end, which disappears against dark CL. OVERLAY_CMAP is viridis with
+# its dark purple low end cut off (OVERLAY_CMAP_RANGE of the full 0-1 range): it
+# starts at a mid blue (L* ~39, vs. ~15 for viridis's own #440154) and runs
+# through green to yellow, so even the lowest value stays clearly visible on dark
+# CL without a halo or outline around every marker. Still perceptually uniform,
+# just over a shorter lightness span. Anything rendered as its own raster still
+# uses SEQUENTIAL_CMAP — this is only for the markers-over-CL case (currently
 # kyanite_spot_analysis.py's pre-edge fit centroid maps).
 DIVERGING_CMAP  = 'RdBu_r'
 SEQUENTIAL_CMAP = 'inferno'
-OVERLAY_CMAP    = 'viridis'
+OVERLAY_CMAP_RANGE = (0.3, 1.0)
+OVERLAY_CMAP = _ListedColormap(
+    _mpl_colormaps['viridis'](_np.linspace(*OVERLAY_CMAP_RANGE, 256)),
+    name='viridis_light')

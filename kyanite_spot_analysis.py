@@ -125,9 +125,13 @@ PCA_CLUSTER_ALPHA    = 0.12   # hull fill alpha (edge is drawn solid at full cla
 # --- Pre-edge fit centroid map (the continuous analog of the Type 1/2/3 spot map) ---
 # The centroid is an absolute energy, not a signed/zero-centered quantity, so it takes
 # a sequential colormap (see CLAUDE.md "Color conventions"), not the diverging one —
-# specifically OVERLAY_CMAP ('viridis'), the project's sequential colormap for markers
-# drawn over a dark CL image, whose low end stays legible on that background.
+# specifically OVERLAY_CMAP (viridis with its dark purple low end trimmed off), the
+# project's sequential colormap for markers drawn over a dark CL image, whose low end
+# stays legible on that background.
 CENTROID_CMAP = OVERLAY_CMAP
+# Marker area (points^2) for centroid-map spots. Larger than the class map's default
+# (SPOT_SIZE) since here the fill color IS the data, and it has to read at a glance.
+CENTROID_SPOT_SIZE = 70
 # Color-scale limits, in eV. None = derive from CENTROID_RANGE_PCT percentiles of every
 # valid centroid POOLED ACROSS ALL INPUT GRAINS, so one eV value is one color in every
 # grain's map and the maps are directly comparable (the same reason the XANES class
@@ -231,6 +235,7 @@ METADATA_COLS = [
     'fit_centroid', 'fit_centroid_stderr', 'fit_r2', 'centroid_ok',
 ]
 
+SPOT_SIZE           = 28       # marker area (points^2) for class/spot-index maps
 SPOT_LABEL_FONTSIZE = 6
 SPOT_LABEL_OFFSET   = (4, 4)   # points
 
@@ -767,11 +772,11 @@ def draw_cl_background(ax, cl_img, scale=1.0):
     ax.set_yticks([])
 
 
-def draw_spot(ax, row, color, marker, scale=1.0, label=True):
+def draw_spot(ax, row, color, marker, scale=1.0, label=True, size=None):
     """One spot marker at its registered pixel location, optionally labeled with
     its spot number."""
     x, y = row.col_px_tiff * scale, row.row_px_tiff * scale
-    ax.scatter(x, y, s=28, color=color, marker=marker,
+    ax.scatter(x, y, s=SPOT_SIZE if size is None else size, color=color, marker=marker,
                edgecolors='black', linewidths=0.5, zorder=3)
     if label:
         ax.annotate(str(int(row.spot)), (x, y),
@@ -867,7 +872,7 @@ def draw_centroid_spots(ax, df, mappable, vmin, vmax, scale=1.0):
             color = GREY   # failed/absent fit — same grey the class map uses for 'Bad data'
             n_bad += 1
         draw_spot(ax, row, color, 'o' if is_on_grain else OFF_GRAIN_MARKER,
-                  scale=scale, label=False)
+                  scale=scale, label=False, size=CENTROID_SPOT_SIZE)
     return int(ok.sum()), n_bad, n_below, n_above
 
 

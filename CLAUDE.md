@@ -624,12 +624,14 @@ so they carry local functions with the identical values hand-copied in —
   `heatmap`), SHAP interaction magnitude and dependence-plot coloring
   (`kyanite_rf_shap_plots.py`), `xrf_display.py`'s element/ratio map display
   range, and `CL_local_regression_map.py`'s window-coverage (n) map.
-- **Overlay colormap** (`kyanite_palette.OVERLAY_CMAP = 'viridis'`) — a second
+- **Overlay colormap** (`kyanite_palette.OVERLAY_CMAP` — viridis truncated to
+  `OVERLAY_CMAP_RANGE = (0.3, 1.0)`, i.e. blue → green → yellow) — a second
   sequential colormap, for a continuous quantity drawn as **markers on top of a
   dark CL image** rather than as a raster in its own right. `SEQUENTIAL_CMAP`
   ('inferno') runs to near-black at its low end, which disappears against dark
-  CL; viridis's low end is a dark blue-green that stays legible there without
-  needing a halo or extra outline on every marker. Anything rendered as its own
+  CL — and so does full viridis's dark purple low end (`#440154`, L* ~15), so
+  that end is cut off: the trimmed map starts at a mid blue (L* ~39) and every
+  value stays legible without a halo or extra outline on every marker. Anything rendered as its own
   raster still uses `SEQUENTIAL_CMAP` — this is only the markers-over-CL case,
   currently just `kyanite_spot_analysis.py`'s pre-edge fit centroid maps
   (`CENTROID_CMAP`). (The centroid is an absolute energy, not a signed or
@@ -1054,8 +1056,11 @@ so they carry local functions with the identical values hand-copied in —
   the `|loading|` cutoff highlighted on the PC1/PC2 loadings bars
 - `CATEGORY_ORDER` / `CATEGORY_COLORS` — fixed XANES class order/coloring, shared across all figures
 - `CENTROID_CMAP` — colormap for the `centroid_map` overlay; defaults to
-  `kyanite_palette.SEQUENTIAL_CMAP` (`'inferno'`), since the fit centroid is an
-  absolute energy, not a signed/zero-centered quantity
+  `kyanite_palette.OVERLAY_CMAP` (trimmed viridis), since the fit centroid is an
+  absolute energy, not a signed/zero-centered quantity, drawn as markers over CL
+- `CENTROID_SPOT_SIZE` (default `70`, points²) — marker area on the centroid maps,
+  larger than the class/spot-index maps' `SPOT_SIZE` (`28`) since there the fill
+  color is the data
 - `CENTROID_VMIN`/`CENTROID_VMAX` (default `None` both) — explicit eV color-scale
   limits, e.g. to lock one scale across separate runs. `None` derives them from
   `CENTROID_RANGE_PCT` (default `(2, 98)`) percentiles of every valid centroid
