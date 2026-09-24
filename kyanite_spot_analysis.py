@@ -97,7 +97,7 @@ DIAGNOSTICS_DIR = _REPO_ROOT / 'figs' / 'diagnostics'
 PREPEAK_DIR = _REPO_ROOT / 'inputs' / 'prepeak_fits'
 
 ANALYSES = 'all'   # 'pie', 'scatter', 'box', 'map', 'centroid_map', 'centroid_hist',
-                   # 'spot_index', 'pca', 'all', or a list of these
+                   # 'centroid_rank', 'spot_index', 'pca', 'all', or a list of these
 
 # Marker fill for the 'spot_index' diagnostic. A single neutral color on purpose:
 # that figure is a numbering key, so nothing in it should read as encoded data.
@@ -207,6 +207,19 @@ CENTROID_HIST_COLOR_BY_VALUE = True
 CENTROID_HIST_SHOW_MEDIAN = True   # per-grain median line, for comparing central tendency
 CENTROID_HIST_WIDTH_IN = 7.0
 CENTROID_HIST_ROW_HEIGHT_IN = 1.1
+
+# --- Ranked centroid plot (per grain) ---
+# Each grain's spots sorted lowest -> highest fit centroid, rank on x, centroid on y,
+# with the fit's own centroid uncertainty as error bars — shows whether neighbouring
+# spots are actually resolvable from each other or overlap within error.
+# Error bar half-width = CENTROID_RANK_ERR_SIGMA x fit_centroid_stderr (1 = ±1σ).
+CENTROID_RANK_ERR_SIGMA = 1
+# True = every grain's figure uses the same pooled y range, so figures are directly
+# comparable grain to grain (same idea as the pooled map color scale); False = each
+# grain's y axis fits its own spots.
+CENTROID_RANK_SHARED_Y = True
+CENTROID_RANK_FIGSIZE = (7.0, 4.0)
+CENTROID_RANK_LABEL_FONTSIZE = 5   # spot-number label above each point's error bar
 
 # Filename prefix for a combined figure over every grain, matching
 # kyanite_figures.py's ALL_GRAINS_LABEL convention.
@@ -1188,6 +1201,66 @@ def plot_centroid_histograms(grain_values, vmin, vmax):
 
 
 # =============================================================================
+# ANALYSIS 6d — ranked centroids with fit uncertainty, per grain
+#
+# One grain's spots sorted lowest -> highest fit centroid: rank on x, centroid on
+# y, error bars = CENTROID_RANK_ERR_SIGMA x fit_centroid_stderr. Where the
+# histogram shows the shape of the distribution, this shows each measurement's
+# own uncertainty against its neighbours — i.e. how much of the spread is real.
+#
+# Same spot population as the histogram: on-grain spots with a usable fit only.
+# A failed fit has no usable stderr (that's what flags it as failed), so it can't
+# carry an error bar; an off-grain spot measured some other phase.
+# =============================================================================
+
+def centroid_rank_frame(df):
+    """(on-grain valid spots sorted by centroid, n_off_grain_dropped, n_failed_fits)."""
+    ok = df['centroid_ok'].fillna(False)
+    on_grain = on_grain_mask(df)
+    ranked = (df.loc[ok & on_grain, ['spot', 'fit_centroid', 'fit_centroid_stderr']]
+                .sort_values('fit_centroid', kind='stable')
+                .reset_index(drop=True))
+    ranked['rank'] = np.arange(1, len(ranked) + 1)
+    return ranked, int((ok & ~on_grain).sum()), int((~ok).sum())
+
+
+def plot_centroid_rank(grain_id, ranked, vmin, vmax, ylim=None):
+    cmap = plt.get_cmap(CENTROID_CMAP)
+    norm = Normalize(vmin=vmin, vmax=vmax)
+    err = CENTROID_RANK_ERR_SIGMA * ranked['fit_centroid_stderr']
+
+    fig, ax = plt.subplots(figsize=CENTROID_RANK_FIGSIZE, layout='constrained')
+    # Error bars drawn first, in neutral grey, so the colored points sit on top.
+    ax.errorbar(ranked['rank'], ranked['fit_centroid'], yerr=err, fmt='none',
+                ecolor='0.35', elinewidth=0.9, capsize=2, zorder=2)
+    # Colored through the same colormap/limits as the maps and histogram, so a
+    # point's color matches that spot on the centroid map.
+    ax.scatter(ranked['rank'], ranked['fit_centroid'], s=30,
+               c=[cmap(norm(v)) for v in ranked['fit_centroid']],
+               edgecolors='black', linewidths=0.5, zorder=3)
+    # Spot number just above each error bar's top, so any point can be found on
+    # the centroid map / spot_index key.
+    for rank, top, spot in zip(ranked['rank'], ranked['fit_centroid'] + err, ranked['spot']):
+        ax.annotate(str(int(spot)), (rank, top), xytext=(0, 2), textcoords='offset points',
+                    ha='center', va='bottom', fontsize=CENTROID_RANK_LABEL_FONTSIZE,
+                    color='0.25', zorder=4)
+
+    ax.set_xlabel('Rank', fontsize=10)
+    ax.set_ylabel(CENTROID_CBAR_LABEL, fontsize=10)
+    ax.set_xlim(0, len(ranked) + 1)
+    ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
+    if ylim is not None:
+        ax.set_ylim(*ylim)
+    format_ev_axis(ax.yaxis)
+    ax.tick_params(labelsize=8)
+    for side in ('top', 'right'):
+        ax.spines[side].set_visible(False)
+    if SHOW_TITLE:
+        ax.set_title(f'{grain_id} — {CENTROID_TITLE}', fontsize=11)
+    return fig
+
+
+# =============================================================================
 # ANALYSIS 7 — per-grain spot-numbering diagnostic
 #
 # Just the numbering: the registered CL image with every spot plotted in one
@@ -1224,7 +1297,7 @@ def plot_spot_index_map(grain_id, df, cl_img):
 # =============================================================================
 
 ALL_ANALYSES = ['pie', 'scatter', 'box', 'map', 'centroid_map', 'centroid_hist',
-                'spot_index', 'pca']
+                'centroid_rank', 'spot_index', 'pca']
 if ANALYSES == 'all':
     analyses = ALL_ANALYSES
 elif isinstance(ANALYSES, (list, tuple)):
@@ -1449,6 +1522,52 @@ if 'centroid_hist' in analyses:
                   f'{lo:.3f}-{hi:.3f} eV ({width * 1000:.1f} meV/bin)')
             if SAVE_FIG:
                 out = out_dir / 'centroid_histogram_by_grain.png'
+                fig.savefig(out, dpi=200, bbox_inches='tight')
+                print(f'  Saved: {out.name}')
+
+if 'centroid_rank' in analyses:
+    print(f'\n--- ranked pre-edge fit centroids (error bars = '
+          f'±{CENTROID_RANK_ERR_SIGMA:g}σ fit stderr) ---')
+    if centroid_limits is None:
+        print(NO_CENTROIDS_MSG)
+    else:
+        vmin, vmax = centroid_limits
+        ranked_by_grain = {}
+        for grain_id in sorted(centroid_grains):
+            ranked, n_off, n_failed = centroid_rank_frame(centroid_grains[grain_id])
+            if not len(ranked):
+                print(f'  WARNING: {grain_id}: no on-grain spot with a usable fit — skipped.')
+                continue
+            ranked_by_grain[grain_id] = (ranked, n_off, n_failed)
+
+        ylim = None
+        if CENTROID_RANK_SHARED_Y and ranked_by_grain:
+            # Pooled across grains, error bars included, so no bar is clipped in
+            # any grain's figure; small margin so end points don't sit on the frame.
+            lo = min((r['fit_centroid'] - CENTROID_RANK_ERR_SIGMA * r['fit_centroid_stderr']).min()
+                     for r, _, _ in ranked_by_grain.values())
+            hi = max((r['fit_centroid'] + CENTROID_RANK_ERR_SIGMA * r['fit_centroid_stderr']).max()
+                     for r, _, _ in ranked_by_grain.values())
+            pad = 0.04 * (hi - lo) if hi > lo else 0.05
+            ylim = (lo - pad, hi + pad)
+            print(f'  Shared y range across {len(ranked_by_grain)} grain(s): '
+                  f'{ylim[0]:.3f}-{ylim[1]:.3f} eV')
+
+        for grain_id, (ranked, n_off, n_failed) in ranked_by_grain.items():
+            stderr = ranked['fit_centroid_stderr']
+            notes = []
+            if n_off:
+                notes.append(f'{n_off} off-grain excluded')
+            if n_failed:
+                notes.append(f'{n_failed} without a usable fit excluded')
+            print(f'  {grain_id}: n={len(ranked)}, centroid '
+                  f'{ranked["fit_centroid"].min():.3f}-{ranked["fit_centroid"].max():.3f} eV, '
+                  f'stderr median {stderr.median() * 1000:.1f} meV '
+                  f'(max {stderr.max() * 1000:.1f} meV)'
+                  + (f' ({"; ".join(notes)})' if notes else ''))
+            fig = plot_centroid_rank(grain_id, ranked, vmin, vmax, ylim)
+            if SAVE_FIG:
+                out = out_dir / f'{grain_id}_centroid_rank.png'
                 fig.savefig(out, dpi=200, bbox_inches='tight')
                 print(f'  Saved: {out.name}')
 

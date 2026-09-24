@@ -262,6 +262,19 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   maps' color limits — those clamp outliers for display, but a histogram should
   show every value where it actually falls. Output:
   `centroid_histogram_by_grain.png`),
+  `centroid_rank` (per grain: that grain's spots sorted lowest → highest fit
+  centroid, rank on x and centroid (eV) on y, each point carrying an error bar of
+  `CENTROID_RANK_ERR_SIGMA` × `fit_centroid_stderr` — shows whether neighbouring
+  spots are actually resolvable from one another or overlap within fit
+  uncertainty, which the histogram can't. Same spot population as
+  `centroid_hist`: on-grain spots with a usable fit only, explicitly filtered — a
+  failed fit has no usable stderr to draw, and an off-grain spot measured another
+  phase. Points are colored through the same colormap/limits as the centroid maps,
+  so a point's color matches that spot on its map, and each point is labeled with
+  its spot number just above its error bar, so it can be found on that map/the
+  `spot_index` key. By default every grain's
+  figure shares one pooled y range (error bars included), so figures are directly
+  comparable across grains. Output: `<grain_id>_centroid_rank.png`),
   `spot_index` (per-grain diagnostic: the registered CL image with every spot in
   one neutral color — `SPOT_INDEX_COLOR`, deliberately uniform so nothing in the
   figure reads as encoded data — labeled with its spot number, and nothing else.
@@ -507,6 +520,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `pca_pc1_pc2_scatter.png`, `pca_scree.png`, `pca_loadings_pc1_pc2.png`,
   `pca_biplot.png`, `<grain_id>_spot_map.png`, `<grain_id>_centroid_map.png`,
   `centroid_histogram_by_grain.png` (one combined figure, like the pie grid),
+  `<grain_id>_centroid_rank.png` (ranked centroids with fit-stderr error bars),
   `<label>_centroid_map_panel.png` (multi-grain shared-colorbar panel; `<label>` is
   `all_grains`, the `CENTROID_PANEL_GROUPS` dict key, or the joined grain ids).
   The `spot_index` numbering figure is the exception — being a lookup aid rather
@@ -1048,7 +1062,7 @@ so they carry local functions with the identical values hand-copied in —
   A stray `*_prepeak_fits.csv` sitting directly in `inputs/` instead is reported by
   name, since it would otherwise be silently ignored
 - `ANALYSES` — `pie`, `scatter`, `box`, `map`, `centroid_map`, `centroid_hist`,
-  `spot_index`, `pca`, `all`, or a list of these
+  `centroid_rank`, `spot_index`, `pca`, `all`, or a list of these
 - `SCATTER_ELEMENTS` — element columns for the CL-vs-element and by-class box plots (`None` = auto-detect all)
 - `PCA_ELEMENTS`, `PCA_LOG_TRANSFORM` — element list for the PCA scatter/scree/loadings/biplot, and
   whether to log10-transform elements before z-scoring/PCA (independent of `SCATTER_ELEMENTS`)
@@ -1095,6 +1109,12 @@ so they carry local functions with the identical values hand-copied in —
   through the maps' colormap/limits; `False` = flat house `BLUE`),
   `CENTROID_HIST_SHOW_MEDIAN` (default `True`), `CENTROID_HIST_WIDTH_IN`,
   `CENTROID_HIST_ROW_HEIGHT_IN`
+- `CENTROID_RANK_ERR_SIGMA` (default `1` = ±1σ) — error bar half-width on the
+  `centroid_rank` plot, as a multiple of `fit_centroid_stderr`;
+  `CENTROID_RANK_SHARED_Y` (default `True` — one pooled y range across every
+  grain's figure; `False` = each grain's axis fits its own spots);
+  `CENTROID_RANK_FIGSIZE`, `CENTROID_RANK_LABEL_FONTSIZE` (spot-number labels,
+  default `5`)
 - `MAPS_DIR` / `CENTROID_PANEL_PIXEL_UM_FROM_SIDECAR` / `CENTROID_PANEL_PIXEL_UM` —
   per-grain µm/px for `CENTROID_PANEL_TRUE_SCALE`, read from `xrf_h5_to_tiff.py`'s
   metadata sidecar (same mechanism/regex as `xrf_display.py`), with the constant as
