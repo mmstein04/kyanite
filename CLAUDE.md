@@ -274,7 +274,9 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   its spot number just above its error bar, so it can be found on that map/the
   `spot_index` key. By default every grain's
   figure shares one pooled y range (error bars included), so figures are directly
-  comparable across grains. Output: `<grain_id>_centroid_rank.png`),
+  comparable across grains. Both this and `centroid_hist` carry dashed Fe²⁺/Fe³⁺
+  reference-centroid lines (`CENTROID_REFERENCE_LINES`). Output:
+  `<grain_id>_centroid_rank.png`),
   `spot_index` (per-grain diagnostic: the registered CL image with every spot in
   one neutral color — `SPOT_INDEX_COLOR`, deliberately uniform so nothing in the
   figure reads as encoded data — labeled with its spot number, and nothing else.
@@ -317,11 +319,19 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
     failed fit — or, if `CENTROID_MAX_STDERR` is set, when the stderr exceeds it.
     This is what keeps `RH-XA-57081P-07` spot 19 (centroid 7111.66 eV, ~1.6 eV
     below every other spot, NaN stderr) from blowing out the shared color scale
-  - The color scale is derived **pooled across every input grain** (default: 2nd/98th
-    percentile of all valid centroids), not per grain, so one energy is one color in
-    every grain's map — the same cross-grain comparability rule the fixed XANES class
-    colors serve. Values outside the range are clamped rather than dropped, and the
-    colorbar grows `extend` arrows to show it happened
+  - The color scale is one scale **shared across every input grain**, not per grain,
+    so one energy is one color in every grain's map — the same cross-grain
+    comparability rule the fixed XANES class colors serve. By default it is **pinned
+    to the Fe²⁺/Fe³⁺ reference centroids** (`CENTROID_SCALE_FROM_REFERENCE`,
+    7112.1 → 7113.5 eV, Wilke et al. 2001), widened by
+    `CENTROID_REFERENCE_SCALE_PAD_EV` (default `0.25`) at each end, i.e.
+    7111.85 → 7113.75 eV, so a color reads as a position between
+    the two end-member valences and doesn't shift as grains are added; with that off
+    it falls back to the 2nd/98th percentile of all valid centroids pooled across
+    grains. Values outside the range are clamped rather than dropped, and the
+    colorbar grows `extend` arrows to show it happened. The padding exists because
+    without it every centroid above 7113.5 eV (24 spots across `-05`/`-07`, max
+    7113.65) clamped to the top color; with it, nothing currently clamps
   - Colorbar ticks are forced to full absolute energies; matplotlib's default would
     factor out the shared ~7113 eV as a `+7.113e3` offset and label ticks `0.25`,
     `0.30`, ... which is unreadable as an energy
@@ -1076,10 +1086,13 @@ so they carry local functions with the identical values hand-copied in —
   larger than the class/spot-index maps' `SPOT_SIZE` (`28`) since there the fill
   color is the data
 - `CENTROID_VMIN`/`CENTROID_VMAX` (default `None` both) — explicit eV color-scale
-  limits, e.g. to lock one scale across separate runs. `None` derives them from
-  `CENTROID_RANGE_PCT` (default `(2, 98)`) percentiles of every valid centroid
-  **pooled across all input grains**, so the maps stay comparable grain to grain;
-  out-of-range values are clamped, not dropped
+  limits; these win over everything below. `None` (both) defers to
+  `CENTROID_SCALE_FROM_REFERENCE` (default `True`: scale pinned to the lowest/
+  highest `CENTROID_REFERENCE_LINES` energy, i.e. Fe²⁺ 7112.1 → Fe³⁺ 7113.5 eV,
+  ± `CENTROID_REFERENCE_SCALE_PAD_EV` = 0.25 eV),
+  and with that off, to `CENTROID_RANGE_PCT` (default `(2, 98)`) percentiles of
+  every valid centroid **pooled across all input grains**. Either way one scale
+  is shared by every grain; out-of-range values are clamped, not dropped
 - `CENTROID_MAX_STDERR` (default `0.20` eV) — additionally reject any fit whose
   `fit_centroid_stderr` exceeds this. A NaN stderr is always treated as a failed
   fit regardless of this setting. The 0.20 default exists because
@@ -1109,6 +1122,16 @@ so they carry local functions with the identical values hand-copied in —
   through the maps' colormap/limits; `False` = flat house `BLUE`),
   `CENTROID_HIST_SHOW_MEDIAN` (default `True`), `CENTROID_HIST_WIDTH_IN`,
   `CENTROID_HIST_ROW_HEIGHT_IN`
+- `CENTROID_REFERENCE_LINES` (default `{'Fe²⁺': 7112.1, 'Fe³⁺': 7113.5}`, eV —
+  Wilke et al. (2001) average pre-edge centroids for Fe²⁺/Fe³⁺, ~1.4 (±0.1) eV
+  apart; `{}`/`None` disables) — dashed, named reference lines on the energy axis
+  of both `centroid_hist` (one line per row, named on the top row) and
+  `centroid_rank`. `CENTROID_REFERENCE_EXTEND_AXIS` (default `True`) widens that
+  axis to keep every line on-scale — needed because Fe²⁺ sits below every
+  centroid measured so far (lowest ~7112.84 eV), at the cost of compressing the
+  data; `False` keeps the axis on the data and drops off-scale lines. Only axis
+  limits change — histogram bin edges stay on the data either way.
+  `CENTROID_REFERENCE_COLOR` (default `'0.2'`)
 - `CENTROID_RANK_ERR_SIGMA` (default `1` = ±1σ) — error bar half-width on the
   `centroid_rank` plot, as a multiple of `fit_centroid_stderr`;
   `CENTROID_RANK_SHARED_Y` (default `True` — one pooled y range across every

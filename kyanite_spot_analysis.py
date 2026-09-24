@@ -139,6 +139,17 @@ CENTROID_SPOT_SIZE = 70
 CENTROID_VMIN = None
 CENTROID_VMAX = None
 CENTROID_RANGE_PCT = (2, 98)   # robust limits; values outside are clamped, not dropped
+# True = pin the color scale to the lowest/highest CENTROID_REFERENCE_LINES energy
+# (Fe2+ 7112.1 -> Fe3+ 7113.5 eV, Wilke et al. 2001), so a color reads as a position
+# between the two end-member valences, and stays fixed as new grains arrive, rather
+# than tracking whatever range this run's data happens to span. Explicit
+# CENTROID_VMIN/VMAX still win; False (or fewer than 2 reference lines) falls back
+# to CENTROID_RANGE_PCT.
+CENTROID_SCALE_FROM_REFERENCE = True
+# eV of padding added below the lowest / above the highest reference energy when
+# pinning, so centroids a little past either end-member (several spots sit just
+# above Fe3+) keep their own color instead of clamping to the end color.
+CENTROID_REFERENCE_SCALE_PAD_EV = 0.25
                                 # (the colorbar grows arrows to show clamping happened)
 
 # Fit-quality screen. A fit flagged here is drawn in GREY at its real location, exactly
@@ -207,6 +218,19 @@ CENTROID_HIST_COLOR_BY_VALUE = True
 CENTROID_HIST_SHOW_MEDIAN = True   # per-grain median line, for comparing central tendency
 CENTROID_HIST_WIDTH_IN = 7.0
 CENTROID_HIST_ROW_HEIGHT_IN = 1.1
+
+# --- Fe2+/Fe3+ reference centroids (histogram + ranked plot) ---
+# Wilke et al. (2001): average pre-edge centroid of Fe2+ ~7112.1 eV and of Fe3+
+# ~7113.5 eV, i.e. separated by ~1.4 (±0.1) eV. Drawn as dashed reference lines on
+# the centroid energy axis of the 'centroid_hist' and 'centroid_rank' figures.
+# {} / None = no reference lines.
+CENTROID_REFERENCE_LINES = {'Fe²⁺': 7112.1, 'Fe³⁺': 7113.5}
+# True = widen the energy axis so every reference line is on-scale even when it
+# falls outside the measured centroids (Fe2+ sits below every spot measured so
+# far); False = keep the axis on the data and drop any line that falls outside it.
+# Only the axis limits change — histogram bin edges stay on the data either way.
+CENTROID_REFERENCE_EXTEND_AXIS = True
+CENTROID_REFERENCE_COLOR = '0.2'
 
 # --- Ranked centroid plot (per grain) ---
 # Each grain's spots sorted lowest -> highest fit centroid, rank on x, centroid on y,
@@ -836,8 +860,6 @@ def centroid_color_limits(grain_frames):
     """(vmin, vmax) in eV, from valid centroids pooled across every input grain,
     so one energy is one color in every grain's map. Returns None if no grain has
     a usable centroid."""
-    if CENTROID_VMIN is not None and CENTROID_VMAX is not None:
-        return CENTROID_VMIN, CENTROID_VMAX
     pooled = pd.concat(
         [df.loc[df['centroid_ok'].fillna(False), 'fit_centroid']
          for df in grain_frames.values() if 'centroid_ok' in df.columns],
@@ -846,6 +868,12 @@ def centroid_color_limits(grain_frames):
     pooled = pooled.dropna()
     if pooled.empty:
         return None
+    if CENTROID_VMIN is not None and CENTROID_VMAX is not None:
+        return CENTROID_VMIN, CENTROID_VMAX
+    refs = list((CENTROID_REFERENCE_LINES or {}).values())
+    if CENTROID_SCALE_FROM_REFERENCE and len(refs) >= 2:
+        pad = CENTROID_REFERENCE_SCALE_PAD_EV
+        return float(min(refs)) - pad, float(max(refs)) + pad
     lo_pct, hi_pct = CENTROID_RANGE_PCT
     vmin = CENTROID_VMIN if CENTROID_VMIN is not None else float(np.percentile(pooled, lo_pct))
     vmax = CENTROID_VMAX if CENTROID_VMAX is not None else float(np.percentile(pooled, hi_pct))
@@ -1138,6 +1166,40 @@ def centroid_hist_values(df):
     return values, int((ok & ~on_grain).sum()), int((~ok).sum())
 
 
+def with_reference_range(lo, hi):
+    """Axis limits (lo, hi) widened to take in every CENTROID_REFERENCE_LINES energy,
+    with a small margin, when CENTROID_REFERENCE_EXTEND_AXIS is on."""
+    refs = list((CENTROID_REFERENCE_LINES or {}).values())
+    if not (CENTROID_REFERENCE_EXTEND_AXIS and refs):
+        return lo, hi
+    new_lo, new_hi = min(lo, *refs), max(hi, *refs)
+    pad = 0.03 * (new_hi - new_lo)
+    return (new_lo - pad if new_lo < lo else lo), (new_hi + pad if new_hi > hi else hi)
+
+
+def draw_reference_lines(ax, orientation, lo, hi, label=True):
+    """Dashed Fe2+/Fe3+ reference centroids along the energy axis ('x' = vertical
+    lines on an energy x-axis, 'y' = horizontal lines on an energy y-axis). Lines
+    outside [lo, hi] are skipped. Names are drawn inside the axes."""
+    for name, energy in (CENTROID_REFERENCE_LINES or {}).items():
+        if not lo <= energy <= hi:
+            continue
+        if orientation == 'x':
+            ax.axvline(energy, color=CENTROID_REFERENCE_COLOR, ls='--', lw=1.0, zorder=1)
+            if label:
+                ax.annotate(name, (energy, 1), xycoords=('data', 'axes fraction'),
+                            xytext=(3, -2), textcoords='offset points', ha='left', va='top',
+                            fontsize=8, color=CENTROID_REFERENCE_COLOR)
+        else:
+            ax.axhline(energy, color=CENTROID_REFERENCE_COLOR, ls='--', lw=1.0, zorder=1)
+            if label:
+                # Left end: ranks run low -> high, so the lowest-ranked points sit
+                # well below the Fe3+ line there and its name doesn't collide.
+                ax.annotate(name, (0, energy), xycoords=('axes fraction', 'data'),
+                            xytext=(3, 2), textcoords='offset points', ha='left',
+                            va='bottom', fontsize=8, color=CENTROID_REFERENCE_COLOR)
+
+
 def plot_centroid_histograms(grain_values, vmin, vmax):
     """grain_values: ordered {grain_id: array of that grain's valid centroids}."""
     grain_ids = list(grain_values)
@@ -1185,7 +1247,11 @@ def plot_centroid_histograms(grain_values, vmin, vmax):
         for side in ('top', 'right'):
             ax.spines[side].set_visible(False)
 
-    axes[-1].set_xlim(lo - width / 2, hi + width / 2)
+    axes[-1].set_xlim(*with_reference_range(lo - width / 2, hi + width / 2))
+    x_lo, x_hi = axes[-1].get_xlim()
+    for i, ax in enumerate(axes):
+        # Line on every row, name only on the top row — every row shares the axis.
+        draw_reference_lines(ax, 'x', x_lo, x_hi, label=(i == 0))
     axes[-1].set_xlabel(CENTROID_CBAR_LABEL, fontsize=10)
     format_ev_axis(axes[-1].xaxis)
     fig.supylabel('Fraction of spots', fontsize=10)
@@ -1251,6 +1317,8 @@ def plot_centroid_rank(grain_id, ranked, vmin, vmax, ylim=None):
     ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
     if ylim is not None:
         ax.set_ylim(*ylim)
+    ax.set_ylim(*with_reference_range(*ax.get_ylim()))
+    draw_reference_lines(ax, 'y', *ax.get_ylim())
     format_ev_axis(ax.yaxis)
     ax.tick_params(labelsize=8)
     for side in ('top', 'right'):
@@ -1431,9 +1499,14 @@ if 'centroid_map' in analyses:
         print(NO_CENTROIDS_MSG)
     else:
         vmin, vmax = centroid_limits
-        how = ('explicit CENTROID_VMIN/VMAX'
-               if CENTROID_VMIN is not None and CENTROID_VMAX is not None
-               else f'pooled {CENTROID_RANGE_PCT[0]}/{CENTROID_RANGE_PCT[1]} percentiles')
+        if CENTROID_VMIN is not None and CENTROID_VMAX is not None:
+            how = 'explicit CENTROID_VMIN/VMAX'
+        elif CENTROID_SCALE_FROM_REFERENCE and len(CENTROID_REFERENCE_LINES or {}) >= 2:
+            how = ('pinned to reference centroids ' + ', '.join(
+                f'{k} {v:g}' for k, v in CENTROID_REFERENCE_LINES.items())
+                + f' ± {CENTROID_REFERENCE_SCALE_PAD_EV:g} eV padding')
+        else:
+            how = f'pooled {CENTROID_RANGE_PCT[0]}/{CENTROID_RANGE_PCT[1]} percentiles'
         print(f'  Shared color scale across {len(centroid_grains)} grain(s): '
               f'{vmin:.3f}-{vmax:.3f} eV ({how})')
         for grain_id, df in centroid_grains.items():
