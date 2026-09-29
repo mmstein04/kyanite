@@ -352,12 +352,32 @@ def load_prepeak_fits(grain_id):
         fits = fits[fits['spot'].notna()]
     fits['spot'] = fits['spot'].astype(int)
 
-    # Re-fitting a spot in a later session appends a second row for it rather than
-    # replacing the first; keep the last (most recent) fit of each spot.
+    # Re-fitting a spot adds another row for it rather than replacing the first;
+    # keep the most recent fit of each spot. Recency comes from the 'Fit Label'
+    # timestamp ('Sep-29 14:12', with a '_N' suffix for a same-minute repeat), NOT
+    # row position — Larch writes each spot's newest fit FIRST, so a keep-last rule
+    # silently keeps the oldest. Labels that don't parse fall back to that
+    # newest-first file order.
     n_dup = int(fits['spot'].duplicated().sum())
     if n_dup:
-        print(f'  {path.name}: {n_dup} duplicate spot row(s) (re-fits) — keeping the last of each.')
-        fits = fits.drop_duplicates('spot', keep='last')
+        label = fits['Fit Label'].astype(str).str.strip() if 'Fit Label' in fits.columns \
+            else pd.Series('', index=fits.index)
+        # Labels carry no year; a fixed leap year keeps 'Feb-29' parseable.
+        stamp = pd.to_datetime('2000-' + label.str.replace(r'_\d+$', '', regex=True),
+                               format='%Y-%b-%d %H:%M', errors='coerce')
+        repeat = pd.to_numeric(label.str.extract(r'_(\d+)$')[0], errors='coerce').fillna(0)
+        if stamp.notna().all():
+            fits = fits.assign(_stamp=stamp, _repeat=repeat, _pos=-np.arange(len(fits)))
+            how = 'most recent Fit Label timestamp'
+        else:
+            print(f'  WARNING: {path.name}: unparseable Fit Label(s) — assuming '
+                  f'newest-first file order for re-fits.')
+            fits = fits.assign(_stamp=pd.Timestamp(0), _repeat=0, _pos=-np.arange(len(fits)))
+            how = 'first row (newest-first order)'
+        fits = (fits.sort_values(['spot', '_stamp', '_repeat', '_pos'])
+                    .drop_duplicates('spot', keep='last')
+                    .drop(columns=['_stamp', '_repeat', '_pos']))
+        print(f'  {path.name}: {n_dup} duplicate spot row(s) (re-fits) — keeping the {how} of each.')
 
     stderr = pd.to_numeric(fits.get('fit_centroid_stderr'), errors='coerce')
     ok = pd.to_numeric(fits['fit_centroid'], errors='coerce').notna() & stderr.notna()

@@ -299,10 +299,16 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
     otherwise the repeat suffix would be read as the spot number. Same "trailing
     digits, whatever tag word precedes them" rule `xrf_h5_extract_spots.py` uses
     for h5 area names, and the same key everything else in this project joins on
-  - Re-fitting a spot in a later session **appends** a second row for it rather
-    than replacing the first (all 60 of `RH-XA-57081P-07`'s spots but one are
-    duplicated this way, values identical to ~1e-7); the last row per spot number
-    wins, with a count printed
+  - Re-fitting a spot adds another row for it rather than replacing the first
+    (all 60 of `RH-XA-57081P-07`'s spots but one are duplicated this way;
+    `NA-GS-P84-06` has 38 spots refit, spot 2 three times). The **most recent
+    fit wins**, judged by the `Fit Label` timestamp (`Sep-29 14:12`, `_N` suffix
+    for a same-minute repeat) — **not** row position: Larch writes each spot's
+    newest fit *first*, so the old keep-last-row rule was silently keeping the
+    oldest. Mostly harmless (refits usually agree to ~1e-5 eV), but not always:
+    `-07` spot 34 moved 0.165 eV, and `-06` spots 17/40 had bad first fits
+    (7114.40 ± 0.66 and 7113.81 ± 0.15 eV) that the 14:12 refits corrected.
+    Unparseable labels fall back to newest-first file order, with a warning
   - Merged onto the grain's spot frame as `fit_centroid`, `fit_centroid_stderr`,
     `fit_r2`, `centroid_ok` — all four listed in `METADATA_COLS` so
     `detect_elements()` can't mistake them for element ROI columns. A grain can
