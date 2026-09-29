@@ -333,8 +333,9 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
     `CENTROID_REFERENCE_SCALE_PAD_EV` (default `0.25`) at each end, i.e.
     7111.85 → 7113.75 eV, so a color reads as a position between
     the two end-member valences and doesn't shift as grains are added; with that off
-    it falls back to the 2nd/98th percentile of all valid centroids pooled across
-    grains. Values outside the range are clamped rather than dropped, and the
+    it falls back to the 2nd/98th percentile of all valid **on-grain** centroids
+    pooled across grains (off-grain spots are still drawn on the maps, but can't
+    stretch the scale — same filter as `centroid_hist`/`centroid_rank`). Values outside the range are clamped rather than dropped, and the
     colorbar grows `extend` arrows to show it happened. The padding exists because
     without it every centroid above 7113.5 eV (24 spots across `-05`/`-07`, max
     7113.65) clamped to the top color; with it, nothing currently clamps
@@ -1114,7 +1115,10 @@ so they carry local functions with the identical values hand-copied in —
   `[['g1','g2'],['g3','g4']]` = one figure per sub-list; `{'label': ['g1','g2']}` =
   same, naming the output file. Auto-labels join the grain ids for groups of ≤3,
   else `<n>_grains`
-- `CENTROID_PANEL_NCOLS` (default `None` = one row, wrapping past 4 grains),
+- `CENTROID_PANEL_NCOLS` (default `None` = one row up to 4 grains, beyond that
+  the fewest rows of ≤4 with panels spread evenly — 5 grains → 3+2, not 4+1;
+  the "no usable fit"/off-grain legend sits in a reserved strip below the
+  panels, never over one),
   `CENTROID_PANEL_SIZE_IN` (largest panel's long edge, inches),
   `CENTROID_PANEL_PAD_COLOR`
 - `CENTROID_PANEL_TRUE_SCALE` (default `False`) — `False`: each panel fills its

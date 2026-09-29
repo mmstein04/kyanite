@@ -179,7 +179,7 @@ CENTROID_MAX_STDERR = 0.20
 #   {'section_A': ['g1','g2']}  — same, but naming the output file
 # Output: <label>_centroid_map_panel.png
 CENTROID_PANEL_GROUPS = 'all'
-CENTROID_PANEL_NCOLS = None    # panel columns; None = one row, wrapping past 4 grains
+CENTROID_PANEL_NCOLS = None    # panel columns; None = one row up to 4 grains, else balanced rows (5 -> 3+2)
 CENTROID_PANEL_SIZE_IN = 5.0   # display size (inches) of the largest panel's long edge
 
 # True: every panel is drawn at the same µm per inch, using each grain's own
@@ -879,9 +879,11 @@ def plot_spot_map(grain_id, df, cl_img):
 def centroid_color_limits(grain_frames):
     """(vmin, vmax) in eV, from valid centroids pooled across every input grain,
     so one energy is one color in every grain's map. Returns None if no grain has
-    a usable centroid."""
+    a usable centroid. Off-grain spots are drawn on the maps but excluded here,
+    same as centroid_hist/centroid_rank: another phase's centroid shouldn't
+    stretch kyanite's color scale."""
     pooled = pd.concat(
-        [df.loc[df['centroid_ok'].fillna(False), 'fit_centroid']
+        [df.loc[df['centroid_ok'].fillna(False) & on_grain_mask(df), 'fit_centroid']
          for df in grain_frames.values() if 'centroid_ok' in df.columns],
         ignore_index=True) if any('centroid_ok' in df.columns for df in grain_frames.values()) \
         else pd.Series(dtype=float)
@@ -1089,7 +1091,9 @@ def draw_scalebar(ax, length_um, scale, cl_img, px_um):
 def plot_centroid_panel(label, panels, vmin, vmax):
     """panels: list of (grain_id, df, cl_img, px_um, px_from_sidecar)."""
     n = len(panels)
-    ncols = CENTROID_PANEL_NCOLS or min(n, 4)
+    # Default: fewest rows that keep each row to <=4 panels, then spread the
+    # panels evenly across those rows (5 -> 3+2 rather than 4+1).
+    ncols = CENTROID_PANEL_NCOLS or int(np.ceil(n / np.ceil(n / 4)))
     ncols = max(1, min(int(ncols), n))
     nrows = int(np.ceil(n / ncols))
     mappable = ScalarMappable(norm=Normalize(vmin=vmin, vmax=vmax), cmap=CENTROID_CMAP)
@@ -1155,7 +1159,9 @@ def plot_centroid_panel(label, panels, vmin, vmax):
     style_centroid_colorbar(cbar)
 
     if legend_handles:
-        fig.legend(handles=legend_handles, loc='lower left', fontsize=7,
+        # 'outside' makes constrained layout reserve a strip below the panels,
+        # so the legend can't sit on top of a grain.
+        fig.legend(handles=legend_handles, loc='outside lower center', fontsize=7,
                    framealpha=0.7, ncols=len(legend_handles))
     if SHOW_TITLE:
         fig.suptitle(CENTROID_TITLE, fontsize=12)
