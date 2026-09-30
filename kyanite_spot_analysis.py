@@ -146,10 +146,14 @@ CENTROID_RANGE_PCT = (2, 98)   # robust limits; values outside are clamped, not 
 # CENTROID_VMIN/VMAX still win; False (or fewer than 2 reference lines) falls back
 # to CENTROID_RANGE_PCT.
 CENTROID_SCALE_FROM_REFERENCE = True
-# eV of padding added below the lowest / above the highest reference energy when
-# pinning, so centroids a little past either end-member (several spots sit just
-# above Fe3+) keep their own color instead of clamping to the end color.
-CENTROID_REFERENCE_SCALE_PAD_EV = 0.25
+# (below, above) eV of padding added below the lowest / above the highest reference
+# energy when pinning, so centroids a little past either end-member (several spots
+# sit just above Fe3+) keep their own color instead of clamping to the end color.
+# Set per end so headroom for one end's outliers doesn't shift every other color:
+# 0.45 above is just enough for the highest centroid so far (MW609-01, 7113.92 eV),
+# while nothing yet comes near Fe2+ (lowest ~7112.84 eV). A single number pads both
+# ends equally.
+CENTROID_REFERENCE_SCALE_PAD_EV = (0.25, 0.45)
                                 # (the colorbar grows arrows to show clamping happened)
 
 # Fit-quality screen. A fit flagged here is drawn in GREY at its real location, exactly
@@ -876,6 +880,15 @@ def plot_spot_map(grain_id, df, cl_img):
 # same grey for a spot with no usable value.
 # =============================================================================
 
+def reference_scale_pads():
+    """CENTROID_REFERENCE_SCALE_PAD_EV as (below, above) eV; a scalar pads both ends."""
+    pad = CENTROID_REFERENCE_SCALE_PAD_EV
+    if np.isscalar(pad):
+        return float(pad), float(pad)
+    pad_lo, pad_hi = pad
+    return float(pad_lo), float(pad_hi)
+
+
 def centroid_color_limits(grain_frames):
     """(vmin, vmax) in eV, from valid centroids pooled across every input grain,
     so one energy is one color in every grain's map. Returns None if no grain has
@@ -894,8 +907,8 @@ def centroid_color_limits(grain_frames):
         return CENTROID_VMIN, CENTROID_VMAX
     refs = list((CENTROID_REFERENCE_LINES or {}).values())
     if CENTROID_SCALE_FROM_REFERENCE and len(refs) >= 2:
-        pad = CENTROID_REFERENCE_SCALE_PAD_EV
-        return float(min(refs)) - pad, float(max(refs)) + pad
+        pad_lo, pad_hi = reference_scale_pads()
+        return float(min(refs)) - pad_lo, float(max(refs)) + pad_hi
     lo_pct, hi_pct = CENTROID_RANGE_PCT
     vmin = CENTROID_VMIN if CENTROID_VMIN is not None else float(np.percentile(pooled, lo_pct))
     vmax = CENTROID_VMAX if CENTROID_VMAX is not None else float(np.percentile(pooled, hi_pct))
@@ -1530,7 +1543,7 @@ if 'centroid_map' in analyses:
         elif CENTROID_SCALE_FROM_REFERENCE and len(CENTROID_REFERENCE_LINES or {}) >= 2:
             how = ('pinned to reference centroids ' + ', '.join(
                 f'{k} {v:g}' for k, v in CENTROID_REFERENCE_LINES.items())
-                + f' ± {CENTROID_REFERENCE_SCALE_PAD_EV:g} eV padding')
+                + ' + padding −{:g}/+{:g} eV'.format(*reference_scale_pads()))
         else:
             how = f'pooled {CENTROID_RANGE_PCT[0]}/{CENTROID_RANGE_PCT[1]} percentiles'
         print(f'  Shared color scale across {len(centroid_grains)} grain(s): '
