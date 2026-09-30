@@ -150,10 +150,10 @@ CENTROID_SCALE_FROM_REFERENCE = True
 # energy when pinning, so centroids a little past either end-member (several spots
 # sit just above Fe3+) keep their own color instead of clamping to the end color.
 # Set per end so headroom for one end's outliers doesn't shift every other color:
-# 0.45 above is just enough for the highest centroid so far (MW609-01, 7113.92 eV),
+# 0.55 above clears the highest centroid so far (LLF6-01 spot 19, 7114.02 eV),
 # while nothing yet comes near Fe2+ (lowest ~7112.84 eV). A single number pads both
 # ends equally.
-CENTROID_REFERENCE_SCALE_PAD_EV = (0.25, 0.45)
+CENTROID_REFERENCE_SCALE_PAD_EV = (0.25, 0.55)
                                 # (the colorbar grows arrows to show clamping happened)
 
 # Fit-quality screen. A fit flagged here is drawn in GREY at its real location, exactly

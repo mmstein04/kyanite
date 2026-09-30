@@ -332,8 +332,8 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
     to the Fe²⁺/Fe³⁺ reference centroids** (`CENTROID_SCALE_FROM_REFERENCE`,
     7112.1 → 7113.5 eV, Wilke et al. 2001), widened by
     `CENTROID_REFERENCE_SCALE_PAD_EV` (a `(below, above)` pair, default
-    `(0.25, 0.45)`; a single number pads both ends equally), i.e.
-    7111.85 → 7113.95 eV, so a color reads as a position between
+    `(0.25, 0.55)`; a single number pads both ends equally), i.e.
+    7111.85 → 7114.05 eV, so a color reads as a position between
     the two end-member valences and doesn't shift as grains are added; with that off
     it falls back to the 2nd/98th percentile of all valid **on-grain** centroids
     pooled across grains (off-grain spots are still drawn on the maps, but can't
@@ -342,7 +342,8 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
     without it every centroid above 7113.5 eV (24 spots across `-05`/`-07`, max
     7113.65) clamped to the top color. The upper pad was raised from `0.25` to
     `0.45` when `MW609-01` arrived with a spot at 7113.92 eV (above the old
-    7113.75 top); the lower pad stays `0.25` — set separately so that headroom
+    7113.75 top), then to `0.55` when `LLF6-01`/`NVD3-01` arrived with four spots
+    above 7113.95 (max 7114.02 eV, LLF6-01 spot 19); the lower pad stays `0.25` — set separately so that headroom
     doesn't shift every other spot's color (nothing yet comes near Fe²⁺, lowest
     ~7112.84 eV). With these, nothing currently clamps
   - Colorbar ticks are forced to full absolute energies; matplotlib's default would
@@ -1102,7 +1103,7 @@ so they carry local functions with the identical values hand-copied in —
   limits; these win over everything below. `None` (both) defers to
   `CENTROID_SCALE_FROM_REFERENCE` (default `True`: scale pinned to the lowest/
   highest `CENTROID_REFERENCE_LINES` energy, i.e. Fe²⁺ 7112.1 → Fe³⁺ 7113.5 eV,
-  padded by `CENTROID_REFERENCE_SCALE_PAD_EV` = (0.25 below, 0.45 above) eV),
+  padded by `CENTROID_REFERENCE_SCALE_PAD_EV` = (0.25 below, 0.55 above) eV),
   and with that off, to `CENTROID_RANGE_PCT` (default `(2, 98)`) percentiles of
   every valid centroid **pooled across all input grains**. Either way one scale
   is shared by every grain; out-of-range values are clamped, not dropped
