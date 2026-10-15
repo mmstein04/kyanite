@@ -1206,4 +1206,5 @@ so they carry local functions with the identical values hand-copied in —
   dedicated virtualenv rather than a shared `--user`/system site-packages —
   installing directly there can silently upgrade packages (e.g. `numpy`) out from
   under unrelated tools already relying on an older version. `kyanite.sh` is an
-  example SLURM script that activates such a venv before running a Python step
+  example SLURM script that activates the project's `.venv/` (built on the cluster
+  from `requirements.txt`; submit from the project root) before running a Python step
