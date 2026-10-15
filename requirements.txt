@@ -1,0 +1,14 @@
+# Python dependencies for the kyanite CL-EPMA project (tested with Python 3.14.8).
+# Install into a project virtualenv:
+#   python3.14 -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+h5py==3.16.0
+matplotlib==3.11.2
+numpy==2.5.4
+pandas==3.0.6
+pyyaml==6.0.3  # only needed for onboard_dataset.py
+scikit-learn==1.9.1
+scipy==1.18.1
+seaborn==0.13.2
+shap==0.53.0
+tifffile==2026.9.20

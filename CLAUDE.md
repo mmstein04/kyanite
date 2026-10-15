@@ -1198,7 +1198,9 @@ so they carry local functions with the identical values hand-copied in —
 
 ## Requirements
 - MATLAB with Image Processing Toolbox (for `cpselect`, `imwarp`, `imread`, etc.)
-- Python: `h5py`, `numpy`, `tifffile`, `pandas`, `matplotlib`, `seaborn`, `scipy`, `scikit-learn`, `shap`, `pyyaml` (only needed for `onboard_dataset.py`)
+- Python: `h5py`, `numpy`, `tifffile`, `pandas`, `matplotlib`, `seaborn`, `scipy`, `scikit-learn`, `shap`, `pyyaml` (only needed for `onboard_dataset.py`) —
+  pinned in `requirements.txt` (tested with Python 3.14); locally these live in the
+  project's `.venv/` (`source .venv/bin/activate`)
 - Images are 8-, 16-, or 32-bit grayscale TIFFs; EPMA maps are the fixed reference
 - On a shared HPC/cluster account, install the Python dependencies above into a
   dedicated virtualenv rather than a shared `--user`/system site-packages —
