@@ -26,6 +26,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | `CL_EPMA_registration.m` | MATLAB | Full registration + analysis pipeline (see workflow below) |
 | `CL_region_extraction.m` | MATLAB | Draw named sub-grain polygon regions on an already-registered CL image and extract per-pixel CL + element data per region (no re-registration) |
 | `CL_mask_edit.m` | MATLAB | After-the-fact touch-up of a grain mask already produced by `CL_EPMA_registration.m` (e.g. an inclusion was masked-in, or real grain was masked-out weeks earlier) — draw add/remove polygons on the already-registered CL image, then re-derive pixel data and downstream figures under the corrected mask |
+| `kyanite_ebsd.m` | MATLAB (MTEX) | Batch EBSD processing of each grain's Oxford/HKL `.ctf` map: MAD filter, then one of two selectable cleaning methods (`'mtex'` small-grain drop + `fill()`, or `'channel5'` HKL Channel 5–style wild-spike removal + n-nearest-neighbour fill), then GROD (grain reference orientation deviation) for every kyanite grain — GROD map, per-pixel CSV, log, and a method-comparison diagnostic pair. Standalone: not registered to the EPMA/CL pixel grid |
 | `CL_local_regression_map.py` | Python | Slide a circular window across an already-registered grain and run a per-pixel CL-vs-element linear regression inside each window, producing continuous slope/R maps that complement `CL_region_extraction.m`'s fixed polygon regions |
 | `kyanite_figures.py` | Python | Standalone figure generation from exported CSV pixel data |
 | `kyanite_pca.py` | Python | PCA analysis of CL vs. trace elements from whole-grain CSV pixel data; for region CSVs, instead fits one shared PCA pooled across regions (scree, loadings, PC1/PC2-by-region scatter, biplot) to test whether hand-drawn regions separate in PC space — no per-region PCA |
@@ -124,6 +125,67 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
    ever applied across runs, for audit/undo-by-inspection), a
    `diagnostics/<grain_id>_mask_edit_diff.png` (before/after boundary + added/removed
    pixel diff), and a `diagnostics/<grain_id>_mask_edit_log.txt` run record
+
+### `kyanite_ebsd.m` workflow
+1. Auto-discover every `inputs/ebsd/*_EBSD.ctf` (or the listed `grain_ids`) and load
+   each with MTEX; a grain that fails partway is skipped with a warning rather than
+   aborting the batch. Copies with any other suffix (e.g. a `_bad.ctf` rejected
+   acquisition) are never picked up
+2. MAD filter (`mad_threshold`) — shared by both cleaning methods. Non-indexed pixels
+   carry MAD 0 in these `.ctf` files, so they pass and are treated as gaps
+3. Clean by `cleaning_method`:
+   - `'mtex'` — reconstruct grains (`grain_angle_deg`), drop grains smaller than
+     `mtex_min_grain_px` (non-indexed clusters count as "grains" here too, so small
+     ones go as well), reconstruct, then MTEX `fill(ebsd, grains)`: every gap inside
+     a grain outline takes its nearest indexed pixel's orientation, not across grain
+     boundaries (a gap pixel inside grain A whose nearest neighbour is in grain B
+     gets A's *mean* orientation, so has GROD exactly 0°)
+   - `'channel5'` — HKL Channel 5 (Tango) noise reduction on the gridded map, by 8-
+     neighbour adjacency: **wild spike removal** (an indexed pixel misoriented
+     > `c5_spike_tol_deg` from every indexed neighbour is set to not-indexed), then
+     **n-nearest-neighbour fill** working from 8 neighbours down to
+     `c5_fill_min_neighbours` — at each level a not-indexed pixel with ≥ that many
+     indexed neighbours takes the modal neighbour orientation (the neighbour with the
+     most other neighbours within `c5_fill_tol_deg`), and each level iterates to
+     convergence before dropping. Each pass works from a snapshot, so the result
+     doesn't depend on raster order. Optional post-fill small-grain drop
+     (`c5_min_grain_px`, 0 = off). Single indexed phase only (errors otherwise).
+     Edge/corner pixels have only 5/3 neighbours, so can never fill at levels 6–8
+4. Reconstruct grains, keep `phase_name` pixels/grains, compute GROD (MTEX
+   `calcGROD`) for every pixel of every kyanite grain — every grain is kept, not
+   just the largest
+5. Save the GROD map, per-pixel CSV, and log for the **selected** method
+6. **Both** methods are run on every grain every run, so the comparison diagnostics
+   always reflect the current parameters; the non-selected method failing is only a
+   warning (its panels show the error). Comparison figures have fixed per-grain
+   filenames, so each run overwrites them rather than accumulating copies
+
+Notes:
+- Filled pixels carry no measured MAD/BC — those columns are `NaN` in the pixel CSV,
+  which is how filled pixels are told apart from measured ones. For `'channel5'`, a
+  removed wild spike has its MAD/BC blanked too, so a spike that's later refilled
+  counts as filled, not measured
+- GROD is unaffected by `ctf_frame_option`, but the exported Euler angles are not:
+  with the default `''` they're in the Euler reference frame, rotated 180° about x
+  from the map (Oxford convention). Set `'convertEuler2SpatialReferenceFrame'` if
+  the Euler angles need to line up with the map
+- Observed on the first three grains (MW609-01, MW609-02, RH-XA-57081P-05): MAD < 2.0
+  rejects nothing (every indexed pixel already has MAD < 2.0), and `'channel5'` with
+  `c5_min_grain_px = 0` leaves thousands of 1–4 px grains (misindexed clusters that
+  survive spike removal) vs. tens–~180 for `'mtex'`; their GROD is ~0° (each is its
+  own mean), visible as white speckle. `c5_min_grain_px = 5` matches the `'mtex'`
+  small-grain drop
+- The GROD map's title is the bare grain id (the colorbar already names the
+  quantity). MTEX lays out its figures with no headroom for a title, so after the
+  (non-bold) `title()` call the script re-runs MTEX's layout (`drawNow` on the
+  figure's `mtexFig`) — what `mtexTitle` does internally, without `mtexTitle`'s
+  forced bold LaTeX
+- The comparison diagnostics are drawn with plain MATLAB axes on the raw map grid
+  (µm axes), each axes/legend/colorbar in a fixed `OuterPosition` box with a
+  reserved header strip for the title + parameter line, and figure height derived
+  from the map's aspect ratio — `tiledlayout` was dropped because its layout title
+  collided with the tile titles on wide maps. Empty pixels draw light grey on the
+  comparison GROD maps so 0° (white) stays distinguishable from background
 
 ### `onboard_dataset.py` details
 - Purpose: let a collaborator with a differently-named/organized dataset feed it into
@@ -425,7 +487,8 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `inputs/xanes_classification/<grain_id>_pre_edge_classification.csv` (hand-assigned
   pre-edge class labels), `inputs/prepeak_fits/<grain_id>_prepeak_fits.csv` (raw
   Larch/Athena "Pre-edge Peak Fit Report" export — Lorentzian pre-edge fit parameters
-  per spot, including `fit_centroid` in eV). `inputs/maps/<grain_id>/*.tif` is the one exception —
+  per spot, including `fit_centroid` in eV), `inputs/ebsd/<grain_id>_EBSD.ctf` (raw
+  Oxford/HKL EBSD Channel Text File, read by `kyanite_ebsd.m`). `inputs/maps/<grain_id>/*.tif` is the one exception —
   it's generated by `xrf_h5_to_tiff.py` from `inputs/xrf/`, not raw — but every
   downstream script (`CL_EPMA_registration.m` and friends) only ever reads it as
   `epma_dir`, never writes to it, so it lives alongside the rest of `inputs/`
@@ -487,7 +550,7 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `kyanite_spot_analysis.py` and `xanes_rf_classifier.py` → `figs/spot_analysis/`
   (shared — both pool the same per-spot CSVs and fall under the same
   "spot analysis" umbrella, even though they're two different analyses),
-  `xanes_plot.py` → `figs/xanes/`
+  `xanes_plot.py` → `figs/xanes/`, `kyanite_ebsd.m` → `figs/ebsd/`
 - Reusable data files read back in by other scripts go in `figs/data/`
   rather than directly in `figs/`: grain mask (`<grain_id>_mask.tif`), pixel
   data exports (`<grain_id>_pixel_data.csv` and `.mat`), control-point MATs
@@ -570,6 +633,16 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
   `dataset_manifest.yaml` (or any name — set in `onboard_dataset.py`'s `MANIFEST_FILE`)
 - Onboarding audit log: `inputs/<grain_id>_onboarding_log.txt` (written by `onboard_dataset.py`,
   only on a non-dry-run execution)
+- EBSD outputs (`kyanite_ebsd.m`), per grain: `ebsd/<grain_id>_GROD_map.png` (selected
+  cleaning method); `data/<grain_id>_ebsd_pixel_data.csv` (`x_um`, `y_um`, Bunge
+  `phi1_deg`/`Phi_deg`/`phi2_deg`, `GROD_deg`, `MAD`, `BC`, `grainId` — `NaN` MAD/BC
+  marks a filled pixel); `diagnostics/<grain_id>_ebsd_log.txt` (method + parameters,
+  pixel counts per cleaning stage incl. spikes removed and pixels filled per level,
+  grain count, GROD stats, per-grain mean orientation);
+  `diagnostics/<grain_id>_ebsd_cleaning_maps.png` (2 × 2: GROD map and kept/filled/
+  removed status map per method) and `diagnostics/<grain_id>_ebsd_cleaning_summary.png`
+  (input status after the MAD filter + both methods' GROD histograms) — both
+  overwritten every run, titled with the selected method and every cleaning parameter
 
 ## Figure text conventions
 Figures from this project are made to be publishable, so their on-image text stays
@@ -675,6 +748,12 @@ so they carry local functions with the identical values hand-copied in —
   (`CENTROID_CMAP`). (The centroid is an absolute energy, not a signed or
   zero-centered quantity, so it takes a sequential colormap rather than
   `DIVERGING_CMAP`.)
+- **GROD colormap** (`kyanite_ebsd.m`'s `cmap_blue`, built by its local
+  `white_to_color()`) — linear white (0°) → `#0018F9` blue (max), a deliberate,
+  requested exception to `SEQUENTIAL_CMAP` for EBSD GROD maps (both the
+  `figs/ebsd/` map and the comparison diagnostics). Grain boundaries black,
+  `lineWidth` 1. The comparison diagnostics' categorical status maps use the house
+  palette: kept = light grey, filled = `BLUE`, removed / MAD-rejected = `ORANG`
 
 ## Key parameters (set per-grain at top of each script)
 
@@ -737,6 +816,28 @@ so they carry local functions with the identical values hand-copied in —
 - `regenerate_downstream` — `true` (default): re-extract pixel data and
   recompute Pearson correlations/shift-sensitivity/QC figures after saving the
   edited mask; `false`: touch only the mask TIFF + edit history
+
+**`kyanite_ebsd.m`**
+- `grain_ids` — `{}` (default) auto-discovers every `inputs/ebsd/*_EBSD.ctf`
+  (`input_dir`, `ctf_suffix`); otherwise a cell array of grain ids
+- `output_dir` / `data_dir` / `diagnostics_dir` — `figs/ebsd/`, `figs/data/`,
+  `figs/diagnostics/`
+- `phase_name` (default `'Kyanite'`, as written in the `.ctf` header)
+- `ctf_frame_option` — `''` (default, load as-is), `'convertEuler2SpatialReferenceFrame'`,
+  or `'convertSpatial2EulerReferenceFrame'` (see workflow notes; affects exported
+  Euler angles, not GROD)
+- Shared cleaning: `mad_threshold` (default `2.0`), `grain_angle_deg` (default `10`)
+- `cleaning_method` — `'mtex'` (default) or `'channel5'`; both always run for the
+  comparison diagnostics, this picks which drives the map/CSV/log
+- `'mtex'`: `mtex_min_grain_px` (default `5`)
+- `'channel5'`: `c5_spike_tol_deg` (default `10`), `c5_spike_require_all8` (default
+  `false`; `true` flags a spike only when all 8 neighbours exist and are indexed),
+  `c5_fill_min_neighbours` (default `6`; `8` = most conservative, `Inf` = spike
+  removal only), `c5_fill_tol_deg` (default `10`), `c5_min_grain_px` (default `0` = off)
+- `grod_shared_scale` (default `false` = each grain's map scaled to its own max;
+  `true` = one range pooled across the batch), `grod_cmax_deg` (`[]` = auto; a number
+  fixes the upper limit and implies a shared scale)
+- `cmap_blue`, `font_size`, `font_name`, `fig_dpi` — figure styling
 
 **`CL_local_regression_map.py`**
 - `GRAIN_IDS` — single string, list, or `None` (default) to auto-discover and run every grain with
@@ -1198,6 +1299,7 @@ so they carry local functions with the identical values hand-copied in —
 
 ## Requirements
 - MATLAB with Image Processing Toolbox (for `cpselect`, `imwarp`, `imread`, etc.)
+- MTEX (tested with 6.1.1) for `kyanite_ebsd.m` only — run `startup_mtex` first
 - Python: `h5py`, `numpy`, `tifffile`, `pandas`, `matplotlib`, `seaborn`, `scipy`, `scikit-learn`, `shap`, `pyyaml` (only needed for `onboard_dataset.py`) —
   pinned in `requirements.txt` (tested with Python 3.14); locally these live in the
   project's `.venv/` (`source .venv/bin/activate`)
