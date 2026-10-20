@@ -21,7 +21,7 @@
 %                   down to c5_fill_min_neighbours; optional small-grain drop
 %   4. Reconstruct grains, keep phase_name pixels/grains
 %   5. Compute GROD for every pixel of every remaining kyanite grain
-%   6. Save the GROD map, a per-pixel CSV, and a log
+%   6. Save the GROD map, an Euler map, a per-pixel CSV, and a log
 %
 %   Both cleaning methods are run on every grain, every run: the selected
 %   one (cleaning_method) drives the GROD map/CSV/log, and both feed two
@@ -39,6 +39,9 @@
 %
 % OUTPUTS:
 %   - ebsd/<grain_id>_GROD_map.png              — GROD map
+%   - ebsd/<grain_id>_Euler_map.png             — Euler map (Bunge phi1,
+%     Phi, phi2 -> RGB, Channel 5 style), same cleaned pixels/boundaries,
+%     with the color key (one gradient bar per angle) below the map
 %   - data/<grain_id>_ebsd_pixel_data.csv       — per-pixel x/y, Bunge Euler
 %     angles, GROD, MAD, band contrast, grain id (reusable). Filled pixels
 %     carry NaN MAD/BC, so they can be told apart from measured ones
@@ -242,16 +245,39 @@ for g = 1:numel(results)
     mtexColorMap(cmap);
     mtexColorbar('location', 'southoutside', 'orientation', 'horizontal', ...
         'title', 'GROD (°)');
-    title(gca, grain_id, 'FontWeight', 'normal', 'Interpreter', 'none', ...
+    ax_map = gca;
+    title(ax_map, grain_id, 'FontWeight', 'normal', 'Interpreter', 'none', ...
         'FontSize', font_size, 'FontName', font_name);
     % MTEX lays its figure out with no headroom for a title; re-run its
     % layout so the margins account for it (what mtexTitle does, but
     % mtexTitle forces a bold LaTeX title)
     mtexFig = getappdata(fig_grod, 'mtexFig');
     if ~isempty(mtexFig), drawNow(mtexFig); end
+    fit_title(fig_grod, ax_map);
     grod_png = fullfile(output_dir, [grain_id '_GROD_map.png']);
     exportgraphics(fig_grod, grod_png, 'Resolution', fig_dpi);
     close(fig_grod);
+
+    % --- Euler map (Channel 5 style: phi1 -> R, Phi -> G, phi2 -> B) ---
+    % Same cleaned map and grain boundaries as the GROD map. Colors come
+    % from the orientations as loaded, so they follow ctf_frame_option
+    % exactly like the exported Euler angles do.
+    eulerKey = BungeColorKey(r.ebsd.CS);
+    fig_euler = figure('Visible', 'off');
+    plot(r.ebsd, eulerKey.orientation2color(r.ebsd.orientations), 'micronbar', 'on');
+    hold on
+    plot(r.grains.boundary, 'lineColor', 'k', 'lineWidth', 1);
+    hold off
+    ax_map = gca;
+    title(ax_map, grain_id, 'FontWeight', 'normal', 'Interpreter', 'none', ...
+        'FontSize', font_size, 'FontName', font_name);
+    mtexFig = getappdata(fig_euler, 'mtexFig');
+    if ~isempty(mtexFig), drawNow(mtexFig); end
+    add_euler_key(fig_euler, r.ebsd.CS, font_size, font_name);
+    fit_title(fig_euler, ax_map);
+    euler_png = fullfile(output_dir, [grain_id '_Euler_map.png']);
+    exportgraphics(fig_euler, euler_png, 'Resolution', fig_dpi);
+    close(fig_euler);
 
     % --- Per-pixel CSV (reusable) ---
     [phi1, Phi, phi2] = Euler(r.ebsd.orientations, 'Bunge');
@@ -318,8 +344,8 @@ for g = 1:numel(results)
     cmp_summary_png = fullfile(diagnostics_dir, [grain_id '_ebsd_cleaning_summary.png']);
     plot_cleaning_comparison(r, clean, cmap, font_name, cmp_maps_png, cmp_summary_png, fig_dpi);
 
-    fprintf(fid, '\nOutputs:\n  %s\n  %s\n  %s\n  %s\n', grod_png, csv_file, ...
-        cmp_maps_png, cmp_summary_png);
+    fprintf(fid, '\nOutputs:\n  %s\n  %s\n  %s\n  %s\n  %s\n', grod_png, euler_png, ...
+        csv_file, cmp_maps_png, cmp_summary_png);
     fclose(fid);
 
     fprintf('%s: %d grains, %d px, GROD max %.2f deg -> %s\n', ...
@@ -799,6 +825,72 @@ function h = draw_categorical(ax, G, S, colors, names)
         h(k) = patch(ax, NaN, NaN, colors(k, :), 'EdgeColor', [0.4 0.4 0.4]);
     end
     hold(ax, 'off');
+end
+
+function fit_title(fig, ax)
+% Grow the figure upward until ax's title fits inside it. MTEX's own
+% layout (drawNow) doesn't reliably leave room for a title, so measure
+% where the title actually ends and add whatever headroom is missing.
+    fig.SizeChangedFcn = '';   % keep MTEX from re-laying out on resize
+    fig.Units = 'pixels';
+    kids = findall(fig, '-depth', 1, '-property', 'Units');
+    kids(kids == fig) = [];
+    for k = 1:numel(kids)
+        kids(k).Units = 'pixels';   % pin everything to the bottom edge
+    end
+    t = ax.Title;
+    t.Units = 'pixels';
+    ext = t.Extent;                 % [x y w h], relative to ax's inner box
+    title_top = ax.Position(2) + ext(2) + ext(4);
+    pad = 0.5*t.FontSize;
+    short = ceil(title_top + pad - fig.Position(4));
+    if short > 0
+        fig.Position(4) = fig.Position(4) + short;
+    end
+end
+
+function add_euler_key(fig, cs, font_size, font_name)
+% Append a Bunge Euler color key in a strip below an MTEX map: one gradient
+% bar per angle, 0 -> that angle's fundamental-region max. BungeColorKey
+% maps each angle linearly onto one RGB channel (phi1 -> R, Phi -> G,
+% phi2 -> B), so three single-channel bars are the exact key.
+    [maxPhi1, maxPhi, maxPhi2] = fundamentalRegionEuler(cs, specimenSymmetry, 'Bunge');
+    maxes = [maxPhi1, maxPhi, maxPhi2] ./ degree;
+    names = {'\phi_1 (°)', '\Phi (°)', '\phi_2 (°)'};
+
+    % MTEX re-lays out its axes whenever the figure resizes; switch that
+    % off, grow the figure downward, and shift the existing map up
+    fig.SizeChangedFcn = '';
+    fig.Units = 'pixels';
+    strip_h = round(6*font_size);
+    kids = findall(fig, '-depth', 1, '-property', 'Units');
+    kids(kids == fig) = [];
+    for k = 1:numel(kids)
+        kids(k).Units = 'pixels';
+    end
+    fig.Position(4) = fig.Position(4) + strip_h;
+    for k = 1:numel(kids)
+        kids(k).Position(2) = kids(k).Position(2) + strip_h;
+    end
+
+    W     = fig.Position(3);
+    bar_w = round(0.22*W);
+    gap   = round((W - 3*bar_w)/4);
+    bar_h = round(0.9*font_size);
+    bar_y = round(2*font_size);    % room below for the tick labels
+    ramp  = linspace(0, 1, 256);
+    for k = 1:3
+        ax = axes(fig, 'Units', 'pixels', ...
+            'Position', [gap + (k-1)*(bar_w + gap), bar_y, bar_w, bar_h]);
+        rgb = zeros(1, 256, 3);
+        rgb(1, :, k) = ramp;
+        image(ax, 'XData', [0 maxes(k)], 'YData', 1, 'CData', rgb);
+        set(ax, 'XLim', [0 maxes(k)], 'YLim', [0.5 1.5], 'XTick', [0 maxes(k)], ...
+            'YTick', [], 'TickLength', [0 0], 'Box', 'on', 'Layer', 'top', ...
+            'FontSize', font_size, 'FontName', font_name);
+        title(ax, names{k}, 'Interpreter', 'tex', 'FontWeight', 'normal', ...
+            'FontSize', font_size, 'FontName', font_name);
+    end
 end
 
 function v = get_prop(ebsd, name)

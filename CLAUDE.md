@@ -154,7 +154,8 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
 4. Reconstruct grains, keep `phase_name` pixels/grains, compute GROD (MTEX
    `calcGROD`) for every pixel of every kyanite grain — every grain is kept, not
    just the largest
-5. Save the GROD map, per-pixel CSV, and log for the **selected** method
+5. Save the GROD map, Euler map (with its color key), per-pixel CSV, and log for the
+   **selected** method
 6. **Both** methods are run on every grain every run, so the comparison diagnostics
    always reflect the current parameters; the non-selected method failing is only a
    warning (its panels show the error). Comparison figures have fixed per-grain
@@ -179,7 +180,10 @@ Notes:
   quantity). MTEX lays out its figures with no headroom for a title, so after the
   (non-bold) `title()` call the script re-runs MTEX's layout (`drawNow` on the
   figure's `mtexFig`) — what `mtexTitle` does internally, without `mtexTitle`'s
-  forced bold LaTeX
+  forced bold LaTeX. That alone still left titles cropped at the top, so both the
+  GROD and Euler maps then go through `fit_title()`, which measures the title's
+  actual pixel extent and grows the figure upward by whatever headroom is missing
+  (MTEX's resize-relayout is switched off first so it can't undo this)
 - The comparison diagnostics are drawn with plain MATLAB axes on the raw map grid
   (µm axes), each axes/legend/colorbar in a fixed `OuterPosition` box with a
   reserved header strip for the title + parameter line, and figure height derived
@@ -634,7 +638,10 @@ Notes:
 - Onboarding audit log: `inputs/<grain_id>_onboarding_log.txt` (written by `onboard_dataset.py`,
   only on a non-dry-run execution)
 - EBSD outputs (`kyanite_ebsd.m`), per grain: `ebsd/<grain_id>_GROD_map.png` (selected
-  cleaning method); `data/<grain_id>_ebsd_pixel_data.csv` (`x_um`, `y_um`, Bunge
+  cleaning method); `ebsd/<grain_id>_Euler_map.png` (same cleaned pixels/boundaries,
+  colored by MTEX `BungeColorKey` — φ1/Φ/φ2 → R/G/B, Channel 5 style — with the color
+  key drawn below the map as one gradient bar per angle, 0 → its fundamental-region
+  max; colors follow `ctf_frame_option` the same way the exported Euler angles do); `data/<grain_id>_ebsd_pixel_data.csv` (`x_um`, `y_um`, Bunge
   `phi1_deg`/`Phi_deg`/`phi2_deg`, `GROD_deg`, `MAD`, `BC`, `grainId` — `NaN` MAD/BC
   marks a filled pixel); `diagnostics/<grain_id>_ebsd_log.txt` (method + parameters,
   pixel counts per cleaning stage incl. spikes removed and pixels filled per level,
