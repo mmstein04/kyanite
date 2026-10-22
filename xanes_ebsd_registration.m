@@ -82,7 +82,7 @@ repo_root = fileparts(mfilename('fullpath'));
 
 % {} = every grain that has an EBSD .ctf, a spot geochemistry CSV and a
 % registered CL image; otherwise a cell array of grain ids.
-grain_ids = {'MW609-01'};
+grain_ids = {};
 
 ebsd_dir        = fullfile(repo_root, 'inputs', 'ebsd');
 ctf_suffix      = '_EBSD.ctf';

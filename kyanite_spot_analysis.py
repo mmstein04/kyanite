@@ -98,7 +98,7 @@ DIAGNOSTICS_DIR = _REPO_ROOT / 'figs' / 'diagnostics'
 # centroid map; the rest are skipped silently.
 PREPEAK_DIR = _REPO_ROOT / 'inputs' / 'prepeak_fits'
 
-ANALYSES = 'centroid_vs_orientation'   # 'pie', 'scatter', 'box', 'map', 'centroid_map', 'centroid_hist',
+ANALYSES = 'all'   # 'pie', 'scatter', 'box', 'map', 'centroid_map', 'centroid_hist',
                    # 'centroid_rank', 'centroid_vs_orientation', 'spot_index', 'pca',
                    # 'all', or a list of these
 
