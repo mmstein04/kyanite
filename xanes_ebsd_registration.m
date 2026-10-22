@@ -16,7 +16,9 @@
 % WORKFLOW (per grain):
 %   1. Load inputs/ebsd/<grain_id>_EBSD.ctf (orientations converted to the
 %      map's spatial frame, so a vector on the map and an orientation are in
-%      the same frame), MAD filter, reconstruct grains
+%      the same frame), MAD filter, reconstruct grains, drop grains smaller
+%      than min_grain_px and reconstruct again (kyanite_ebsd.m's 'mtex'
+%      cleaning without its fill)
 %   2. Load the registered CL image (already on the XRF/spot pixel grid) and
 %      the spot table from xrf_h5_extract_spots.py
 %   3. cpselect: registered CL (moving) vs. EBSD band contrast / IPF (fixed).
@@ -80,7 +82,7 @@ repo_root = fileparts(mfilename('fullpath'));
 
 % {} = every grain that has an EBSD .ctf, a spot geochemistry CSV and a
 % registered CL image; otherwise a cell array of grain ids.
-grain_ids = {};
+grain_ids = {'MW609-01'};
 
 ebsd_dir        = fullfile(repo_root, 'inputs', 'ebsd');
 ctf_suffix      = '_EBSD.ctf';
@@ -97,10 +99,16 @@ phase_name = 'Kyanite';
 % Unlike kyanite_ebsd.m (GROD only, frame-independent), this is required.
 ctf_frame_option = 'convertEuler2SpatialReferenceFrame';
 
-% Cleaning: MAD filter + grain reconstruction only, matching kyanite_ebsd.m's
-% shared settings. No fill — only measured pixels are used for orientations.
+% Cleaning: kyanite_ebsd.m's 'mtex' method up to (not including) its fill —
+% MAD filter, reconstruct grains, drop grains smaller than min_grain_px
+% (misindexed specks, which would otherwise become a spot's "majority grain"
+% with a meaningless grain mean), reconstruct again. No fill: only measured
+% pixels are used for orientations. Keep these equal to kyanite_ebsd.m's
+% mad_threshold / grain_angle_deg / mtex_min_grain_px so grains (and grain
+% means) match its GROD output.
 mad_threshold   = 2.0;
 grain_angle_deg = 10;
+min_grain_px    = 5;    % 0 = no small-grain drop
 
 % --- Control points ---
 % 'similarity' | 'affine' | 'projective'. Both images are in physical µm,
@@ -143,7 +151,7 @@ setMTEXpref('zAxisDirection', 'intoPlane');
 
 P = struct('ctf_frame_option', ctf_frame_option, 'phase_name', phase_name, ...
     'mad_threshold', mad_threshold, 'grain_angle_deg', grain_angle_deg, ...
-    'transform_type', lower(transform_type), 'reuse_saved_cps', lower(reuse_saved_cps), ...
+    'min_grain_px', min_grain_px, 'transform_type', lower(transform_type), 'reuse_saved_cps', lower(reuse_saved_cps), ...
     'cp_fixed_display', lower(cp_fixed_display), 'cp_moving_display', lower(cp_moving_display), ...
     'display_pct', display_pct, 'beam_radius_um', beam_radius_um, ...
     'xrf_pixel_um_fallback', xrf_pixel_um_fallback, ...
@@ -231,12 +239,23 @@ function register_grain(grain_id, P)
     end
     G = raw_grid(ebsd.x(:), ebsd.y(:));
 
-    ebsdK = ebsd(P.phase_name);
-    ebsdK = ebsdK(get_prop(ebsdK, 'mad') < P.mad_threshold);
-    [grains, ebsdK.grainId] = calcGrains(ebsdK, 'angle', P.grain_angle_deg*degree);
+    % Same order as kyanite_ebsd.m's clean_mtex: every phase (and non-indexed
+    % pixels, MAD 0, which pass) goes into the reconstruction, so other
+    % phases and gaps bound kyanite grains the same way there and here.
+    ang = P.grain_angle_deg*degree;
+    ebsdMad = ebsd(get_prop(ebsd, 'mad') < P.mad_threshold);
+    n_mad = length(ebsdMad(P.phase_name));
+    [grainsAll, ebsdMad.grainId] = calcGrains(ebsdMad, 'angle', ang);
+    if P.min_grain_px > 0
+        ebsdMad = ebsdMad(grainsAll(grainsAll.numPixel >= P.min_grain_px));
+        [grainsAll, ebsdMad.grainId] = calcGrains(ebsdMad, 'angle', ang);
+    end
+    ebsdK  = ebsdMad(P.phase_name);
+    grains = grainsAll(P.phase_name);
     cs = ebsdK.CS;
-    fprintf('EBSD: %d px (%d %s after MAD < %.2f), %d grains, step %.3g µm\n', ...
-        length(ebsd), length(ebsdK), P.phase_name, P.mad_threshold, grains.length, G.dx);
+    fprintf('EBSD: %d px; %s: %d after MAD < %.2f, %d after dropping grains < %d px; %d grains, step %.3g µm\n', ...
+        length(ebsd), P.phase_name, n_mad, P.mad_threshold, length(ebsdK), P.min_grain_px, ...
+        grains.length, G.dx);
 
     % Band contrast on the full raw grid (non-indexed pixels have BC too)
     bc = get_prop(ebsd, 'bc');
@@ -623,9 +642,9 @@ function write_log(log_file, grain_id, P, ctf_file, G, ebsd, ebsdK, grains, cs, 
     fprintf(fid, 'EBSD: %s\n', ctf_file);
     fprintf(fid, '  frame option      %s\n', P.ctf_frame_option);
     fprintf(fid, '  grid              %d x %d px, step %.4g x %.4g µm\n', G.sz(2), G.sz(1), G.dx, G.dy);
-    fprintf(fid, '  pixels            %d raw, %d %s with MAD < %.2f\n', length(ebsd), ...
-        length(ebsdK), P.phase_name, P.mad_threshold);
-    fprintf(fid, '  grains            %d (boundary %g°)\n', grains.length, P.grain_angle_deg);
+    fprintf(fid, '  pixels            %d raw, %d %s with MAD < %.2f and in grains >= %d px (no fill)\n', ...
+        length(ebsd), length(ebsdK), P.phase_name, P.mad_threshold, P.min_grain_px);
+    fprintf(fid, '  grains            %d %s (boundary %g°)\n', grains.length, P.phase_name, P.grain_angle_deg);
     try
         fprintf(fid, '  crystal frame     %s\n', strjoin(string(cs.alignment), ', '));
     catch

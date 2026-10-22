@@ -69,9 +69,11 @@ from matplotlib.cm import ScalarMappable
 from matplotlib.ticker import FuncFormatter
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
+from scipy import stats
 from scipy.spatial import ConvexHull, QhullError
 from kyanite_palette import (BLUE, ORANG, GREY, CATEGORY_ORDER, OVERLAY_CMAP,
                               element_colors as _element_colors,
+                              region_colors as _name_colors,
                               CATEGORY_COLORS as _SHARED_CATEGORY_COLORS)
 
 # =============================================================================
@@ -96,8 +98,9 @@ DIAGNOSTICS_DIR = _REPO_ROOT / 'figs' / 'diagnostics'
 # centroid map; the rest are skipped silently.
 PREPEAK_DIR = _REPO_ROOT / 'inputs' / 'prepeak_fits'
 
-ANALYSES = 'all'   # 'pie', 'scatter', 'box', 'map', 'centroid_map', 'centroid_hist',
-                   # 'centroid_rank', 'spot_index', 'pca', 'all', or a list of these
+ANALYSES = 'centroid_vs_orientation'   # 'pie', 'scatter', 'box', 'map', 'centroid_map', 'centroid_hist',
+                   # 'centroid_rank', 'centroid_vs_orientation', 'spot_index', 'pca',
+                   # 'all', or a list of these
 
 # Marker fill for the 'spot_index' diagnostic. A single neutral color on purpose:
 # that figure is a numbering key, so nothing in it should read as encoded data.
@@ -248,6 +251,35 @@ CENTROID_RANK_ERR_SIGMA = 1
 CENTROID_RANK_SHARED_Y = True
 CENTROID_RANK_FIGSIZE = (7.0, 4.0)
 CENTROID_RANK_LABEL_FONTSIZE = 5   # spot-number label above each point's error bar
+
+# --- Centroid vs. crystal orientation (per grain) ---
+# Joins each spot's fit centroid to xanes_ebsd_registration.m's per-spot EBSD
+# orientation (<grain_id>_spot_orientation.csv, in ORIENTATION_DIR); only grains that
+# have one get a figure, the rest are skipped silently. One figure per column named
+# in ORIENTATION_X: 'misori_to_grain_mean_deg' (misorientation of the spot's
+# footprint-mean orientation from its EBSD grain's mean orientation), or any
+# 'e_angle_*'/'k_angle_*' column (axial angle between the beam polarization /
+# propagation vector and a crystal axis or plane normal).
+ORIENTATION_DIR = _REPO_ROOT / 'figs' / 'data'
+ORIENTATION_X = ['misori_to_grain_mean_deg']
+# Spots whose EBSD footprint is mostly NOT one grain are excluded: their
+# majority grain is often a few-pixel misindexed speck, whose "grain mean" is the
+# spot's own orientation (misorientation ~0°), which is meaningless here. The
+# multi_grain flag alone is too strict — on a noisy map nearly every footprint
+# catches a stray pixel or two.
+ORIENTATION_MIN_MAJORITY_FRAC = 0.5
+# Pooled (all-grain) figure: grains from different samples differ in bulk Fe
+# oxidation state, which shows up as a centroid offset between grains that has
+# nothing to do with orientation. True = also write a median-centered version
+# (each grain's centroids minus that grain's own median), so only the
+# within-grain spread is compared across grains. The raw pooled figure is
+# written either way.
+ORIENTATION_POOLED_MEDIAN_CENTERED = True
+# ORIENTATION_X columns that only get per-grain figures, never a pooled one.
+# Misorientation from the grain mean is measured against each grain's own mean
+# orientation — a different reference in every grain — so putting several grains
+# on one such axis compares nothing.
+ORIENTATION_PER_GRAIN_ONLY = {'misori_to_grain_mean_deg'}
 
 # Filename prefix for a combined figure over every grain, matching
 # kyanite_figures.py's ALL_GRAINS_LABEL convention.
@@ -1368,6 +1400,124 @@ def plot_centroid_rank(grain_id, ranked, vmin, vmax, ylim=None):
 
 
 # =============================================================================
+# ANALYSIS 6e — centroid vs. crystal orientation, per grain
+#
+# Centroid (y, with fit-stderr error bars) against an EBSD orientation quantity at
+# each spot (x), from xanes_ebsd_registration.m's <grain_id>_spot_orientation.csv.
+# Same spot population as centroid_rank (on-grain, usable fit), further restricted
+# to spots that have an EBSD orientation and whose footprint is mostly one grain
+# (ORIENTATION_MIN_MAJORITY_FRAC).
+# =============================================================================
+
+_AXIS_NAMES = {'a_100': '[100]', 'b_010': '[010]', 'c_001': '[001]',
+               'n100': '(100) normal', 'n010': '(010) normal', 'n001': '(001) normal'}
+
+
+def orientation_axis_label(column):
+    if column == 'misori_to_grain_mean_deg':
+        return 'Misorientation from grain mean orientation (°)'
+    if column == 'misori_mean_deg':
+        return 'Mean misorientation within beam footprint (°)'
+    match = re.fullmatch(r'([ek])_angle_(\w+)', column)
+    if match and match.group(2) in _AXIS_NAMES:
+        vec = 'polarization' if match.group(1) == 'e' else 'beam direction'
+        return f'Angle between {vec} and {_AXIS_NAMES[match.group(2)]} (°)'
+    return column
+
+
+def load_spot_orientation(grain_id):
+    path = Path(ORIENTATION_DIR) / f'{grain_id}_spot_orientation.csv'
+    return pd.read_csv(path) if path.exists() else None
+
+
+def centroid_orientation_frame(df, orient, column):
+    """(spots with a usable centroid and orientation, {reason: n excluded})."""
+    ok = df['centroid_ok'].fillna(False) & on_grain_mask(df)
+    sub = df.loc[ok, ['spot', 'fit_centroid', 'fit_centroid_stderr']].merge(
+        orient[['spot', 'flag', 'majority_frac', column]], on='spot', how='left')
+    no_ori = sub[column].isna()
+    minority = ~no_ori & (sub['majority_frac'] < ORIENTATION_MIN_MAJORITY_FRAC)
+    excluded = {'off-grain': int((df['centroid_ok'].fillna(False) & ~on_grain_mask(df)).sum()),
+                'no usable fit': int((~df['centroid_ok'].fillna(False)).sum()),
+                'no EBSD orientation': int(no_ori.sum()),
+                f'footprint majority grain < {ORIENTATION_MIN_MAJORITY_FRAC:g}': int(minority.sum())}
+    return sub[~no_ori & ~minority].reset_index(drop=True), excluded
+
+
+def plot_centroid_vs_orientation(grain_id, sub, column):
+    err = CENTROID_RANK_ERR_SIGMA * sub['fit_centroid_stderr']
+
+    fig, ax = plt.subplots(figsize=CENTROID_RANK_FIGSIZE, layout='constrained')
+    ax.errorbar(sub[column], sub['fit_centroid'], yerr=err, fmt='none',
+                ecolor='0.35', elinewidth=0.9, capsize=2, zorder=2)
+    # Flat house BLUE: centroid is already the y axis, and within one grain its
+    # spread is far narrower than the maps' shared color scale, so a centroid
+    # colormap would render every point the same shade.
+    ax.scatter(sub[column], sub['fit_centroid'], s=30, color=BLUE,
+               edgecolors='black', linewidths=0.5, zorder=3)
+    for x, top, spot in zip(sub[column], sub['fit_centroid'] + err, sub['spot']):
+        ax.annotate(str(int(spot)), (x, top), xytext=(0, 2), textcoords='offset points',
+                    ha='center', va='bottom', fontsize=CENTROID_RANK_LABEL_FONTSIZE,
+                    color='0.25', zorder=4)
+
+    ax.set_xlabel(orientation_axis_label(column), fontsize=10)
+    ax.set_ylabel(CENTROID_CBAR_LABEL, fontsize=10)
+    # No Fe2+/Fe3+ reference lines: widening the axis to take in Fe2+ squashes
+    # the spread within a grain to a thin band. y is left autoscaled to the data.
+    format_ev_axis(ax.yaxis)
+    ax.tick_params(labelsize=8)
+    for side in ('top', 'right'):
+        ax.spines[side].set_visible(False)
+    if SHOW_TITLE:
+        ax.set_title(f'{grain_id} — {CENTROID_TITLE}', fontsize=11)
+    return fig
+
+
+# One marker shape per grain on the pooled figure, on top of its color (redundant
+# encoding, so grains stay distinguishable in greyscale/for colorblind readers).
+# Cycles past the last shape.
+ORIENTATION_POOLED_MARKERS = ['o', 's', '^', 'D', 'v', 'P', 'X', '<', '>', 'h']
+
+
+def median_centered(sub):
+    """One grain's centroids minus that grain's own median (eV)."""
+    return sub['fit_centroid'] - sub['fit_centroid'].median()
+
+
+def plot_centroid_vs_orientation_pooled(grain_subs, column, centered=False):
+    """grain_subs: ordered {grain_id: centroid_orientation_frame output}. Spots are
+    not labeled — spot numbers repeat across grains, so a bare number would be
+    ambiguous here (the per-grain figures carry them). Grain colors come from
+    kyanite_palette's sorted-name tab10 assignment (region_colors): stable across
+    reruns and across these figures, but a new grain that sorts earlier shifts
+    the colors of the grains after it. centered=True plots each grain's centroids
+    relative to its own median (see ORIENTATION_POOLED_MEDIAN_CENTERED); error
+    bars are unchanged, since subtracting a constant doesn't change them."""
+    colors = _name_colors(grain_subs)
+    fig, ax = plt.subplots(figsize=CENTROID_RANK_FIGSIZE, layout='constrained')
+    for i, (grain_id, sub) in enumerate(grain_subs.items()):
+        y = median_centered(sub) if centered else sub['fit_centroid']
+        ax.errorbar(sub[column], y,
+                    yerr=CENTROID_RANK_ERR_SIGMA * sub['fit_centroid_stderr'], fmt='none',
+                    ecolor='0.35', elinewidth=0.9, capsize=2, zorder=2)
+        ax.scatter(sub[column], y, s=30, color=colors[grain_id],
+                   marker=ORIENTATION_POOLED_MARKERS[i % len(ORIENTATION_POOLED_MARKERS)],
+                   edgecolors='black', linewidths=0.5, zorder=3, label=grain_id)
+
+    ax.set_xlabel(orientation_axis_label(column), fontsize=10)
+    ax.set_ylabel('Fe pre-edge fit centroid − grain median (eV)' if centered
+                  else CENTROID_CBAR_LABEL, fontsize=10)
+    format_ev_axis(ax.yaxis)
+    ax.tick_params(labelsize=8)
+    ax.legend(fontsize=8, frameon=False, loc='best')
+    for side in ('top', 'right'):
+        ax.spines[side].set_visible(False)
+    if SHOW_TITLE:
+        ax.set_title(CENTROID_TITLE, fontsize=11)
+    return fig
+
+
+# =============================================================================
 # ANALYSIS 7 — per-grain spot-numbering diagnostic
 #
 # Just the numbering: the registered CL image with every spot plotted in one
@@ -1404,7 +1554,7 @@ def plot_spot_index_map(grain_id, df, cl_img):
 # =============================================================================
 
 ALL_ANALYSES = ['pie', 'scatter', 'box', 'map', 'centroid_map', 'centroid_hist',
-                'centroid_rank', 'spot_index', 'pca']
+                'centroid_rank', 'centroid_vs_orientation', 'spot_index', 'pca']
 if ANALYSES == 'all':
     analyses = ALL_ANALYSES
 elif isinstance(ANALYSES, (list, tuple)):
@@ -1682,6 +1832,65 @@ if 'centroid_rank' in analyses:
                 out = out_dir / f'{grain_id}_centroid_rank.png'
                 fig.savefig(out, dpi=200, bbox_inches='tight')
                 print(f'  Saved: {out.name}')
+
+if 'centroid_vs_orientation' in analyses:
+    print('\n--- pre-edge fit centroid vs. EBSD crystal orientation ---')
+    if centroid_limits is None:
+        print(NO_CENTROIDS_MSG)
+    else:
+        n_done = 0
+        pooled = {column: {} for column in ORIENTATION_X}   # column -> {grain_id: sub}
+        for grain_id in sorted(centroid_grains):
+            orient = load_spot_orientation(grain_id)
+            if orient is None:
+                continue
+            for column in ORIENTATION_X:
+                if column not in orient.columns:
+                    print(f"  WARNING: {grain_id}: '{column}' not in its spot orientation CSV — skipping.")
+                    continue
+                sub, excluded = centroid_orientation_frame(centroid_grains[grain_id], orient, column)
+                notes = '; '.join(f'{n} {why}' for why, n in excluded.items() if n)
+                if len(sub) < 3:
+                    print(f'  WARNING: {grain_id}: only {len(sub)} usable spot(s) for {column} — skipped'
+                          + (f' ({notes} excluded)' if notes else ''))
+                    continue
+                pearson = stats.pearsonr(sub[column], sub['fit_centroid'])
+                spearman = stats.spearmanr(sub[column], sub['fit_centroid'])
+                print(f'  {grain_id} vs {column}: n={len(sub)}, '
+                      f'{column} {sub[column].min():.2f}-{sub[column].max():.2f}, '
+                      f'Pearson r={pearson.statistic:.3f} (p={pearson.pvalue:.2g}), '
+                      f'Spearman ρ={spearman.statistic:.3f} (p={spearman.pvalue:.2g})'
+                      + (f'; excluded: {notes}' if notes else ''))
+                fig = plot_centroid_vs_orientation(grain_id, sub, column)
+                n_done += 1
+                pooled[column][grain_id] = sub
+                if SAVE_FIG:
+                    out = out_dir / f'{grain_id}_centroid_vs_{column}.png'
+                    fig.savefig(out, dpi=200, bbox_inches='tight')
+                    print(f'  Saved: {out.name}')
+        if not n_done:
+            print(f'  No grain with fits has a *_spot_orientation.csv in {ORIENTATION_DIR} — skipping.')
+
+        for column, grain_subs in pooled.items():
+            if len(grain_subs) < 2 or column in ORIENTATION_PER_GRAIN_ONLY:
+                continue
+            both = pd.concat(grain_subs.values(), ignore_index=True)
+            modes = [False] + ([True] if ORIENTATION_POOLED_MEDIAN_CENTERED else [])
+            for centered in modes:
+                y = (pd.concat([median_centered(s) for s in grain_subs.values()], ignore_index=True)
+                     if centered else both['fit_centroid'])
+                pearson = stats.pearsonr(both[column], y)
+                spearman = stats.spearmanr(both[column], y)
+                print(f'  Pooled{" median-centered" if centered else ""} '
+                      f'({", ".join(grain_subs)}) vs {column}: n={len(both)}, '
+                      f'Pearson r={pearson.statistic:.3f} (p={pearson.pvalue:.2g}), '
+                      f'Spearman ρ={spearman.statistic:.3f} (p={spearman.pvalue:.2g})')
+                fig = plot_centroid_vs_orientation_pooled(grain_subs, column, centered)
+                if SAVE_FIG:
+                    stem = 'centroid_rel_median' if centered else 'centroid'
+                    out = out_dir / f'{ALL_GRAINS_LABEL}_{stem}_vs_{column}.png'
+                    fig.savefig(out, dpi=200, bbox_inches='tight')
+                    print(f'  Saved: {out.name}')
 
 if 'spot_index' in analyses:
     print(f'\n--- spot numbering diagnostics ({len(grain_frames)} grain(s)) ---')

@@ -27,6 +27,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | `CL_region_extraction.m` | MATLAB | Draw named sub-grain polygon regions on an already-registered CL image and extract per-pixel CL + element data per region (no re-registration) |
 | `CL_mask_edit.m` | MATLAB | After-the-fact touch-up of a grain mask already produced by `CL_EPMA_registration.m` (e.g. an inclusion was masked-in, or real grain was masked-out weeks earlier) — draw add/remove polygons on the already-registered CL image, then re-derive pixel data and downstream figures under the corrected mask |
 | `kyanite_ebsd.m` | MATLAB (MTEX) | Batch EBSD processing of each grain's Oxford/HKL `.ctf` map: MAD filter, then one of two selectable cleaning methods (`'mtex'` small-grain drop + `fill()`, or `'channel5'` HKL Channel 5–style wild-spike removal + n-nearest-neighbour fill), then GROD (grain reference orientation deviation) for every kyanite grain — GROD map, per-pixel CSV, log, and a method-comparison diagnostic pair. Standalone: not registered to the EPMA/CL pixel grid |
+| `xanes_ebsd_registration.m` | MATLAB (MTEX) | Place each XANES spot on its grain's EBSD map: `cpselect` CL↔EBSD control points, fit an XRF-µm → EBSD-µm transform (applied to the spot coordinates only — the EBSD data are never warped), read the footprint-mean orientation of the majority grain at each spot, and rotate the beam polarization/propagation vectors into the crystal frame. Outputs `data/<grain_id>_spot_orientation.csv` and `_ebsd_controlpoints.mat`, plus a log and QC PNG in `diagnostics/`. Not yet verified: the beam geometry defaults (`polarization_xrf`/`beam_dir_xrf`) and the triclinic crystal-frame alignment MTEX assigns on `.ctf` load (`X‖a*, Z‖c`) |
 | `CL_local_regression_map.py` | Python | Slide a circular window across an already-registered grain and run a per-pixel CL-vs-element linear regression inside each window, producing continuous slope/R maps that complement `CL_region_extraction.m`'s fixed polygon regions |
 | `kyanite_figures.py` | Python | Standalone figure generation from exported CSV pixel data |
 | `kyanite_pca.py` | Python | PCA analysis of CL vs. trace elements from whole-grain CSV pixel data; for region CSVs, instead fits one shared PCA pooled across regions (scree, loadings, PC1/PC2-by-region scatter, biplot) to test whether hand-drawn regions separate in PC space — no per-region PCA |
@@ -351,7 +352,34 @@ Notes:
   QC/lookup aid rather than an analysis result and goes to `figs/diagnostics/`
   (`DIAGNOSTICS_DIR`), not `OUT_DIR`. Off-grain spots keep the `'X'` marker. The
   `map` analysis's own class-colored spot map keeps its labels — only the centroid
-  figures dropped them)
+  figures dropped them),
+  `centroid_vs_orientation` (per grain that has a `<grain_id>_spot_orientation.csv`
+  from `xanes_ebsd_registration.m` in `ORIENTATION_DIR`; other grains are skipped
+  silently): fit centroid ± `CENTROID_RANK_ERR_SIGMA`σ against one EBSD orientation
+  column per `ORIENTATION_X` entry — default `misori_to_grain_mean_deg`, or any
+  `e_angle_*`/`k_angle_*` polarization/beam-to-crystal-axis angle. Same spot
+  population as `centroid_rank`, further restricted to spots with an orientation
+  whose footprint majority grain holds ≥ `ORIENTATION_MIN_MAJORITY_FRAC` of the
+  footprint pixels. The screen uses that fraction rather than the `multi_grain`
+  flag, which on a noisy map catches nearly every spot. Spots labeled by number
+  like `centroid_rank`; Pearson/Spearman r go to the console only. Output:
+  `<grain_id>_centroid_vs_<column>.png`, plus — when 2+ grains have orientation
+  data — a pooled `<ALL_GRAINS_LABEL>_centroid_vs_<column>.png` with every grain
+  on one set of axes (not for columns in `ORIENTATION_PER_GRAIN_ONLY`, default
+  `{'misori_to_grain_mean_deg'}`: each grain's misorientation is measured from its
+  own grain mean, a different reference per grain, so pooling it compares nothing),
+  each grain its own color (`kyanite_palette.region_colors()`'s
+  sorted-name tab10 assignment) *and* marker shape, spots unlabeled since spot
+  numbers repeat across grains. With `ORIENTATION_POOLED_MEDIAN_CENTERED` (default
+  on), also a `<ALL_GRAINS_LABEL>_centroid_rel_median_vs_<column>.png`: each grain's
+  centroids minus that grain's own median, so a bulk oxidation-state offset
+  between grains (e.g. from different samples — MW609 vs. 57081P) doesn't
+  masquerade as an orientation effect; only within-grain spread is compared. Its
+  console r is computed on the centered values too. Neither figure draws the Fe²⁺/Fe³⁺ reference lines
+  (the y axis is autoscaled to the data, since widening it to Fe²⁺ flattens the
+  within-grain spread), and neither colors points by centroid (centroid is already
+  the y axis, and its within-grain range is far narrower than the maps' shared
+  color scale) — per-grain figures use flat house `BLUE`
 - **Pre-edge fit centroids** are a separate, later-arriving per-spot measurement,
   read from `inputs/prepeak_fits/<grain_id>_prepeak_fits.csv` (`PREPEAK_DIR`) — the
   raw Larch/Athena "Pre-edge Peak Fit Report" export, unmodified. Only grains that
@@ -612,6 +640,9 @@ Notes:
   `pca_biplot.png`, `<grain_id>_spot_map.png`, `<grain_id>_centroid_map.png`,
   `centroid_histogram_by_grain.png` (one combined figure, like the pie grid),
   `<grain_id>_centroid_rank.png` (ranked centroids with fit-stderr error bars),
+  `<grain_id>_centroid_vs_<column>.png` (centroid vs. EBSD orientation) and its
+  pooled `all_grains_centroid_vs_<column>.png` / median-centered
+  `all_grains_centroid_rel_median_vs_<column>.png`,
   `<label>_centroid_map_panel.png` (multi-grain shared-colorbar panel; `<label>` is
   `all_grains`, the `CENTROID_PANEL_GROUPS` dict key, or the joined grain ids).
   The `spot_index` numbering figure is the exception — being a lookup aid rather
@@ -1194,7 +1225,8 @@ so they carry local functions with the identical values hand-copied in —
   A stray `*_prepeak_fits.csv` sitting directly in `inputs/` instead is reported by
   name, since it would otherwise be silently ignored
 - `ANALYSES` — `pie`, `scatter`, `box`, `map`, `centroid_map`, `centroid_hist`,
-  `centroid_rank`, `spot_index`, `pca`, `all`, or a list of these
+  `centroid_rank`, `centroid_vs_orientation`, `spot_index`, `pca`, `all`, or a
+  list of these
 - `SCATTER_ELEMENTS` — element columns for the CL-vs-element and by-class box plots (`None` = auto-detect all)
 - `PCA_ELEMENTS`, `PCA_LOG_TRANSFORM` — element list for the PCA scatter/scree/loadings/biplot, and
   whether to log10-transform elements before z-scoring/PCA (independent of `SCATTER_ELEMENTS`)
@@ -1263,6 +1295,12 @@ so they carry local functions with the identical values hand-copied in —
   grain's figure; `False` = each grain's axis fits its own spots);
   `CENTROID_RANK_FIGSIZE`, `CENTROID_RANK_LABEL_FONTSIZE` (spot-number labels,
   default `5`)
+- `ORIENTATION_DIR` (default `figs/data/`), `ORIENTATION_X` (default
+  `['misori_to_grain_mean_deg']`), `ORIENTATION_MIN_MAJORITY_FRAC` (default `0.5`),
+  `ORIENTATION_POOLED_MEDIAN_CENTERED` (default `True`), `ORIENTATION_PER_GRAIN_ONLY`
+  (default `{'misori_to_grain_mean_deg'}`) — `centroid_vs_orientation`'s input
+  folder, x-axis columns, footprint-purity screen, pooled median-centered figure
+  toggle, and columns that never get a pooled figure
 - `MAPS_DIR` / `CENTROID_PANEL_PIXEL_UM_FROM_SIDECAR` / `CENTROID_PANEL_PIXEL_UM` —
   per-grain µm/px for `CENTROID_PANEL_TRUE_SCALE`, read from `xrf_h5_to_tiff.py`'s
   metadata sidecar (same mechanism/regex as `xrf_display.py`), with the constant as
