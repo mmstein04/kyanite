@@ -136,15 +136,18 @@ REGION_PCA_HULLS = True     # draw a convex-hull outline around each region's po
 
 # --- All-grains summary (whole-grain CSVs only) ---
 # One pooled figure, one row per grain (sorted, same order as
-# kyanite_figures.py's summary r heatmap). A PC's sign is arbitrary, so
-# every PC is first flipped so its score correlates positively with CL —
-# positive score = brighter CL. Left: r(PC score, CL) for each PC, with the
-# grain's best-CL PC (largest r) outlined. Right: that PC's loadings, so a
-# positive loading reads as "more of this element goes with brighter CL".
+# kyanite_figures.py's summary heatmap). Left: R² of CL vs. each PC's score
+# (= r², the single-PC linear fit's R², matching kyanite_figures.py's default
+# SUMMARY_METRIC), with the grain's best-CL PC (largest R²) outlined. A PC's
+# sign is arbitrary, so that PC is flipped so its score correlates positively
+# with CL — positive score = brighter CL. Right: that PC's flipped loadings,
+# so a positive loading reads as "more of this element goes with brighter CL".
 # Skipped if fewer than 2 whole-grain CSVs ran. No title — the caption
-# carries what the figure shows. Saved to WHOLE_GRAIN_OUTPUT_DIR as
+# carries what the figure shows. Saved to SUMMARY_OUTPUT_DIR (figs/summary/,
+# shared with every other all-grains summary figure) as
 # <ALL_GRAINS_LABEL>_pca_summary.png.
 SUMMARY          = True
+SUMMARY_OUTPUT_DIR = _REPO_ROOT / 'figs' / 'summary'
 ALL_GRAINS_LABEL = 'all_grains'
 # Column order for the loadings panel; elements not listed are appended, sorted.
 SUMMARY_ELEMENT_ORDER = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Mn_Ka', 'Ti_Ka']
@@ -612,50 +615,50 @@ def _summary_heatmap(ax, values, cmap, vmin, vmax, cbar_label, fig, fmt='.2f'):
 
 
 def build_pca_summary_tables(results):
-    """From analyze()'s per-grain results: grains x PCs table of r(PC score,
-    CL) after orienting every PC toward brighter CL (so r >= 0), each grain's
-    best-CL PC, and grains x elements table of that PC's (same-oriented)
-    loadings."""
+    """From analyze()'s per-grain results: grains x PCs table of R² (= r²)
+    of CL vs. each PC's score, each grain's best-CL PC (largest R²), and
+    grains x elements table of that PC's loadings, flipped so the PC's score
+    correlates positively with CL."""
     grains = sorted(results)
     n_pcs = max(len(res['r_cl']) for res in results.values())
     present = set().union(*(res['loadings'].index for res in results.values()))
     elements = ([e for e in SUMMARY_ELEMENT_ORDER if e in present]
                 + sorted(present - set(SUMMARY_ELEMENT_ORDER)))
-    r_df = pd.DataFrame(np.nan, index=grains, columns=[f'PC{k+1}' for k in range(n_pcs)])
+    r2_df = pd.DataFrame(np.nan, index=grains, columns=[f'PC{k+1}' for k in range(n_pcs)])
     load_df = pd.DataFrame(np.nan, index=grains, columns=elements)
-    var_df = r_df.copy()
+    var_df = r2_df.copy()
     best = {}
     for g in grains:
         res = results[g]
-        r = np.abs(res['r_cl'])               # r after flipping each PC toward +CL
-        k = int(np.nanargmax(r))
-        r_df.loc[g, r_df.columns[:len(r)]] = r
-        var_df.loc[g, var_df.columns[:len(r)]] = res['explained']
+        r2 = res['r_cl'] ** 2
+        k = int(np.nanargmax(r2))
+        r2_df.loc[g, r2_df.columns[:len(r2)]] = r2
+        var_df.loc[g, var_df.columns[:len(r2)]] = res['explained']
         best[g] = k
         sign = np.sign(res['r_cl'][k]) or 1.0
         loads = res['loadings'][f'PC{k+1}'] * sign
         load_df.loc[g, loads.index] = loads.values
-    return r_df, var_df, best, load_df
+    return r2_df, var_df, best, load_df
 
 
-def plot_pca_summary(r_df, best, load_df):
-    grains = list(r_df.index)
-    n_g, n_pc, n_e = len(grains), r_df.shape[1], load_df.shape[1]
+def plot_pca_summary(r2_df, best, load_df):
+    grains = list(r2_df.index)
+    n_g, n_pc, n_e = len(grains), r2_df.shape[1], load_df.shape[1]
     fig, (ax_r, ax_l) = plt.subplots(1, 2, figsize=(2.2 + (n_pc + n_e) * 0.9 + 1.5, n_g * 0.7 + 2),
                                      gridspec_kw={'width_ratios': [n_pc, n_e], 'wspace': 0.08},
                                      sharey=True)
 
-    # White -> red: positive half of DIVERGING_CMAP, the same reds the r
-    # heatmap uses for positive r — this panel is also a correlation with CL,
-    # and every PC was oriented so r >= 0
+    # White -> red: positive half of DIVERGING_CMAP, the same reds and 0..1
+    # scale as kyanite_figures.py's summary R² heatmap
     reds = ListedColormap(plt.colormaps[DIVERGING_CMAP](np.linspace(0.5, 1.0, 256)))
-    _summary_heatmap(ax_r, r_df.values.astype(float), reds, 0, 1,
-                     'Pearson r (PC score vs. CL)', fig)
+    cbar = _summary_heatmap(ax_r, r2_df.values.astype(float), reds, 0, 1,
+                            'R² (PC score vs. CL)', fig)
+    cbar.set_ticks([0, 0.25, 0.5, 0.75, 1])
     for i, g in enumerate(grains):
         ax_r.add_patch(plt.Rectangle((best[g] - 0.5, i - 0.5), 1, 1, fill=False,
                                      edgecolor='black', linewidth=2, zorder=3, clip_on=False))
     ax_r.set_xticks(range(n_pc))
-    ax_r.set_xticklabels(r_df.columns)
+    ax_r.set_xticklabels(r2_df.columns)
     ax_r.set_xlabel('principal component')
     ax_r.set_yticks(range(n_g))
     ax_r.set_yticklabels(grains)
@@ -825,9 +828,9 @@ if SUMMARY:
     if len(whole_grain_results) < 2:
         print(f'  WARNING: summary needs >=2 whole-grain CSVs, found {len(whole_grain_results)}; skipping')
     else:
-        r_df, var_df, best, load_df = build_pca_summary_tables(whole_grain_results)
-        print('  Pearson r, PC score vs. CL (each PC oriented toward brighter CL):')
-        print('    ' + r_df.round(2).to_string().replace('\n', '\n    '))
+        r2_df, var_df, best, load_df = build_pca_summary_tables(whole_grain_results)
+        print('  R², CL vs. PC score:')
+        print('    ' + r2_df.round(2).to_string().replace('\n', '\n    '))
         print('  Variance explained (%):')
         print('    ' + var_df.round(1).to_string().replace('\n', '\n    '))
         print('  Best-CL PC per grain, and its loadings:')
@@ -835,8 +838,8 @@ if SUMMARY:
         summary_print.insert(0, 'PC', [f'PC{best[g] + 1}' for g in load_df.index])
         print('    ' + summary_print.to_string().replace('\n', '\n    '))
         if SAVE_FIG:
-            fig = plot_pca_summary(r_df, best, load_df)
-            summary_dir = Path(WHOLE_GRAIN_OUTPUT_DIR)
+            fig = plot_pca_summary(r2_df, best, load_df)
+            summary_dir = Path(SUMMARY_OUTPUT_DIR)
             summary_dir.mkdir(parents=True, exist_ok=True)
             out = summary_dir / f'{ALL_GRAINS_LABEL}_pca_summary.png'
             fig.savefig(out, dpi=200, bbox_inches='tight')

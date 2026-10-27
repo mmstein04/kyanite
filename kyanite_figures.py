@@ -121,12 +121,12 @@ GRAIN_FILTER = None
 WHOLE_GRAIN_OUTPUT_DIR = _REPO_ROOT / 'figs' / 'whole_grain'
 REGION_OUTPUT_DIR      = _REPO_ROOT / 'figs' / 'regions'
 
-# 'summary' output — None (default) saves alongside WHOLE_GRAIN_OUTPUT_DIR,
-# since it's still a whole-grain-CSV-derived figure, just pooled across
-# grains rather than per-grain. ALL_GRAINS_LABEL is the filename prefix
-# (mirrors xanes_rf_classifier.py's OUTPUT_LABEL convention for pooled,
-# not-per-grain outputs).
-SUMMARY_OUTPUT_DIR = None
+# 'summary' output — figs/summary/, the shared home for every all-grains
+# summary figure (also kyanite_pca.py's and kyanite_rf_shap_plots.py's);
+# None falls back to WHOLE_GRAIN_OUTPUT_DIR. ALL_GRAINS_LABEL is the filename
+# prefix (mirrors xanes_rf_classifier.py's OUTPUT_LABEL convention for
+# pooled, not-per-grain outputs).
+SUMMARY_OUTPUT_DIR = _REPO_ROOT / 'figs' / 'summary'
 ALL_GRAINS_LABEL   = 'all_grains'
 # What the 'summary' heatmap's cells show:
 #   'r'         — Pearson r, red/blue diverging, -1..1

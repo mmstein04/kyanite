@@ -572,6 +572,15 @@ Notes:
   wherever `CSV_INPUT` happens to point. Same principle for the other
   analysis-family folders: `kyanite_figures.py`'s own whole-grain figures →
   `figs/whole_grain/` (unchanged; only `kyanite_pca.py`'s moved).
+  **All-grains summary figures** — one figure condensing an analysis across
+  every grain (grains as rows): `kyanite_figures.py`'s `summary`,
+  `kyanite_rf_shap_plots.py`'s `summary`, and `kyanite_pca.py`'s `SUMMARY` —
+  all go to `figs/summary/` (each script's `SUMMARY_OUTPUT_DIR`), not their
+  analysis-family folder, so the cross-grain overview lives in one place. Any
+  new summary figure of this kind should do the same. Exception by design:
+  `kyanite_spot_analysis.py`'s cross-grain figures (pie grid, centroid
+  histogram/panel, pooled scatter/PCA/centroid-vs-orientation) stay in
+  `figs/spot_analysis/` with the rest of that analysis family
   `kyanite_sample_size_convergence.py` is the one exception: it's itself a
   diagnostic (not a pipeline step), so it has no dedicated analysis-family
   folder at all — its raw sweep CSV, convergence figures, and log all go to
@@ -1040,8 +1049,8 @@ so they carry local functions with the identical values hand-copied in —
   `<ALL_GRAINS_LABEL>_summary_<metric>_heatmap.png`, so
   correlation strength/consistency can be
   compared across grains — skipped (with a warning) if `CSV_INPUT` isn't a directory
-  or fewer than 2 whole-grain CSVs are found. `SUMMARY_OUTPUT_DIR` (default `None` →
-  `WHOLE_GRAIN_OUTPUT_DIR`) and `ALL_GRAINS_LABEL` (default `'all_grains'`, the
+  or fewer than 2 whole-grain CSVs are found. `SUMMARY_OUTPUT_DIR` (default
+  `figs/summary/`; `None` → `WHOLE_GRAIN_OUTPUT_DIR`) and `ALL_GRAINS_LABEL` (default `'all_grains'`, the
   filename prefix) control where/how it's saved
 - Outlier removal on the element axis (applied per region in region mode), two
   independent stages, implemented in shared module `kyanite_outliers.py` (also used
@@ -1157,15 +1166,16 @@ so they carry local functions with the identical values hand-copied in —
   `WHOLE_GRAIN_OUTPUT_DIR` (`figs/pca/`); `<grain_id>_pca_log.txt` in
   `DIAGNOSTICS_DIR` (`figs/diagnostics/`)
 - `SUMMARY` (default `True`) — after the per-grain loop, one pooled figure
-  `<ALL_GRAINS_LABEL>_pca_summary.png` in `WHOLE_GRAIN_OUTPUT_DIR` (no title),
+  `<ALL_GRAINS_LABEL>_pca_summary.png` in `SUMMARY_OUTPUT_DIR` (default
+  `figs/summary/`; no title),
   one row per whole-grain CSV, same sorted grain order as `kyanite_figures.py`'s
-  summary r heatmap. Every PC is first sign-flipped so its score correlates
-  positively with CL (PC sign is arbitrary), so positive score = brighter CL.
-  Left: grains × PCs heatmap of r(PC score, CL), white → red (positive half of
-  `DIVERGING_CMAP`, 0–1, the r heatmap's reds), each grain's best-CL PC
-  (largest r) outlined in black. Right: grains × elements heatmap of that PC's
-  same-flipped loadings on `LOADING_CMAP` (−1..1), so a positive loading reads
-  "more of this element goes with brighter CL". Columns in
+  summary heatmap. Left: grains × PCs heatmap of R² of CL vs. each PC's score
+  (= r², the single-PC linear fit's R²), white → red 0–1 (positive half of
+  `DIVERGING_CMAP` — same scale as `kyanite_figures.py`'s default R² summary),
+  each grain's best-CL PC (largest R²) outlined in black. Right: grains ×
+  elements heatmap of that PC's loadings on `LOADING_CMAP` (−1..1), sign-flipped
+  (PC sign is arbitrary) so the PC's score correlates positively with CL — a
+  positive loading reads "more of this element goes with brighter CL". Columns in
   `SUMMARY_ELEMENT_ORDER` (default Cr, V, Fe, Mn, Ti; others appended), bare
   element symbols. Variance explained and the tables print to the console, not
   the figure. Needs ≥2 whole-grain CSVs; built from the in-memory results of
@@ -1219,7 +1229,8 @@ so they carry local functions with the identical values hand-copied in —
 - `GRAIN_FILTER` — list of grain_ids to plot, or `None` for every grain found in `CSV_INPUT`
 - `PLOTS` — `observed_vs_predicted`, `importance`, `shap_importance`,
   `shap_interactions`, `shap_dependence`, `summary`, `all`, or a list of these
-- `summary` — one pooled figure (`RF_OUTPUT_DIR/<ALL_GRAINS_LABEL>_rf_summary.png`,
+- `summary` — one pooled figure (`SUMMARY_OUTPUT_DIR/<ALL_GRAINS_LABEL>_rf_summary.png`,
+  default `figs/summary/`,
   no title), one row per grain in the same sorted order as `kyanite_figures.py`'s
   summary r heatmap: CV R² bars (mean ± std across folds), a permutation-importance
   heatmap (drop in R², comparable across grains as-is), and a mean-|SHAP| heatmap

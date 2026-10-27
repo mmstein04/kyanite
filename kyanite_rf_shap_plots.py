@@ -56,8 +56,10 @@ PLOTS = 'all'   # 'observed_vs_predicted', 'importance', 'shap_importance',
 # grain — CV R2 (mean +/- std across folds), permutation importance (drop in
 # R2, already comparable across grains), and mean |SHAP| as a percentage of
 # that grain's total (raw |SHAP| is in each grain's own CL units, so it's
-# normalized per grain). Saved to RF_OUTPUT_DIR as
+# normalized per grain). Saved to SUMMARY_OUTPUT_DIR (figs/summary/, shared
+# with every other all-grains summary figure) as
 # <ALL_GRAINS_LABEL>_rf_summary.png.
+SUMMARY_OUTPUT_DIR = _REPO_ROOT / 'figs' / 'summary'
 ALL_GRAINS_LABEL = 'all_grains'
 # Column order for the summary heatmaps (matches kyanite_figures.py's summary
 # r heatmap); elements found in the CSVs but not listed are appended, sorted.
@@ -471,7 +473,9 @@ if 'summary' in plots:
         print('  Mean |SHAP|, % of grain total:')
         print('    ' + shap_df.round(1).to_string().replace('\n', '\n    '))
         fig = plot_summary(r2_df, perm_df, shap_df)
-        out = rf_out_dir / f'{ALL_GRAINS_LABEL}_rf_summary.png'
+        summary_out_dir = Path(SUMMARY_OUTPUT_DIR)
+        summary_out_dir.mkdir(parents=True, exist_ok=True)
+        out = summary_out_dir / f'{ALL_GRAINS_LABEL}_rf_summary.png'
         fig.savefig(out, dpi=FIG_DPI, bbox_inches='tight')
         plt.close(fig)
         print(f'  Saved {out.name}')
