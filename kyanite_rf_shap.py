@@ -127,11 +127,13 @@ def grain_id_for(csv_path):
 
 input_path = Path(CSV_INPUT)
 if input_path.is_dir():
-    # CL_local_regression_map.m's output also ends in '_pixel_data.csv' but is
-    # a different data product (per-window slope/R stats, no 'CL' column) —
+    # CL_local_regression_map.m's and kyanite_ebsd.m's outputs also end in
+    # '_pixel_data.csv' but are different data products (per-window slope/R
+    # stats; per-pixel EBSD orientation — neither has a 'CL' column) —
     # excluded here rather than processed and skipped downstream.
     csv_files = sorted(p for p in input_path.glob('*_pixel_data.csv')
-                        if not p.name.endswith('_local_regression_pixel_data.csv'))
+                        if not p.name.endswith(('_local_regression_pixel_data.csv',
+                                                '_ebsd_pixel_data.csv')))
     if not csv_files:
         raise FileNotFoundError(f'No *_pixel_data.csv files found in {input_path}')
 else:

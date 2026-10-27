@@ -52,7 +52,8 @@
 # 'summary' is different again: it only fires when CSV_INPUT is a directory,
 # and it's the one plot type that isn't per-grain — it pools every
 # whole-grain (non-region) CSV found into a single grains x ELEMENTS heatmap
-# of CL-vs-element Pearson r (annotated with n per cell), so correlation
+# of CL-vs-element correlation (R² by default; see SUMMARY_METRIC — per-cell
+# n goes to the console, not the figure), so correlation
 # strength/consistency can be compared across grains at a glance. Skipped
 # (with a warning) if CSV_INPUT isn't a directory or fewer than 2 whole-grain
 # CSVs are found.
@@ -127,6 +128,16 @@ REGION_OUTPUT_DIR      = _REPO_ROOT / 'figs' / 'regions'
 # not-per-grain outputs).
 SUMMARY_OUTPUT_DIR = None
 ALL_GRAINS_LABEL   = 'all_grains'
+# What the 'summary' heatmap's cells show:
+#   'r'         — Pearson r, red/blue diverging, -1..1
+#   'r2'        — R² (= r², the single-element linear fit's R²), white -> red,
+#                 0..1; the sign of the correlation is lost (a negative Fe r
+#                 reads the same as a positive one)
+#   'signed_r2' — r² carrying r's sign (r·|r|), red/blue diverging, -1..1:
+#                 magnitude is variance explained, sign is direction
+# Each saves under its own filename (_summary_<metric>_heatmap.png), so
+# switching never overwrites another variant.
+SUMMARY_METRIC = 'r2'
 
 # 'corrmatrix' and 'element_corrmatrix' both ignore the per-element looping
 # above and instead build one grid per grain (or per region) from every pair
@@ -706,27 +717,47 @@ def compute_summary_matrix(elements, grain_dfs):
     return grains, rdf, ndf
 
 
-def plot_summary_heatmap(ax, elements, grains, rdf, ndf):
-    sns.heatmap(rdf, ax=ax, cmap=DIVERGING_CMAP, vmin=-1, vmax=1, center=0,
-                annot=False, cbar_kws={'label': 'Pearson r'},
+def summary_metric_values(rdf, metric):
+    """Convert the Pearson r table to SUMMARY_METRIC's quantity. Returns
+    (values_df, cmap, vmin, vmax, ticks, colorbar_label)."""
+    if metric == 'r':
+        return rdf, DIVERGING_CMAP, -1, 1, [-1, -0.5, 0, 0.5, 1], 'Pearson r'
+    if metric == 'r2':
+        # Positive half of DIVERGING_CMAP: same reds, no blue (R² >= 0)
+        reds = mcolors.ListedColormap(plt.colormaps[DIVERGING_CMAP](np.linspace(0.5, 1.0, 256)))
+        return rdf ** 2, reds, 0, 1, [0, 0.25, 0.5, 0.75, 1], 'R²'
+    if metric == 'signed_r2':
+        return rdf * rdf.abs(), DIVERGING_CMAP, -1, 1, [-1, -0.5, 0, 0.5, 1], 'Signed R²'
+    raise ValueError(f"Unknown SUMMARY_METRIC {metric!r}; choose 'r', 'r2', or 'signed_r2'")
+
+
+def plot_summary_heatmap(ax, elements, grains, rdf, metric='r'):
+    # Metric value only in the cells — per-cell n goes to the console (see
+    # caller), not the figure. Colorbar sits below the heatmap.
+    vdf, cmap, vmin, vmax, ticks, cbar_label = summary_metric_values(rdf, metric)
+    sns.heatmap(vdf, ax=ax, cmap=cmap, vmin=vmin, vmax=vmax,
+                center=0 if vmin < 0 else None, annot=False,
+                cbar_kws={'label': cbar_label, 'location': 'bottom',
+                          'pad': 0.08, 'shrink': 0.8, 'aspect': 30},
                 linewidths=0.5, linecolor='white')
+    ax.collections[0].colorbar.set_ticks(ticks)
     for i, grain in enumerate(grains):
         for j, element in enumerate(elements):
-            r, n = rdf.iloc[i, j], ndf.iloc[i, j]
-            if pd.isna(r):
+            v = vdf.iloc[i, j]
+            if pd.isna(v):
                 label, color = 'n/a', 'gray'
             else:
-                n_label = f'{int(n) // 1000}k' if n >= 1000 else f'{int(n)}'
-                label = f'{r:.2f}\nn={n_label}'
-                color = 'white' if abs(r) >= 0.6 else 'black'
+                # Tiny negatives (common once r is squared) would print '-0.00'
+                label = f'{v:.2f}'.replace('-0.00', '0.00')
+                # White text on the darkest 40% of the scale either side of 0
+                color = 'white' if abs(v) >= 0.6 * max(abs(vmin), abs(vmax)) else 'black'
             ax.text(j + 0.5, i + 0.5, label, ha='center', va='center',
-                    fontsize=7, color=color)
+                    fontsize=11, color=color)
+    # Bare element symbol ('Cr_Ka' -> 'Cr'); short enough to sit unrotated
+    ax.set_xticklabels([e.split('_')[0] for e in elements], rotation=0)
     ax.set_xlabel('element')
     ax.set_ylabel('grain')
-    ax.tick_params(axis='x', rotation=45)
     ax.tick_params(axis='y', rotation=0)
-    for lbl in ax.get_xticklabels():
-        lbl.set_ha('right')
 
 
 def element_distribution_stats(elements, grain_dfs):
@@ -1101,17 +1132,25 @@ if 'summary' in plot_types:
         else:
             grains, rdf, ndf = compute_summary_matrix(summary_elements, whole_grain_summary_dfs)
             print(f'\n--- {ALL_GRAINS_LABEL} summary ({len(grains)} grains) ---')
+            print('  Pearson r:')
+            print('    ' + rdf.round(2).to_string().replace('\n', '\n    '))
+            if SUMMARY_METRIC != 'r':
+                vdf = summary_metric_values(rdf, SUMMARY_METRIC)[0]
+                print(f'  {SUMMARY_METRIC} (shown on the figure):')
+                print('    ' + vdf.round(2).to_string().replace('\n', '\n    '))
+            print('  n (pixels after outlier filtering):')
+            print('    ' + ndf.astype('Int64').to_string().replace('\n', '\n    '))
 
             fig, ax = plt.subplots(figsize=(len(summary_elements) * 0.9 + 2, len(grains) * 0.7 + 2))
-            plot_summary_heatmap(ax, summary_elements, grains, rdf, ndf)
-            if SHOW_TITLE:
-                ax.set_title(f'{ALL_GRAINS_LABEL} — CL vs. element correlation by grain', fontsize=12)
+            plot_summary_heatmap(ax, summary_elements, grains, rdf, SUMMARY_METRIC)
+            # No title regardless of SHOW_TITLE — what this figure shows goes in
+            # the caption
             plt.tight_layout()
 
             if SAVE_FIG:
                 summary_out_dir = Path(SUMMARY_OUTPUT_DIR) if SUMMARY_OUTPUT_DIR else Path(WHOLE_GRAIN_OUTPUT_DIR)
                 summary_out_dir.mkdir(parents=True, exist_ok=True)
-                out = summary_out_dir / f'{ALL_GRAINS_LABEL}_summary_r_heatmap.png'
+                out = summary_out_dir / f'{ALL_GRAINS_LABEL}_summary_{SUMMARY_METRIC}_heatmap.png'
                 fig.savefig(out, dpi=200, bbox_inches='tight')
                 print(f'  Saved: {out.name}')
 

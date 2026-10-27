@@ -786,6 +786,15 @@ so they carry local functions with the identical values hand-copied in —
   (`CENTROID_CMAP`). (The centroid is an absolute energy, not a signed or
   zero-centered quantity, so it takes a sequential colormap rather than
   `DIVERGING_CMAP`.)
+- **Importance colormap** (`kyanite_palette.IMPORTANCE_CMAP = 'Purples'`) —
+  single-hue white → purple for `kyanite_rf_shap_plots.py`'s all-grains
+  `summary` importance heatmaps. Deliberately neither of `DIVERGING_CMAP`'s
+  hues: that figure sits beside `kyanite_figures.py`'s summary r heatmap, and a
+  shared hue would imply the two color scales mean the same thing
+- **Loading colormap** (`kyanite_palette.LOADING_CMAP = 'BrBG'`, brown → white
+  → teal) — signed PCA loadings in `kyanite_pca.py`'s all-grains `SUMMARY`
+  heatmap. A loading isn't a correlation, so it deliberately avoids
+  `DIVERGING_CMAP`'s red/blue, which the r panel beside it uses
 - **GROD colormap** (`kyanite_ebsd.m`'s `cmap_blue`, built by its local
   `white_to_color()`) — linear white (0°) → `#0018F9` blue (max), a deliberate,
   requested exception to `SEQUENTIAL_CMAP` for EBSD GROD maps (both the
@@ -1022,7 +1031,14 @@ so they carry local functions with the identical values hand-copied in —
 - `N_BINS` / `BIN_EDGES`
 - `summary` (only fires when `CSV_INPUT` is a directory): pools every whole-grain
   (non-region) CSV found into one grains-x-`ELEMENTS` heatmap of CL-vs-element
-  Pearson r (annotated with n per cell), so correlation strength/consistency can be
+  Pearson r (cells annotated with the value only; per-cell n is printed to the
+  console, not the figure; no title; bare element-symbol tick labels; colorbar
+  below). `SUMMARY_METRIC` picks what the cells show: `'r'` (red/blue −1..1),
+  `'r2'` (default — r², i.e. each single-element linear fit's R²; white → red
+  0..1, sign lost), or `'signed_r2'` (r·|r|, red/blue −1..1 — variance explained with
+  the correlation's direction kept); each saves as
+  `<ALL_GRAINS_LABEL>_summary_<metric>_heatmap.png`, so
+  correlation strength/consistency can be
   compared across grains — skipped (with a warning) if `CSV_INPUT` isn't a directory
   or fewer than 2 whole-grain CSVs are found. `SUMMARY_OUTPUT_DIR` (default `None` →
   `WHOLE_GRAIN_OUTPUT_DIR`) and `ALL_GRAINS_LABEL` (default `'all_grains'`, the
@@ -1132,12 +1148,28 @@ so they carry local functions with the identical values hand-copied in —
   loading-vector arrows overlaid) in `REGION_OUTPUT_DIR` (`figs/regions/`); and
   `<grain_id>_regions_pca_log.txt` in `DIAGNOSTICS_DIR` (`figs/diagnostics/`)
 - Whole-grain PCA outputs, similarly split: `<grain_id>_pca_variance.csv`/
-  `<grain_id>_pca_loadings.csv` in `DATA_OUTPUT_DIR` (`figs/data/`);
+  `<grain_id>_pca_loadings.csv`/`<grain_id>_pca_cl_correlation.csv` (Pearson r
+  of each PC's scores vs. CL — the same r annotated on `_pca_scores_vs_CL.png`)
+  in `DATA_OUTPUT_DIR` (`figs/data/`);
   `<grain_id>_pca_scree.png`, `<grain_id>_pca_scores_vs_CL.png`, and either
   `<grain_id>_pca_loadings_PC<n>.png` (one per `PC_TO_PLOT`, default) or
   `<grain_id>_pca_loadings_grid.png` (`LOADINGS_GRID_LAYOUT = True`) in
   `WHOLE_GRAIN_OUTPUT_DIR` (`figs/pca/`); `<grain_id>_pca_log.txt` in
   `DIAGNOSTICS_DIR` (`figs/diagnostics/`)
+- `SUMMARY` (default `True`) — after the per-grain loop, one pooled figure
+  `<ALL_GRAINS_LABEL>_pca_summary.png` in `WHOLE_GRAIN_OUTPUT_DIR` (no title),
+  one row per whole-grain CSV, same sorted grain order as `kyanite_figures.py`'s
+  summary r heatmap. Every PC is first sign-flipped so its score correlates
+  positively with CL (PC sign is arbitrary), so positive score = brighter CL.
+  Left: grains × PCs heatmap of r(PC score, CL), white → red (positive half of
+  `DIVERGING_CMAP`, 0–1, the r heatmap's reds), each grain's best-CL PC
+  (largest r) outlined in black. Right: grains × elements heatmap of that PC's
+  same-flipped loadings on `LOADING_CMAP` (−1..1), so a positive loading reads
+  "more of this element goes with brighter CL". Columns in
+  `SUMMARY_ELEMENT_ORDER` (default Cr, V, Fe, Mn, Ti; others appended), bare
+  element symbols. Variance explained and the tables print to the console, not
+  the figure. Needs ≥2 whole-grain CSVs; built from the in-memory results of
+  this run, so it always matches the per-grain outputs written alongside it
 
 **`kyanite_rf_shap.py`**
 - Fits models and exports CSVs + a log only — no figures; region CSVs (`Region`
@@ -1186,7 +1218,16 @@ so they carry local functions with the identical values hand-copied in —
   (`shap_importance`, `shap_interactions`, `shap_dependence`) to the latter
 - `GRAIN_FILTER` — list of grain_ids to plot, or `None` for every grain found in `CSV_INPUT`
 - `PLOTS` — `observed_vs_predicted`, `importance`, `shap_importance`,
-  `shap_interactions`, `shap_dependence`, `all`, or a list of these
+  `shap_interactions`, `shap_dependence`, `summary`, `all`, or a list of these
+- `summary` — one pooled figure (`RF_OUTPUT_DIR/<ALL_GRAINS_LABEL>_rf_summary.png`,
+  no title), one row per grain in the same sorted order as `kyanite_figures.py`'s
+  summary r heatmap: CV R² bars (mean ± std across folds), a permutation-importance
+  heatmap (drop in R², comparable across grains as-is), and a mean-|SHAP| heatmap
+  as % of each grain's total (raw |SHAP| is in each grain's own CL units, so it's
+  normalized per grain). Heatmaps use `IMPORTANCE_CMAP` (white → purple), bare element-symbol column
+  labels in `SUMMARY_ELEMENT_ORDER` (default Cr, V, Fe, Mn, Ti; others appended),
+  colorbars below. The underlying tables print to the console. Needs ≥2 grains
+  with `rf_predictions` + `rf_importance` CSVs
 - `LOG_TRANSFORM` — must match whatever `kyanite_rf_shap.py` used for this data;
   only affects axis labeling here (`(log10)` suffix), since values were already
   transformed (or not) upstream

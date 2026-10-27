@@ -30,7 +30,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 from sklearn.metrics import mean_squared_error, r2_score
-from kyanite_palette import BLUE, SEQUENTIAL_CMAP, element_colors
+from kyanite_palette import BLUE, IMPORTANCE_CMAP, SEQUENTIAL_CMAP, element_colors
 
 # =============================================================================
 # PARAMETERS — edit this section for each run
@@ -49,7 +49,19 @@ SHAP_OUTPUT_DIR = _REPO_ROOT / 'figs' / 'shap'
 GRAIN_FILTER = None   # list of grain_ids to plot, or None for every grain found in CSV_INPUT
 
 PLOTS = 'all'   # 'observed_vs_predicted', 'importance', 'shap_importance',
-                # 'shap_interactions', 'shap_dependence', 'all', or a list of these
+                # 'shap_interactions', 'shap_dependence', 'summary', 'all', or a list of these
+
+# 'summary' is not per-grain: one figure pooling every grain (that survives
+# GRAIN_FILTER and has both rf_predictions and rf_importance CSVs), one row per
+# grain — CV R2 (mean +/- std across folds), permutation importance (drop in
+# R2, already comparable across grains), and mean |SHAP| as a percentage of
+# that grain's total (raw |SHAP| is in each grain's own CL units, so it's
+# normalized per grain). Saved to RF_OUTPUT_DIR as
+# <ALL_GRAINS_LABEL>_rf_summary.png.
+ALL_GRAINS_LABEL = 'all_grains'
+# Column order for the summary heatmaps (matches kyanite_figures.py's summary
+# r heatmap); elements found in the CSVs but not listed are appended, sorted.
+SUMMARY_ELEMENT_ORDER = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Mn_Ka', 'Ti_Ka']
 
 # LOG_TRANSFORM must match whatever kyanite_rf_shap.py used for this data —
 # it only affects axis labeling here (element values were already
@@ -60,7 +72,7 @@ FIG_DPI    = 300
 SHOW_TITLE = True
 
 ALL_PLOTS = ['observed_vs_predicted', 'importance', 'shap_importance',
-             'shap_interactions', 'shap_dependence']
+             'shap_interactions', 'shap_dependence', 'summary']
 if PLOTS == 'all':
     plots = ALL_PLOTS
 elif isinstance(PLOTS, (list, tuple)):
@@ -220,6 +232,105 @@ def plot_shap_interactions(interaction_matrix, elements):
     return fig
 
 
+def build_summary_tables(csv_dir, labels):
+    """One row per grain (sorted): CV R2 mean/std across folds, plus
+    grains x elements tables of permutation importance and SHAP share (% of
+    that grain's total mean |SHAP|). Grains missing rf_predictions or
+    rf_importance are dropped with a warning; a missing shap_importance just
+    leaves that grain's SHAP row NaN."""
+    r2_rows, perm_rows, shap_rows = {}, {}, {}
+    for label in sorted(labels):
+        pred_path = csv_dir / f'{label}_rf_predictions.csv'
+        imp_path = csv_dir / f'{label}_rf_importance.csv'
+        shap_path = csv_dir / f'{label}_shap_importance.csv'
+        if not (pred_path.exists() and imp_path.exists()):
+            print(f'  WARNING: {label} lacks rf_predictions/rf_importance CSV; left out of summary')
+            continue
+        pred_df = pd.read_csv(pred_path).dropna(subset=['predicted_CL'])
+        _, r2_folds = compute_fold_metrics(pred_df)
+        r2_rows[label] = {'mean': r2_folds.mean(), 'std': r2_folds.std()}
+        perm_rows[label] = pd.read_csv(imp_path).set_index('element')['mean_importance']
+        if shap_path.exists():
+            s = pd.read_csv(shap_path).set_index('element')['mean_abs_shap']
+            shap_rows[label] = 100 * s / s.sum()
+    r2_df = pd.DataFrame.from_dict(r2_rows, orient='index')
+    perm_df = pd.DataFrame(perm_rows).T
+    shap_df = pd.DataFrame(shap_rows).T.reindex(perm_df.index)
+    present = set(perm_df.columns) | set(shap_df.columns)
+    elements = ([e for e in SUMMARY_ELEMENT_ORDER if e in present]
+                + sorted(present - set(SUMMARY_ELEMENT_ORDER)))
+    return r2_df, perm_df.reindex(columns=elements), shap_df.reindex(columns=elements)
+
+
+def _annotated_heatmap(ax, values, fmt, vmax, cbar_label, fig):
+    cmap = plt.colormaps[IMPORTANCE_CMAP].copy()
+    cmap.set_bad('0.85')
+    im = ax.imshow(np.ma.masked_invalid(values), cmap=cmap, vmin=0, vmax=vmax, aspect='auto')
+    for i in range(values.shape[0]):
+        for j in range(values.shape[1]):
+            v = values[i, j]
+            if np.isnan(v):
+                ax.text(j, i, 'n/a', ha='center', va='center', fontsize=11, color='gray')
+            else:
+                # same cutoff as the r heatmap's |r| >= 0.6 on a 0..1 scale
+                color = 'white' if v >= 0.6 * vmax else 'black'
+                ax.text(j, i, format(v, fmt), ha='center', va='center', fontsize=11, color=color)
+    # White cell borders, matching kyanite_figures.py's summary r heatmap
+    ax.set_xticks(np.arange(values.shape[1] + 1) - 0.5, minor=True)
+    ax.set_yticks(np.arange(values.shape[0] + 1) - 0.5, minor=True)
+    ax.grid(which='minor', color='white', linewidth=0.5)
+    ax.tick_params(which='minor', length=0)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    cbar = fig.colorbar(im, ax=ax, location='bottom', pad=0.08, shrink=0.8, aspect=30)
+    cbar.set_label(cbar_label)
+
+
+def plot_summary(r2_df, perm_df, shap_df):
+    """Three panels sharing one row per grain: CV R2 bars (mean +/- std
+    across folds), permutation importance heatmap, SHAP share heatmap.
+    No title — what the figure shows goes in the caption."""
+    grains = list(r2_df.index)
+    elements = list(perm_df.columns)
+    n_g, n_e = len(grains), len(elements)
+    fig, axes = plt.subplots(1, 3, figsize=(2.2 + 2 * n_e * 0.9 + 2.5, n_g * 0.7 + 2),
+                             gridspec_kw={'width_ratios': [2.0, n_e, n_e], 'wspace': 0.08},
+                             sharey=True)
+    ax_r2, ax_perm, ax_shap = axes
+    y = np.arange(n_g)
+
+    ax_r2.barh(y, r2_df['mean'], xerr=r2_df['std'], color=BLUE, height=0.7,
+               error_kw={'ecolor': 'k', 'elinewidth': 1, 'capsize': 2})
+    for yi, m, s in zip(y, r2_df['mean'], r2_df['std']):
+        ax_r2.text(max(m + s, 0) + 0.03, yi, f'{m:.2f}', va='center', fontsize=11)
+    ax_r2.set_xlim(min(0, (r2_df['mean'] - r2_df['std']).min() - 0.05), 1.15)
+    ax_r2.set_xlabel('CV R²')
+    ax_r2.set_ylabel('grain')
+    ax_r2.set_yticks(y)
+    ax_r2.set_yticklabels(grains)
+    ax_r2.set_ylim(n_g - 0.5, -0.5)
+    ax_r2.spines[['top', 'right']].set_visible(False)
+    # Empty colorbar-sized slot below the bars so all three panels' data
+    # areas stay the same height as the heatmaps above their colorbars
+    slot = fig.colorbar(plt.cm.ScalarMappable(), ax=ax_r2, location='bottom',
+                        pad=0.08, shrink=0.8, aspect=30)
+    slot.ax.set_visible(False)
+
+    tick_labels = [e.split('_')[0] for e in elements]
+    perm_vals = perm_df.values.astype(float)
+    _annotated_heatmap(ax_perm, perm_vals, '.2f', np.nanmax(perm_vals),
+                       'Permutation importance (ΔR²)', fig)
+    shap_vals = shap_df.values.astype(float)
+    _annotated_heatmap(ax_shap, shap_vals, '.0f', np.nanmax(shap_vals),
+                       'Mean |SHAP| (% of grain total)', fig)
+    for ax in (ax_perm, ax_shap):
+        ax.set_xticks(range(n_e))
+        ax.set_xticklabels(tick_labels)
+        ax.set_xlabel('element')
+        ax.tick_params(axis='y', left=False)
+    return fig
+
+
 def plot_shap_dependence(shap_values, X_vals, elements, interaction_df):
     # Each panel: an element's own value vs. its SHAP value, i.e. how the
     # model's learned effect of that element on CL varies across the
@@ -346,5 +457,23 @@ for label in labels:
                   f'({"colored by top interacting partner" if interaction_df is not None else "uncolored"})')
         else:
             print(f'  WARNING: {shap_val_path.name} not found, skipping shap_dependence.')
+
+if 'summary' in plots:
+    print(f'\n--- {ALL_GRAINS_LABEL} summary ---')
+    r2_df, perm_df, shap_df = build_summary_tables(csv_dir, labels)
+    if len(r2_df) < 2:
+        print(f'  WARNING: summary needs >=2 grains with RF CSVs, found {len(r2_df)}; skipping')
+    else:
+        print('  CV R2 (mean, std across folds):')
+        print('    ' + r2_df.round(3).to_string().replace('\n', '\n    '))
+        print('  Permutation importance (drop in R2):')
+        print('    ' + perm_df.round(3).to_string().replace('\n', '\n    '))
+        print('  Mean |SHAP|, % of grain total:')
+        print('    ' + shap_df.round(1).to_string().replace('\n', '\n    '))
+        fig = plot_summary(r2_df, perm_df, shap_df)
+        out = rf_out_dir / f'{ALL_GRAINS_LABEL}_rf_summary.png'
+        fig.savefig(out, dpi=FIG_DPI, bbox_inches='tight')
+        plt.close(fig)
+        print(f'  Saved {out.name}')
 
 print('\nDone.')

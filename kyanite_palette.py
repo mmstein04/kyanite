@@ -117,3 +117,16 @@ OVERLAY_CMAP_RANGE = (0.3, 1.0)
 OVERLAY_CMAP = _ListedColormap(
     _mpl_colormaps['viridis'](_np.linspace(*OVERLAY_CMAP_RANGE, 256)),
     name='viridis_light')
+
+# IMPORTANCE_CMAP: single-hue white -> purple for the all-grains RF/SHAP
+# importance summary heatmaps (kyanite_rf_shap_plots.py's 'summary'). Not
+# DIVERGING_CMAP's reds or blues on purpose: that summary sits next to
+# kyanite_figures.py's summary r heatmap, and a shared hue would suggest the
+# two color scales mean the same thing when they don't.
+IMPORTANCE_CMAP = 'Purples'
+
+# LOADING_CMAP: diverging colormap for signed PCA loadings in the all-grains
+# PCA summary heatmap (kyanite_pca.py's SUMMARY). A loading is not a
+# correlation, so it deliberately avoids DIVERGING_CMAP's red/blue, which the
+# summary r heatmaps beside it use for r.
+LOADING_CMAP = 'BrBG'

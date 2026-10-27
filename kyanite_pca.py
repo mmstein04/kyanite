@@ -51,7 +51,9 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from scipy.stats import f_oneway
 from scipy.spatial import ConvexHull
-from kyanite_palette import (BLUE, ORANG, element_colors as _element_colors,
+from matplotlib.colors import ListedColormap
+from kyanite_palette import (BLUE, ORANG, DIVERGING_CMAP, LOADING_CMAP,
+                              element_colors as _element_colors,
                               region_colors as _shared_region_colors)
 from kyanite_outliers import (saturation_mask as _saturation_mask,
                                 outlier_keep_mask as _outlier_keep_mask)
@@ -132,6 +134,21 @@ LOADINGS_GRID_LAYOUT = True
 REGION_PCA_PCS   = (1, 2)   # which two PCs to scatter regions on
 REGION_PCA_HULLS = True     # draw a convex-hull outline around each region's point cloud
 
+# --- All-grains summary (whole-grain CSVs only) ---
+# One pooled figure, one row per grain (sorted, same order as
+# kyanite_figures.py's summary r heatmap). A PC's sign is arbitrary, so
+# every PC is first flipped so its score correlates positively with CL —
+# positive score = brighter CL. Left: r(PC score, CL) for each PC, with the
+# grain's best-CL PC (largest r) outlined. Right: that PC's loadings, so a
+# positive loading reads as "more of this element goes with brighter CL".
+# Skipped if fewer than 2 whole-grain CSVs ran. No title — the caption
+# carries what the figure shows. Saved to WHOLE_GRAIN_OUTPUT_DIR as
+# <ALL_GRAINS_LABEL>_pca_summary.png.
+SUMMARY          = True
+ALL_GRAINS_LABEL = 'all_grains'
+# Column order for the loadings panel; elements not listed are appended, sorted.
+SUMMARY_ELEMENT_ORDER = ['Cr_Ka', 'V_Ka', 'Fe_Ka', 'Mn_Ka', 'Ti_Ka']
+
 SAVE_FIG   = True
 SAVE_CSV   = True
 SHOW_TITLE = True
@@ -142,11 +159,13 @@ SHOW_TITLE = True
 
 input_path = Path(CSV_INPUT)
 if input_path.is_dir():
-    # CL_local_regression_map.m's output also ends in '_pixel_data.csv' but is
-    # a different data product (per-window slope/R stats, no 'CL' column) —
+    # CL_local_regression_map.m's and kyanite_ebsd.m's outputs also end in
+    # '_pixel_data.csv' but are different data products (per-window slope/R
+    # stats; per-pixel EBSD orientation — neither has a 'CL' column) —
     # excluded here rather than processed and skipped downstream.
     csv_files = sorted(p for p in input_path.glob('*_pixel_data.csv')
-                        if not p.name.endswith('_local_regression_pixel_data.csv'))
+                        if not p.name.endswith(('_local_regression_pixel_data.csv',
+                                                '_ebsd_pixel_data.csv')))
     if not csv_files:
         raise FileNotFoundError(f'No *_pixel_data.csv files found in {input_path}')
 else:
@@ -506,6 +525,9 @@ def analyze(df, elements, label, out_dir, data_dir, diagnostics_dir, csv_path, m
 
     print('  Running PCA...')
     scores, explained, loadings = run_pca(X_df)
+    r_cl = np.array([np.corrcoef(scores[:, k], y)[0, 1] for k in range(scores.shape[1])])
+    load_df = pd.DataFrame(loadings, index=kept,
+                            columns=[f'PC{i+1}' for i in range(loadings.shape[1])])
 
     if SAVE_CSV:
         var_df = pd.DataFrame({
@@ -514,13 +536,16 @@ def analyze(df, elements, label, out_dir, data_dir, diagnostics_dir, csv_path, m
             'cumulative_pct': np.cumsum(explained),
         })
         var_df.to_csv(data_dir / f'{label}_pca_variance.csv', index=False)
-
-        load_df = pd.DataFrame(loadings, index=kept,
-                                columns=[f'PC{i+1}' for i in range(loadings.shape[1])])
         load_df.to_csv(data_dir / f'{label}_pca_loadings.csv')
+        # Same r as annotated on _pca_scores_vs_CL.png, for the summary figure
+        # and anything else that wants it without re-running PCA
+        pd.DataFrame({'PC': range(1, len(r_cl) + 1), 'r_with_CL': r_cl}).to_csv(
+            data_dir / f'{label}_pca_cl_correlation.csv', index=False)
 
     log_lines.append('PCA variance explained (%): ' +
                       ', '.join(f'PC{i+1}={v:.1f}' for i, v in enumerate(explained[:N_PCS_SCREE])))
+    log_lines.append('Pearson r, PC score vs. CL: ' +
+                      ', '.join(f'PC{i+1}={v:.3f}' for i, v in enumerate(r_cl)))
 
     if SAVE_FIG:
         fig = plot_scree(explained)
@@ -555,6 +580,95 @@ def analyze(df, elements, label, out_dir, data_dir, diagnostics_dir, csv_path, m
     log_file = diagnostics_dir / f'{label}_pca_log.txt'
     log_file.write_text('\n'.join(str(l) for l in log_lines) + '\n')
     print(f'  Log saved: {log_file.name}')
+
+    return {'explained': explained, 'loadings': load_df, 'r_cl': r_cl}
+
+
+def _summary_heatmap(ax, values, cmap, vmin, vmax, cbar_label, fig, fmt='.2f'):
+    """Annotated heatmap in the same style as kyanite_figures.py's summary r
+    heatmap: white cell borders, fontsize-11 values, white text where the
+    color is dark (|value| >= 0.6 of the scale), colorbar below."""
+    cmap = plt.colormaps[cmap].copy() if isinstance(cmap, str) else cmap
+    cmap.set_bad('0.85')
+    im = ax.imshow(np.ma.masked_invalid(values), cmap=cmap, vmin=vmin, vmax=vmax, aspect='auto')
+    span = max(abs(vmin), abs(vmax))
+    for i in range(values.shape[0]):
+        for j in range(values.shape[1]):
+            v = values[i, j]
+            if np.isnan(v):
+                ax.text(j, i, 'n/a', ha='center', va='center', fontsize=11, color='gray')
+            else:
+                color = 'white' if abs(v) >= 0.6 * span else 'black'
+                ax.text(j, i, format(v, fmt), ha='center', va='center', fontsize=11, color=color)
+    ax.set_xticks(np.arange(values.shape[1] + 1) - 0.5, minor=True)
+    ax.set_yticks(np.arange(values.shape[0] + 1) - 0.5, minor=True)
+    ax.grid(which='minor', color='white', linewidth=0.5)
+    ax.tick_params(which='minor', length=0)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    cbar = fig.colorbar(im, ax=ax, location='bottom', pad=0.08, shrink=0.8, aspect=30)
+    cbar.set_label(cbar_label)
+    return cbar
+
+
+def build_pca_summary_tables(results):
+    """From analyze()'s per-grain results: grains x PCs table of r(PC score,
+    CL) after orienting every PC toward brighter CL (so r >= 0), each grain's
+    best-CL PC, and grains x elements table of that PC's (same-oriented)
+    loadings."""
+    grains = sorted(results)
+    n_pcs = max(len(res['r_cl']) for res in results.values())
+    present = set().union(*(res['loadings'].index for res in results.values()))
+    elements = ([e for e in SUMMARY_ELEMENT_ORDER if e in present]
+                + sorted(present - set(SUMMARY_ELEMENT_ORDER)))
+    r_df = pd.DataFrame(np.nan, index=grains, columns=[f'PC{k+1}' for k in range(n_pcs)])
+    load_df = pd.DataFrame(np.nan, index=grains, columns=elements)
+    var_df = r_df.copy()
+    best = {}
+    for g in grains:
+        res = results[g]
+        r = np.abs(res['r_cl'])               # r after flipping each PC toward +CL
+        k = int(np.nanargmax(r))
+        r_df.loc[g, r_df.columns[:len(r)]] = r
+        var_df.loc[g, var_df.columns[:len(r)]] = res['explained']
+        best[g] = k
+        sign = np.sign(res['r_cl'][k]) or 1.0
+        loads = res['loadings'][f'PC{k+1}'] * sign
+        load_df.loc[g, loads.index] = loads.values
+    return r_df, var_df, best, load_df
+
+
+def plot_pca_summary(r_df, best, load_df):
+    grains = list(r_df.index)
+    n_g, n_pc, n_e = len(grains), r_df.shape[1], load_df.shape[1]
+    fig, (ax_r, ax_l) = plt.subplots(1, 2, figsize=(2.2 + (n_pc + n_e) * 0.9 + 1.5, n_g * 0.7 + 2),
+                                     gridspec_kw={'width_ratios': [n_pc, n_e], 'wspace': 0.08},
+                                     sharey=True)
+
+    # White -> red: positive half of DIVERGING_CMAP, the same reds the r
+    # heatmap uses for positive r — this panel is also a correlation with CL,
+    # and every PC was oriented so r >= 0
+    reds = ListedColormap(plt.colormaps[DIVERGING_CMAP](np.linspace(0.5, 1.0, 256)))
+    _summary_heatmap(ax_r, r_df.values.astype(float), reds, 0, 1,
+                     'Pearson r (PC score vs. CL)', fig)
+    for i, g in enumerate(grains):
+        ax_r.add_patch(plt.Rectangle((best[g] - 0.5, i - 0.5), 1, 1, fill=False,
+                                     edgecolor='black', linewidth=2, zorder=3, clip_on=False))
+    ax_r.set_xticks(range(n_pc))
+    ax_r.set_xticklabels(r_df.columns)
+    ax_r.set_xlabel('principal component')
+    ax_r.set_yticks(range(n_g))
+    ax_r.set_yticklabels(grains)
+    ax_r.set_ylabel('grain')
+
+    cbar = _summary_heatmap(ax_l, load_df.values.astype(float), LOADING_CMAP, -1, 1,
+                            'Loading on best-CL PC', fig)
+    cbar.set_ticks([-1, -0.5, 0, 0.5, 1])
+    ax_l.set_xticks(range(n_e))
+    ax_l.set_xticklabels([e.split('_')[0] for e in load_df.columns])
+    ax_l.set_xlabel('element')
+    ax_l.tick_params(axis='y', left=False)
+    return fig
 
 
 def analyze_region_pca(df, elements, grain_id, out_dir, data_dir, diagnostics_dir, csv_path, missing=()):
@@ -680,6 +794,7 @@ data_dir.mkdir(parents=True, exist_ok=True)
 diagnostics_dir = Path(DIAGNOSTICS_DIR)
 diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
+whole_grain_results = {}
 for csv_path in csv_files:
     df = pd.read_csv(csv_path)
     region_mode = 'Region' in df.columns
@@ -701,6 +816,31 @@ for csv_path in csv_files:
             analyze_region_pca(df, available, grain_id, out_dir, data_dir, diagnostics_dir, csv_path, missing)
     else:
         grain_id = csv_path.stem.replace('_pixel_data', '')
-        analyze(df, available, grain_id, out_dir, data_dir, diagnostics_dir, csv_path, missing)
+        res = analyze(df, available, grain_id, out_dir, data_dir, diagnostics_dir, csv_path, missing)
+        if res is not None:
+            whole_grain_results[grain_id] = res
+
+if SUMMARY:
+    print(f'\n--- {ALL_GRAINS_LABEL} PCA summary ---')
+    if len(whole_grain_results) < 2:
+        print(f'  WARNING: summary needs >=2 whole-grain CSVs, found {len(whole_grain_results)}; skipping')
+    else:
+        r_df, var_df, best, load_df = build_pca_summary_tables(whole_grain_results)
+        print('  Pearson r, PC score vs. CL (each PC oriented toward brighter CL):')
+        print('    ' + r_df.round(2).to_string().replace('\n', '\n    '))
+        print('  Variance explained (%):')
+        print('    ' + var_df.round(1).to_string().replace('\n', '\n    '))
+        print('  Best-CL PC per grain, and its loadings:')
+        summary_print = load_df.round(2)
+        summary_print.insert(0, 'PC', [f'PC{best[g] + 1}' for g in load_df.index])
+        print('    ' + summary_print.to_string().replace('\n', '\n    '))
+        if SAVE_FIG:
+            fig = plot_pca_summary(r_df, best, load_df)
+            summary_dir = Path(WHOLE_GRAIN_OUTPUT_DIR)
+            summary_dir.mkdir(parents=True, exist_ok=True)
+            out = summary_dir / f'{ALL_GRAINS_LABEL}_pca_summary.png'
+            fig.savefig(out, dpi=200, bbox_inches='tight')
+            plt.close(fig)
+            print(f'  Saved {out.name}')
 
 print('\nDone.')
