@@ -21,7 +21,13 @@
 %                   down to c5_fill_min_neighbours; optional small-grain drop
 %   4. Reconstruct grains, keep phase_name pixels/grains
 %   5. Compute GROD for every pixel of every remaining kyanite grain
-%   6. Save the GROD map, an Euler map, a per-pixel CSV, and a log
+%   6. Optional (refmis_enable): pick a reference point on the cleaned map
+%      interactively, then map every pixel's misorientation from that one
+%      reference orientation (GROD instead measures each pixel against its
+%      own grain's mean), with the reference point marked by a symbol. The
+%      pick is saved and reused on rerun
+%   7. Save the GROD map, an Euler map, the reference-misorientation map, a
+%      per-pixel CSV, and a log
 %
 %   Both cleaning methods are run on every grain, every run: the selected
 %   one (cleaning_method) drives the GROD map/CSV/log, and both feed two
@@ -42,9 +48,15 @@
 %   - ebsd/<grain_id>_Euler_map.png             — Euler map (Bunge phi1,
 %     Phi, phi2 -> RGB, Channel 5 style), same cleaned pixels/boundaries,
 %     with the color key (one gradient bar per angle) below the map
+%   - ebsd/<grain_id>_ref_misori_map.png        — misorientation from the
+%     picked reference orientation, reference point marked (refmis_enable)
+%   - data/<grain_id>_ebsd_reference.mat        — the picked reference
+%     point's map position (reusable; the orientation itself is re-read
+%     from the cleaned map each run)
 %   - data/<grain_id>_ebsd_pixel_data.csv       — per-pixel x/y, Bunge Euler
-%     angles, GROD, MAD, band contrast, grain id (reusable). Filled pixels
-%     carry NaN MAD/BC, so they can be told apart from measured ones
+%     angles, GROD, MAD, band contrast, grain id (+ RefMisori_deg when a
+%     reference was picked) (reusable). Filled pixels carry NaN MAD/BC, so
+%     they can be told apart from measured ones
 %   - diagnostics/<grain_id>_ebsd_log.txt       — cleaning method + its
 %     parameters, pixel counts at each cleaning stage, grain count, GROD
 %     stats, per-grain mean orientation
@@ -130,6 +142,30 @@ c5_min_grain_px        = 0;
 grod_shared_scale = false;
 grod_cmax_deg     = [];     % explicit upper color limit (deg); [] = auto
 
+% --- Reference-orientation misorientation map ---
+% Misorientation of every pixel from ONE reference orientation, picked by
+% clicking on the cleaned map (Euler colors | GROD side by side). Only the
+% picked position is saved (data/<grain_id>_ebsd_reference.mat); the
+% orientation there is re-read from the cleaned map every run, so it
+% follows any change to the cleaning parameters.
+refmis_enable = true;
+% 'ask' (prompt: use saved / pick new), 'reuse' (use saved, else pick),
+% 'new' (always pick). Non-interactive (e.g. -batch) runs need 'reuse'
+% with a saved pick for every grain; a grain without one is skipped.
+refmis_pick = 'ask';
+% Reference orientation = mean orientation of the picked pixel's grain
+% within this radius of it (µm), to average out pixel noise; 0 = the
+% single picked pixel. A nonzero radius is drawn as a circle on the map.
+refmis_avg_radius_um = 0;
+% Upper color limit (deg); [] = each grain's map max. Other grains sit
+% tens of degrees from a reference inside one grain, so set this to see
+% intragrain structure — values above it clamp to the top color.
+refmis_cmax_deg = [];
+% Reference-point symbol (any MATLAB marker), drawn with a black edge
+refmis_marker       = 'p';
+refmis_marker_size  = 18;
+refmis_marker_color = '#D85B30';   % kyanite_palette house ORANG
+
 % --- Figure styling ---
 % GROD colormap: linear white (0°) -> cmap_blue (max). A deliberate
 % exception to kyanite_palette.SEQUENTIAL_CMAP ('inferno').
@@ -161,6 +197,17 @@ clean = struct( ...
 
 if ~any(strcmp(clean.method, {'mtex', 'channel5'}))
     error('cleaning_method must be ''mtex'' or ''channel5'' (got ''%s'')', cleaning_method);
+end
+
+refm = struct( ...
+    'pick',          lower(refmis_pick), ...
+    'avg_radius_um', refmis_avg_radius_um, ...
+    'marker',        refmis_marker, ...
+    'marker_size',   refmis_marker_size, ...
+    'marker_color',  refmis_marker_color);
+
+if ~any(strcmp(refm.pick, {'ask', 'reuse', 'new'}))
+    error('refmis_pick must be ''ask'', ''reuse'' or ''new'' (got ''%s'')', refmis_pick);
 end
 
 % =========================================================================
@@ -209,7 +256,26 @@ if isempty(results)
 end
 
 % =========================================================================
-%% SECTION 4: GROD COLOR SCALE
+%% SECTION 4: REFERENCE ORIENTATIONS (interactive)
+% =========================================================================
+% All grains are picked here, before any figure is drawn, so the clicking
+% happens in one sitting rather than interleaved with export.
+
+if refmis_enable
+    for g = 1:numel(results)
+        r = results{g};
+        ref_file = fullfile(data_dir, [r.grain_id '_ebsd_reference.mat']);
+        try
+            results{g}.ref = get_reference(r, ref_file, refm, cmap, font_name);
+        catch err
+            warning('kyanite_ebsd:referenceFailed', ...
+                'No reference misorientation map for %s: %s', r.grain_id, err.message);
+        end
+    end
+end
+
+% =========================================================================
+%% SECTION 5: GROD COLOR SCALE
 % =========================================================================
 
 if ~isempty(grod_cmax_deg)
@@ -221,7 +287,7 @@ fprintf('\nGROD color scale: %s, 0 to %.2f deg\n', ...
     ternary(grod_shared_scale, 'shared across grains', 'per grain'), pooled_cmax);
 
 % =========================================================================
-%% SECTION 5: FIGURES, DATA, LOGS
+%% SECTION 6: FIGURES, DATA, LOGS
 % =========================================================================
 
 for g = 1:numel(results)
@@ -254,6 +320,7 @@ for g = 1:numel(results)
     mtexFig = getappdata(fig_grod, 'mtexFig');
     if ~isempty(mtexFig), drawNow(mtexFig); end
     fit_title(fig_grod, ax_map);
+    inset_colorbar(fig_grod, font_size);
     grod_png = fullfile(output_dir, [grain_id '_GROD_map.png']);
     exportgraphics(fig_grod, grod_png, 'Resolution', fig_dpi);
     close(fig_grod);
@@ -279,12 +346,51 @@ for g = 1:numel(results)
     exportgraphics(fig_euler, euler_png, 'Resolution', fig_dpi);
     close(fig_euler);
 
+    % --- Reference-orientation misorientation map ---
+    % Same map, boundaries and colormap as the GROD map, but every pixel is
+    % measured against the one picked reference orientation, which is
+    % marked on the map.
+    has_ref = isfield(r, 'ref');
+    ref_png = '';
+    if has_ref
+        ref = r.ref;
+        if ~isempty(refmis_cmax_deg)
+            ref_cmax = refmis_cmax_deg;
+        else
+            ref_cmax = ref.misori_max_deg;
+        end
+        ref_cmax = max(ceil(ref_cmax), 1);
+        fig_ref = figure('Visible', 'off');
+        plot(r.ebsd, ref.misori_deg, 'micronbar', 'on');
+        hold on
+        plot(r.grains.boundary, 'lineColor', 'k', 'lineWidth', 1);
+        hold off
+        setColorRange([0 ref_cmax]);
+        mtexColorMap(cmap);
+        mtexColorbar('location', 'southoutside', 'orientation', 'horizontal', ...
+            'title', 'Misorientation (°)');
+        ax_map = gca;
+        draw_reference_marker(ax_map, ref, refm);
+        title(ax_map, grain_id, 'FontWeight', 'normal', 'Interpreter', 'none', ...
+            'FontSize', font_size, 'FontName', font_name);
+        mtexFig = getappdata(fig_ref, 'mtexFig');
+        if ~isempty(mtexFig), drawNow(mtexFig); end
+        fit_title(fig_ref, ax_map);
+        inset_colorbar(fig_ref, font_size);
+        ref_png = fullfile(output_dir, [grain_id '_ref_misori_map.png']);
+        exportgraphics(fig_ref, ref_png, 'Resolution', fig_dpi);
+        close(fig_ref);
+    end
+
     % --- Per-pixel CSV (reusable) ---
     [phi1, Phi, phi2] = Euler(r.ebsd.orientations, 'Bunge');
     T = table(r.ebsd.x(:), r.ebsd.y(:), phi1(:)/degree, Phi(:)/degree, phi2(:)/degree, ...
         r.grod_deg(:), get_prop(r.ebsd, 'mad'), get_prop(r.ebsd, 'bc'), r.ebsd.grainId(:), ...
         'VariableNames', {'x_um', 'y_um', 'phi1_deg', 'Phi_deg', 'phi2_deg', ...
                           'GROD_deg', 'MAD', 'BC', 'grainId'});
+    if has_ref
+        T.RefMisori_deg = ref.misori_deg;
+    end
     csv_file = fullfile(data_dir, [grain_id '_ebsd_pixel_data.csv']);
     writetable(T, csv_file);
 
@@ -339,6 +445,23 @@ for g = 1:numel(results)
         fprintf(fid, 'Mean orientation, grain %d (%d px; Bunge phi1, Phi, phi2): %.2f, %.2f, %.2f deg\n', ...
             r.grains.id(k), r.grains.numPixel(k), mp1(k)/degree, mP(k)/degree, mp2(k)/degree);
     end
+    if has_ref
+        [rp1, rP, rp2] = Euler(ref.ori, 'Bunge');
+        in_g = r.ebsd.grainId(:) == ref.grainId;
+        fprintf(fid, '\nReference orientation (%s):\n', ref.source);
+        fprintf(fid, '  point          (%.2f, %.2f) um, grain %d\n', ref.x, ref.y, ref.grainId);
+        fprintf(fid, '  averaged over  %d px (radius %g um, within grain %d)\n', ...
+            ref.n_avg, refm.avg_radius_um, ref.grainId);
+        fprintf(fid, '  Bunge phi1, Phi, phi2: %.2f, %.2f, %.2f deg\n', ...
+            rp1/degree, rP/degree, rp2/degree);
+        fprintf(fid, '  misorientation, reference grain (deg): median %.3f, 95th pct %.3f, max %.3f\n', ...
+            median(ref.misori_deg(in_g), 'omitnan'), prctile(ref.misori_deg(in_g), 95), ...
+            max(ref.misori_deg(in_g)));
+        fprintf(fid, '  misorientation, whole map (deg):       median %.3f, max %.3f\n', ...
+            median(ref.misori_deg, 'omitnan'), ref.misori_max_deg);
+        fprintf(fid, '  color range: 0 to %d deg (%s)\n', ref_cmax, ...
+            ternary(isempty(refmis_cmax_deg), 'map max', 'refmis_cmax_deg'));
+    end
     % --- Cleaning-method comparison (diagnostic, overwritten every run) ---
     cmp_maps_png    = fullfile(diagnostics_dir, [grain_id '_ebsd_cleaning_maps.png']);
     cmp_summary_png = fullfile(diagnostics_dir, [grain_id '_ebsd_cleaning_summary.png']);
@@ -346,6 +469,9 @@ for g = 1:numel(results)
 
     fprintf(fid, '\nOutputs:\n  %s\n  %s\n  %s\n  %s\n  %s\n', grod_png, euler_png, ...
         csv_file, cmp_maps_png, cmp_summary_png);
+    if has_ref
+        fprintf(fid, '  %s\n', ref_png);
+    end
     fclose(fid);
 
     fprintf('%s: %d grains, %d px, GROD max %.2f deg -> %s\n', ...
@@ -825,6 +951,154 @@ function h = draw_categorical(ax, G, S, colors, names)
         h(k) = patch(ax, NaN, NaN, colors(k, :), 'EdgeColor', [0.4 0.4 0.4]);
     end
     hold(ax, 'off');
+end
+
+function ref = get_reference(r, ref_file, refm, cmap, font_name)
+% Reference orientation for the reference-misorientation map: reuse a
+% saved pick or click a new one, then read the orientation there from the
+% current cleaned map and measure every pixel against it.
+    action = 'pick';
+    if isfile(ref_file)
+        switch refm.pick
+            case 'reuse', action = 'use';
+            case 'new',   action = 'pick';
+            otherwise
+                resp = lower(strtrim(input(sprintf( ...
+                    '%s: saved reference point found (%s).\n  (u)se / (n)ew? [u] ', ...
+                    r.grain_id, ref_file), 's')));
+                if ~startsWith(resp, 'n'), action = 'use'; end
+        end
+    end
+
+    if strcmp(action, 'use')
+        L = load(ref_file, 'pick_xy');
+        pick_xy = L.pick_xy;
+        ref.source = ['loaded from ' ref_file];
+    else
+        pick_xy = pick_reference_point(r, refm, cmap, font_name);
+        grain_id = r.grain_id;  %#ok<NASGU> saved for provenance
+        picked_on = datestr(now, 'yyyy-mm-dd HH:MM:SS'); %#ok<NASGU>
+        save(ref_file, 'pick_xy', 'grain_id', 'picked_on');
+        ref.source = 'picked interactively';
+    end
+
+    % Snap to the nearest pixel of the current cleaned map
+    [k, dmin] = nearest_pixel(r.ebsd, pick_xy);
+    if dmin > 2*r.step_um
+        warning('kyanite_ebsd:referenceMoved', ...
+            '%s: saved reference point is %.1f µm from the nearest pixel of the current cleaned map; using that pixel.', ...
+            r.grain_id, dmin);
+    end
+    ref.x = r.ebsd.x(k);
+    ref.y = r.ebsd.y(k);
+    ref.grainId = r.ebsd.grainId(k);
+
+    % Reference orientation: the picked pixel, or the mean of its grain's
+    % pixels within avg_radius_um (never across a grain boundary)
+    oris = r.ebsd.orientations;
+    if refm.avg_radius_um > 0
+        in = r.ebsd.grainId(:) == ref.grainId & ...
+             hypot(r.ebsd.x(:) - ref.x, r.ebsd.y(:) - ref.y) <= refm.avg_radius_um;
+        ref.ori = mean(oris(in));
+    else
+        in = (1:length(r.ebsd))' == k;
+        ref.ori = oris(k);
+    end
+    ref.n_avg = nnz(in);
+    ref.avg_radius_um = refm.avg_radius_um;
+
+    ref.misori_deg     = angle(oris(:), ref.ori) ./ degree;
+    ref.misori_max_deg = max(ref.misori_deg, [], 'omitnan');
+    fprintf('%s: reference at (%.1f, %.1f) µm, grain %d (%s); misorientation max %.2f deg\n', ...
+        r.grain_id, ref.x, ref.y, ref.grainId, ref.source, ref.misori_max_deg);
+end
+
+function pick_xy = pick_reference_point(r, refm, cmap, font_name)
+% Show the cleaned map (Euler colors | GROD, linked axes) and let the user
+% click the reference point; repeat until accepted. Returns the snapped
+% pixel position (µm).
+    G   = raw_grid(r.ebsd.x(:), r.ebsd.y(:));
+    ind = G.ind(r.ebsd.x(:), r.ebsd.y(:));
+    E = ones(prod(G.sz), 3);
+    E(ind, :) = BungeColorKey(r.ebsd.CS).orientation2color(r.ebsd.orientations);
+    E = reshape(E, [G.sz 3]);
+    M = nan(G.sz);
+    M(ind) = r.grod_deg;
+
+    fig = figure('Name', sprintf('%s — pick reference orientation', r.grain_id), ...
+        'NumberTitle', 'off', 'Color', 'w');
+    set(fig, 'DefaultAxesFontSize', 10, 'DefaultAxesFontName', font_name);
+    ax1 = subplot(1, 2, 1);
+    image(ax1, G.xv, G.yv, E);
+    title(ax1, 'Euler colors', 'FontWeight', 'normal');
+    ax2 = subplot(1, 2, 2);
+    imagesc(ax2, G.xv, G.yv, M, 'AlphaData', ~isnan(M));
+    colormap(ax2, cmap);
+    colorbar(ax2);
+    title(ax2, 'GROD (°)', 'FontWeight', 'normal');
+    for ax = [ax1 ax2]
+        axis(ax, 'image');
+        xlabel(ax, 'x (µm)');  ylabel(ax, 'y (µm)');
+    end
+    linkaxes([ax1 ax2]);
+
+    fprintf(['\n%s: pick the reference orientation. Zoom/pan in the figure as needed,\n' ...
+             'then press Enter here and click the reference point on either map.\n'], r.grain_id);
+    h = gobjects(0);
+    while true
+        input('  Press Enter, then click... ', 's');
+        figure(fig);
+        [x, y] = ginput(1);
+        if isempty(x), continue; end
+        [k, dmin] = nearest_pixel(r.ebsd, [x y]);
+        if dmin > 2*G.dx
+            fprintf('  No map pixel there (nearest is %.1f µm away) — try again.\n', dmin);
+            continue
+        end
+        delete(h);
+        pick_xy = [r.ebsd.x(k), r.ebsd.y(k)];
+        mk = {'LineStyle', 'none', 'Marker', refm.marker, 'MarkerSize', refm.marker_size, ...
+              'MarkerFaceColor', refm.marker_color, 'MarkerEdgeColor', 'k'};
+        h = [line(ax1, pick_xy(1), pick_xy(2), mk{:}), line(ax2, pick_xy(1), pick_xy(2), mk{:})];
+        fprintf('  Pixel (%.1f, %.1f) µm, grain %d, GROD %.2f°\n', ...
+            pick_xy(1), pick_xy(2), r.ebsd.grainId(k), r.grod_deg(k));
+        resp = lower(strtrim(input('  Accept? (y = accept, n = repick) [y]: ', 's')));
+        if isempty(resp) || startsWith(resp, 'y'), break; end
+    end
+    close(fig);
+end
+
+function [k, dmin] = nearest_pixel(ebsd, xy)
+% Index of, and distance (µm) to, the EBSD pixel nearest position xy.
+    [dmin, k] = min(hypot(ebsd.x(:) - xy(1), ebsd.y(:) - xy(2)));
+end
+
+function draw_reference_marker(ax, ref, refm)
+% Mark the reference point on an MTEX map (and the averaging circle, if
+% the reference is a neighbourhood mean). MTEX map axes use the EBSD x/y
+% (µm) as data coordinates, so plain line() lands on the right pixel.
+    hold(ax, 'on');
+    if ref.avg_radius_um > 0
+        t = linspace(0, 2*pi, 181);
+        line(ax, ref.x + ref.avg_radius_um*cos(t), ref.y + ref.avg_radius_um*sin(t), ...
+            'Color', 'k', 'LineWidth', 1);
+    end
+    line(ax, ref.x, ref.y, 'LineStyle', 'none', 'Marker', refm.marker, ...
+        'MarkerSize', refm.marker_size, 'MarkerFaceColor', refm.marker_color, ...
+        'MarkerEdgeColor', 'k', 'LineWidth', 1);
+    hold(ax, 'off');
+end
+
+function inset_colorbar(fig, font_size)
+% Pull a full-width horizontal colorbar's ends in, so a tick label centred
+% on either end of the bar (e.g. "0", or the max) isn't cut off at the
+% figure edge. Call after fit_title, which pins MTEX's layout in place.
+    cb = findobj(fig, 'Type', 'ColorBar');
+    for k = 1:numel(cb)
+        cb(k).Units = 'pixels';
+        m = 1.5*font_size;
+        cb(k).Position = cb(k).Position + [m 0 -2*m 0];
+    end
 end
 
 function fit_title(fig, ax)

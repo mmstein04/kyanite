@@ -26,7 +26,7 @@ grain → extract per-pixel CL vs. chemistry data → scatter/violin/box plots.
 | `CL_EPMA_registration.m` | MATLAB | Full registration + analysis pipeline (see workflow below) |
 | `CL_region_extraction.m` | MATLAB | Draw named sub-grain polygon regions on an already-registered CL image and extract per-pixel CL + element data per region (no re-registration) |
 | `CL_mask_edit.m` | MATLAB | After-the-fact touch-up of a grain mask already produced by `CL_EPMA_registration.m` (e.g. an inclusion was masked-in, or real grain was masked-out weeks earlier) — draw add/remove polygons on the already-registered CL image, then re-derive pixel data and downstream figures under the corrected mask |
-| `kyanite_ebsd.m` | MATLAB (MTEX) | Batch EBSD processing of each grain's Oxford/HKL `.ctf` map: MAD filter, then one of two selectable cleaning methods (`'mtex'` small-grain drop + `fill()`, or `'channel5'` HKL Channel 5–style wild-spike removal + n-nearest-neighbour fill), then GROD (grain reference orientation deviation) for every kyanite grain — GROD map, per-pixel CSV, log, and a method-comparison diagnostic pair. Standalone: not registered to the EPMA/CL pixel grid |
+| `kyanite_ebsd.m` | MATLAB (MTEX) | Batch EBSD processing of each grain's Oxford/HKL `.ctf` map: MAD filter, then one of two selectable cleaning methods (`'mtex'` small-grain drop + `fill()`, or `'channel5'` HKL Channel 5–style wild-spike removal + n-nearest-neighbour fill), then GROD (grain reference orientation deviation) for every kyanite grain — GROD map, a misorientation map from an interactively picked reference orientation (marked on the map), per-pixel CSV, log, and a method-comparison diagnostic pair. Standalone: not registered to the EPMA/CL pixel grid |
 | `xanes_ebsd_registration.m` | MATLAB (MTEX) | Place each XANES spot on its grain's EBSD map: `cpselect` CL↔EBSD control points, fit an XRF-µm → EBSD-µm transform (applied to the spot coordinates only — the EBSD data are never warped), read the footprint-mean orientation of the majority grain at each spot, and rotate the beam polarization/propagation vectors into the crystal frame. Outputs `data/<grain_id>_spot_orientation.csv` and `_ebsd_controlpoints.mat`, plus a log and QC PNG in `diagnostics/`. Not yet verified: the beam geometry defaults (`polarization_xrf`/`beam_dir_xrf`) and the triclinic crystal-frame alignment MTEX assigns on `.ctf` load (`X‖a*, Z‖c`) |
 | `CL_local_regression_map.py` | Python | Slide a circular window across an already-registered grain and run a per-pixel CL-vs-element linear regression inside each window, producing continuous slope/R maps that complement `CL_region_extraction.m`'s fixed polygon regions |
 | `kyanite_figures.py` | Python | Standalone figure generation from exported CSV pixel data |
@@ -157,7 +157,23 @@ oscillatory) instead of arbitrary/partial-coverage named ROIs.
    just the largest
 5. Save the GROD map, Euler map (with its color key), per-pixel CSV, and log for the
    **selected** method
-6. **Both** methods are run on every grain every run, so the comparison diagnostics
+6. Optional (`refmis_enable`, default on): **reference-orientation misorientation
+   map** — every grain's reference point is picked interactively (all grains in one
+   sitting, after processing and before any figure is drawn) by clicking on a
+   side-by-side Euler-color | GROD view of the cleaned map; the click snaps to the
+   nearest cleaned pixel and must be accepted (`y`/`n` in the command window). Every
+   pixel's misorientation from that one orientation (MTEX `angle`, symmetry-aware)
+   is mapped like the GROD map (same colormap, boundaries, styling), with the
+   reference marked by `refmis_marker` (default an `ORANG` pentagram, black edge).
+   Only the picked *position* is saved (`data/<grain_id>_ebsd_reference.mat`); the
+   orientation is re-read from the current cleaned map every run, so it follows
+   cleaning-parameter changes. `refmis_avg_radius_um > 0` uses the mean orientation
+   of the picked grain's pixels within that radius instead of one pixel (drawn as a
+   circle). Another grain — or a twin — reads tens of degrees up to 180° from a
+   reference inside one grain, so `refmis_cmax_deg` caps the color scale to show
+   intragrain structure (above-cap values clamp). A grain whose pick fails or is
+   unavailable is skipped with a warning; the rest of its outputs are unaffected
+7. **Both** methods are run on every grain every run, so the comparison diagnostics
    always reflect the current parameters; the non-selected method failing is only a
    warning (its panels show the error). Comparison figures have fixed per-grain
    filenames, so each run overwrites them rather than accumulating copies
@@ -686,9 +702,12 @@ Notes:
   cleaning method); `ebsd/<grain_id>_Euler_map.png` (same cleaned pixels/boundaries,
   colored by MTEX `BungeColorKey` — φ1/Φ/φ2 → R/G/B, Channel 5 style — with the color
   key drawn below the map as one gradient bar per angle, 0 → its fundamental-region
-  max; colors follow `ctf_frame_option` the same way the exported Euler angles do); `data/<grain_id>_ebsd_pixel_data.csv` (`x_um`, `y_um`, Bunge
-  `phi1_deg`/`Phi_deg`/`phi2_deg`, `GROD_deg`, `MAD`, `BC`, `grainId` — `NaN` MAD/BC
-  marks a filled pixel); `diagnostics/<grain_id>_ebsd_log.txt` (method + parameters,
+  max; colors follow `ctf_frame_option` the same way the exported Euler angles do);
+  `ebsd/<grain_id>_ref_misori_map.png` (misorientation from the picked reference,
+  reference marked); `data/<grain_id>_ebsd_reference.mat` (picked reference
+  position, reused on rerun); `data/<grain_id>_ebsd_pixel_data.csv` (`x_um`, `y_um`, Bunge
+  `phi1_deg`/`Phi_deg`/`phi2_deg`, `GROD_deg`, `MAD`, `BC`, `grainId`, plus
+  `RefMisori_deg` when a reference was picked — `NaN` MAD/BC marks a filled pixel); `diagnostics/<grain_id>_ebsd_log.txt` (method + parameters,
   pixel counts per cleaning stage incl. spikes removed and pixels filled per level,
   grain count, GROD stats, per-grain mean orientation);
   `diagnostics/<grain_id>_ebsd_cleaning_maps.png` (2 × 2: GROD map and kept/filled/
@@ -903,6 +922,11 @@ so they carry local functions with the identical values hand-copied in —
 - `grod_shared_scale` (default `false` = each grain's map scaled to its own max;
   `true` = one range pooled across the batch), `grod_cmax_deg` (`[]` = auto; a number
   fixes the upper limit and implies a shared scale)
+- `refmis_enable` (default `true`), `refmis_pick` (`'ask'` default: prompt use
+  saved / pick new; `'reuse'`: saved, else pick; `'new'`: always pick — a
+  non-interactive `-batch` run needs `'reuse'` with a saved pick per grain),
+  `refmis_avg_radius_um` (default `0` = single pixel), `refmis_cmax_deg` (`[]` =
+  each grain's map max), `refmis_marker`/`refmis_marker_size`/`refmis_marker_color`
 - `cmap_blue`, `font_size`, `font_name`, `fig_dpi` — figure styling
 
 **`CL_local_regression_map.py`**
