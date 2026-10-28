@@ -90,7 +90,8 @@ import seaborn as sns
 import tifffile
 from pathlib import Path
 from scipy.stats import gaussian_kde, skew, kurtosis, norm
-from kyanite_palette import BLUE, ORANG, DIVERGING_CMAP, SEQUENTIAL_CMAP, region_colors
+from kyanite_palette import BLUE, ORANG, DIVERGING_CMAP, SEQUENTIAL_CMAP, R2_CMAP, region_colors
+from kyanite_heatmap import annotated_heatmap
 from kyanite_outliers import (saturation_mask as _saturation_mask,
                                 outlier_keep_mask as _outlier_keep_mask)
 
@@ -723,9 +724,7 @@ def summary_metric_values(rdf, metric):
     if metric == 'r':
         return rdf, DIVERGING_CMAP, -1, 1, [-1, -0.5, 0, 0.5, 1], 'Pearson r'
     if metric == 'r2':
-        # Positive half of DIVERGING_CMAP: same reds, no blue (R² >= 0)
-        reds = mcolors.ListedColormap(plt.colormaps[DIVERGING_CMAP](np.linspace(0.5, 1.0, 256)))
-        return rdf ** 2, reds, 0, 1, [0, 0.25, 0.5, 0.75, 1], 'R²'
+        return rdf ** 2, R2_CMAP, 0, 1, [0, 0.25, 0.5, 0.75, 1], 'R²'
     if metric == 'signed_r2':
         return rdf * rdf.abs(), DIVERGING_CMAP, -1, 1, [-1, -0.5, 0, 0.5, 1], 'Signed R²'
     raise ValueError(f"Unknown SUMMARY_METRIC {metric!r}; choose 'r', 'r2', or 'signed_r2'")
@@ -735,29 +734,14 @@ def plot_summary_heatmap(ax, elements, grains, rdf, metric='r'):
     # Metric value only in the cells — per-cell n goes to the console (see
     # caller), not the figure. Colorbar sits below the heatmap.
     vdf, cmap, vmin, vmax, ticks, cbar_label = summary_metric_values(rdf, metric)
-    sns.heatmap(vdf, ax=ax, cmap=cmap, vmin=vmin, vmax=vmax,
-                center=0 if vmin < 0 else None, annot=False,
-                cbar_kws={'label': cbar_label, 'location': 'bottom',
-                          'pad': 0.08, 'shrink': 0.8, 'aspect': 30},
-                linewidths=0.5, linecolor='white')
-    ax.collections[0].colorbar.set_ticks(ticks)
-    for i, grain in enumerate(grains):
-        for j, element in enumerate(elements):
-            v = vdf.iloc[i, j]
-            if pd.isna(v):
-                label, color = 'n/a', 'gray'
-            else:
-                # Tiny negatives (common once r is squared) would print '-0.00'
-                label = f'{v:.2f}'.replace('-0.00', '0.00')
-                # White text on the darkest 40% of the scale either side of 0
-                color = 'white' if abs(v) >= 0.6 * max(abs(vmin), abs(vmax)) else 'black'
-            ax.text(j + 0.5, i + 0.5, label, ha='center', va='center',
-                    fontsize=11, color=color)
-    # Bare element symbol ('Cr_Ka' -> 'Cr'); short enough to sit unrotated
-    ax.set_xticklabels([e.split('_')[0] for e in elements], rotation=0)
+    annotated_heatmap(ax, vdf.values, cmap, vmin, vmax, cbar_label, ticks=ticks)
+    # Bare element symbol ('Cr_Ka' -> 'Cr')
+    ax.set_xticks(range(len(elements)))
+    ax.set_xticklabels([e.split('_')[0] for e in elements])
+    ax.set_yticks(range(len(grains)))
+    ax.set_yticklabels(grains)
     ax.set_xlabel('element')
     ax.set_ylabel('grain')
-    ax.tick_params(axis='y', rotation=0)
 
 
 def element_distribution_stats(elements, grain_dfs):

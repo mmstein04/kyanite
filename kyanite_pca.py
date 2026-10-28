@@ -51,10 +51,10 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from scipy.stats import f_oneway
 from scipy.spatial import ConvexHull
-from matplotlib.colors import ListedColormap
-from kyanite_palette import (BLUE, ORANG, DIVERGING_CMAP, LOADING_CMAP,
+from kyanite_palette import (BLUE, ORANG, R2_CMAP, LOADING_CMAP,
                               element_colors as _element_colors,
                               region_colors as _shared_region_colors)
+from kyanite_heatmap import annotated_heatmap
 from kyanite_outliers import (saturation_mask as _saturation_mask,
                                 outlier_keep_mask as _outlier_keep_mask)
 
@@ -587,33 +587,6 @@ def analyze(df, elements, label, out_dir, data_dir, diagnostics_dir, csv_path, m
     return {'explained': explained, 'loadings': load_df, 'r_cl': r_cl}
 
 
-def _summary_heatmap(ax, values, cmap, vmin, vmax, cbar_label, fig, fmt='.2f'):
-    """Annotated heatmap in the same style as kyanite_figures.py's summary r
-    heatmap: white cell borders, fontsize-11 values, white text where the
-    color is dark (|value| >= 0.6 of the scale), colorbar below."""
-    cmap = plt.colormaps[cmap].copy() if isinstance(cmap, str) else cmap
-    cmap.set_bad('0.85')
-    im = ax.imshow(np.ma.masked_invalid(values), cmap=cmap, vmin=vmin, vmax=vmax, aspect='auto')
-    span = max(abs(vmin), abs(vmax))
-    for i in range(values.shape[0]):
-        for j in range(values.shape[1]):
-            v = values[i, j]
-            if np.isnan(v):
-                ax.text(j, i, 'n/a', ha='center', va='center', fontsize=11, color='gray')
-            else:
-                color = 'white' if abs(v) >= 0.6 * span else 'black'
-                ax.text(j, i, format(v, fmt), ha='center', va='center', fontsize=11, color=color)
-    ax.set_xticks(np.arange(values.shape[1] + 1) - 0.5, minor=True)
-    ax.set_yticks(np.arange(values.shape[0] + 1) - 0.5, minor=True)
-    ax.grid(which='minor', color='white', linewidth=0.5)
-    ax.tick_params(which='minor', length=0)
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-    cbar = fig.colorbar(im, ax=ax, location='bottom', pad=0.08, shrink=0.8, aspect=30)
-    cbar.set_label(cbar_label)
-    return cbar
-
-
 def build_pca_summary_tables(results):
     """From analyze()'s per-grain results: grains x PCs table of R² (= r²)
     of CL vs. each PC's score, each grain's best-CL PC (largest R²), and
@@ -648,12 +621,8 @@ def plot_pca_summary(r2_df, best, load_df):
                                      gridspec_kw={'width_ratios': [n_pc, n_e], 'wspace': 0.08},
                                      sharey=True)
 
-    # White -> red: positive half of DIVERGING_CMAP, the same reds and 0..1
-    # scale as kyanite_figures.py's summary R² heatmap
-    reds = ListedColormap(plt.colormaps[DIVERGING_CMAP](np.linspace(0.5, 1.0, 256)))
-    cbar = _summary_heatmap(ax_r, r2_df.values.astype(float), reds, 0, 1,
-                            'R² (PC score vs. CL)', fig)
-    cbar.set_ticks([0, 0.25, 0.5, 0.75, 1])
+    annotated_heatmap(ax_r, r2_df.values, R2_CMAP, 0, 1, 'R²',
+                      ticks=[0, 0.25, 0.5, 0.75, 1])
     for i, g in enumerate(grains):
         ax_r.add_patch(plt.Rectangle((best[g] - 0.5, i - 0.5), 1, 1, fill=False,
                                      edgecolor='black', linewidth=2, zorder=3, clip_on=False))
@@ -664,9 +633,8 @@ def plot_pca_summary(r2_df, best, load_df):
     ax_r.set_yticklabels(grains)
     ax_r.set_ylabel('grain')
 
-    cbar = _summary_heatmap(ax_l, load_df.values.astype(float), LOADING_CMAP, -1, 1,
-                            'Loading on best-CL PC', fig)
-    cbar.set_ticks([-1, -0.5, 0, 0.5, 1])
+    annotated_heatmap(ax_l, load_df.values, LOADING_CMAP, -1, 1, 'Loading on outlined PC',
+                      ticks=[-1, -0.5, 0, 0.5, 1])
     ax_l.set_xticks(range(n_e))
     ax_l.set_xticklabels([e.split('_')[0] for e in load_df.columns])
     ax_l.set_xlabel('element')

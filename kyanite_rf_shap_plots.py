@@ -31,6 +31,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from sklearn.metrics import mean_squared_error, r2_score
 from kyanite_palette import BLUE, IMPORTANCE_CMAP, SEQUENTIAL_CMAP, element_colors
+from kyanite_heatmap import annotated_heatmap
 
 # =============================================================================
 # PARAMETERS — edit this section for each run
@@ -264,30 +265,6 @@ def build_summary_tables(csv_dir, labels):
     return r2_df, perm_df.reindex(columns=elements), shap_df.reindex(columns=elements)
 
 
-def _annotated_heatmap(ax, values, fmt, vmax, cbar_label, fig):
-    cmap = plt.colormaps[IMPORTANCE_CMAP].copy()
-    cmap.set_bad('0.85')
-    im = ax.imshow(np.ma.masked_invalid(values), cmap=cmap, vmin=0, vmax=vmax, aspect='auto')
-    for i in range(values.shape[0]):
-        for j in range(values.shape[1]):
-            v = values[i, j]
-            if np.isnan(v):
-                ax.text(j, i, 'n/a', ha='center', va='center', fontsize=11, color='gray')
-            else:
-                # same cutoff as the r heatmap's |r| >= 0.6 on a 0..1 scale
-                color = 'white' if v >= 0.6 * vmax else 'black'
-                ax.text(j, i, format(v, fmt), ha='center', va='center', fontsize=11, color=color)
-    # White cell borders, matching kyanite_figures.py's summary r heatmap
-    ax.set_xticks(np.arange(values.shape[1] + 1) - 0.5, minor=True)
-    ax.set_yticks(np.arange(values.shape[0] + 1) - 0.5, minor=True)
-    ax.grid(which='minor', color='white', linewidth=0.5)
-    ax.tick_params(which='minor', length=0)
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-    cbar = fig.colorbar(im, ax=ax, location='bottom', pad=0.08, shrink=0.8, aspect=30)
-    cbar.set_label(cbar_label)
-
-
 def plot_summary(r2_df, perm_df, shap_df):
     """Three panels sharing one row per grain: CV R2 bars (mean +/- std
     across folds), permutation importance heatmap, SHAP share heatmap.
@@ -320,11 +297,11 @@ def plot_summary(r2_df, perm_df, shap_df):
 
     tick_labels = [e.split('_')[0] for e in elements]
     perm_vals = perm_df.values.astype(float)
-    _annotated_heatmap(ax_perm, perm_vals, '.2f', np.nanmax(perm_vals),
-                       'Permutation importance (ΔR²)', fig)
+    annotated_heatmap(ax_perm, perm_vals, IMPORTANCE_CMAP, 0, np.nanmax(perm_vals),
+                      'Permutation importance (ΔR²)')
     shap_vals = shap_df.values.astype(float)
-    _annotated_heatmap(ax_shap, shap_vals, '.0f', np.nanmax(shap_vals),
-                       'Mean |SHAP| (% of grain total)', fig)
+    annotated_heatmap(ax_shap, shap_vals, IMPORTANCE_CMAP, 0, np.nanmax(shap_vals),
+                      'Mean |SHAP| (% of grain total)', fmt='.0f')
     for ax in (ax_perm, ax_shap):
         ax.set_xticks(range(n_e))
         ax.set_xticklabels(tick_labels)

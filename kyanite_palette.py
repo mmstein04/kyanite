@@ -118,6 +118,13 @@ OVERLAY_CMAP = _ListedColormap(
     _mpl_colormaps['viridis'](_np.linspace(*OVERLAY_CMAP_RANGE, 256)),
     name='viridis_light')
 
+# R2_CMAP: white -> red, the positive half of DIVERGING_CMAP — for R²
+# (0..1) in the all-grains summary heatmaps (kyanite_figures.py's 'summary'
+# with SUMMARY_METRIC='r2', kyanite_pca.py's SUMMARY), so a positive
+# correlation with CL reads in the same reds whether shown as r or R².
+R2_CMAP = _ListedColormap(_mpl_colormaps[DIVERGING_CMAP](_np.linspace(0.5, 1.0, 256)),
+                          name='RdBu_r_positive')
+
 # IMPORTANCE_CMAP: single-hue white -> purple for the all-grains RF/SHAP
 # importance summary heatmaps (kyanite_rf_shap_plots.py's 'summary'). Not
 # DIVERGING_CMAP's reds or blues on purpose: that summary sits next to

@@ -580,7 +580,12 @@ Notes:
   new summary figure of this kind should do the same. Exception by design:
   `kyanite_spot_analysis.py`'s cross-grain figures (pie grid, centroid
   histogram/panel, pooled scatter/PCA/centroid-vs-orientation) stay in
-  `figs/spot_analysis/` with the rest of that analysis family
+  `figs/spot_analysis/` with the rest of that analysis family. All three
+  summaries draw their heatmaps through the shared
+  `kyanite_heatmap.annotated_heatmap()` (cell values, white cell borders,
+  white-on-dark text cutoff, `n/a` cells, colorbar below) rather than each
+  carrying its own copy, so their styling can't drift apart — a new summary
+  heatmap should use it too.
   `kyanite_sample_size_convergence.py` is the one exception: it's itself a
   diagnostic (not a pipeline step), so it has no dedicated analysis-family
   folder at all — its raw sweep CSV, convergence figures, and log all go to
@@ -795,6 +800,11 @@ so they carry local functions with the identical values hand-copied in —
   (`CENTROID_CMAP`). (The centroid is an absolute energy, not a signed or
   zero-centered quantity, so it takes a sequential colormap rather than
   `DIVERGING_CMAP`.)
+- **R² colormap** (`kyanite_palette.R2_CMAP`) — white → red, the positive half
+  of `DIVERGING_CMAP`, 0..1, for R² in the all-grains summary heatmaps
+  (`kyanite_figures.py`'s `summary` with `SUMMARY_METRIC = 'r2'`, the left panel
+  of `kyanite_pca.py`'s `SUMMARY`), so a correlation with CL reads in the same
+  reds whether shown as r or R²
 - **Importance colormap** (`kyanite_palette.IMPORTANCE_CMAP = 'Purples'`) —
   single-hue white → purple for `kyanite_rf_shap_plots.py`'s all-grains
   `summary` importance heatmaps. Deliberately neither of `DIVERGING_CMAP`'s
