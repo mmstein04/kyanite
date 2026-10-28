@@ -999,6 +999,11 @@ so they carry local functions with the identical values hand-copied in —
 - `RATIOS` — list of `(numerator, denominator)` element symbol pairs to render as ratio maps
   (e.g. `('Cr', 'V')`); `[]` disables ratio maps
 - `CMAP` — defaults to `kyanite_palette.SEQUENTIAL_CMAP` (`'inferno'`)
+- `SHOW_TITLE` (default `False`) — no figure title; the colorbar label names the
+  quantity instead: `<El> Kα (<units>)` for element maps, `<El> Kα / <El> Kα` for
+  ratio maps (unitless). Units are derived from the sidecar's `normalized_by` line
+  (e.g. I₀ → `counts / I₀`); `COLORBAR_UNITS` is the warned fallback.
+  `CBAR_LABEL_FONTSIZE` sets the label size
 - `SATURATION_FILTER`/`SATURATION_BAND_FRAC`/`SATURATION_MIN_FRAC`/`SATURATION_MIN_COUNT` and
   `MAD_K_LO`/`MAD_K_HI` (default `None`/`4`) — same saturation + MAD outlier logic as
   `kyanite_figures.py`'s `OUTLIER_METHOD='mad'` default, but used only to set the imshow

@@ -57,6 +57,15 @@ CMAP          = SEQUENTIAL_CMAP   # project convention for continuous-intensity 
 BKGD_COLOR    = 'black'
 FONT_COLOR    = 'white'
 SHOW_COLORBAR = True
+SHOW_TITLE    = False   # poster style: no title, the colorbar label names the quantity
+CBAR_LABEL_FONTSIZE = 12
+
+# Colorbar unit for element maps. By default this is read from the metadata
+# sidecar's normalized_by line (I0 → 'counts / I₀', etc.), so the label can't
+# disagree with how the map was actually exported. COLORBAR_UNITS is only the
+# fallback (with a warning) if no sidecar is found/parseable. Ratio maps are
+# unitless (the normalization cancels), so they're labeled by the ratio alone.
+COLORBAR_UNITS = 'counts / I₀'
 
 # Outlier/contrast-scaling conventions — same two-stage logic as
 # kyanite_figures.py's default (OUTLIER_METHOD='mad', MAD_K_HI=4), just
@@ -122,6 +131,28 @@ def read_pixel_um_from_sidecar(tif_path):
         return None
     m = _SIDECAR_PIXEL_UM_RE.search(sidecar.read_text())
     return float(m.group(1)) if m else None
+
+
+_SIDECAR_NORM_RE = re.compile(r'normalized_by\s*:\s*(.+)')
+
+
+def read_units_from_sidecar(tif_path):
+    """Colorbar unit string from the sidecar's normalized_by line (written by
+    xrf_h5_to_tiff.py: 'clock (...)', 'I0 (...)', both joined by ' and ', or
+    'none (...)'). None if the sidecar is missing or the field can't be parsed."""
+    sidecar = tif_path.with_suffix('.txt')
+    if not sidecar.exists():
+        return None
+    m = _SIDECAR_NORM_RE.search(sidecar.read_text())
+    if not m:
+        return None
+    norm = m.group(1)
+    units = 'counts'
+    if 'clock' in norm:
+        units += ' / clock'
+    if 'I0' in norm:
+        units += ' / I₀'
+    return units
 
 
 def discover_grain_ids():
@@ -197,7 +228,8 @@ def display_range(x, label, mad_k_lo, mad_k_hi):
     return max(0.0, float(inliers.min())), float(inliers.max())
 
 
-def render_and_save_map(grain_id, label, filename_tag, img, mask, grain_px_um, mad_k_lo, mad_k_hi):
+def render_and_save_map(grain_id, label, filename_tag, img, mask, grain_px_um, mad_k_lo, mad_k_hi,
+                        cbar_label):
     """Renders one masked, contrast-scaled map (element or ratio) in the
     project's standard style and optionally exports it as a PNG. Shared by
     both the element and ratio display loops so their look never drifts."""
@@ -220,12 +252,14 @@ def render_and_save_map(grain_id, label, filename_tag, img, mask, grain_px_um, m
 
     ax.set_aspect('equal')
     ax.axis('off')
-    ax.set_title(f'{grain_id}  {label}', color=FONT_COLOR)
+    if SHOW_TITLE:
+        ax.set_title(f'{grain_id} — {label}', color=FONT_COLOR)
 
     if SHOW_COLORBAR:
         cb = fig.colorbar(im, ax=ax)
         cb.ax.tick_params(colors=FONT_COLOR)
         cb.outline.set_edgecolor(FONT_COLOR)
+        cb.set_label(cbar_label, color=FONT_COLOR, fontsize=CBAR_LABEL_FONTSIZE)
 
     if SHOW_SCALEBAR:
         sb_px = SCALEBAR_UM / grain_px_um
@@ -287,6 +321,7 @@ def main():
         elements_to_load = list(dict.fromkeys(ELEMENTS + ratio_components))
 
         imgs = {}
+        units = {}
         sidecar_px_um, sidecar_source = None, None
         for el in elements_to_load:
             fn = MAPS_DIR / grain_id / f'{grain_id}_{el}_Ka.tif'
@@ -294,6 +329,11 @@ def main():
                 print(f'  WARNING: {grain_id}: element map not found ({fn.name}) — skipping.')
                 continue
             imgs[el] = tifffile.imread(str(fn)).astype(np.float64)
+            units[el] = read_units_from_sidecar(fn)
+            if units[el] is None:
+                print(f'  WARNING: {grain_id}: no normalization found in {fn.name} sidecar — '
+                      f'labeling colorbar with COLORBAR_UNITS={COLORBAR_UNITS!r}')
+                units[el] = COLORBAR_UNITS
             if PIXEL_UM_FROM_SIDECAR and sidecar_px_um is None:
                 found = read_pixel_um_from_sidecar(fn)
                 if found is not None:
@@ -314,8 +354,9 @@ def main():
                 continue
             img = imgs[el].copy()
             img[~mask] = np.nan
-            render_and_save_map(grain_id, f'{el}_Ka', f'{el}_Ka', img, mask,
-                                 grain_px_um, MAD_K_LO, MAD_K_HI)
+            render_and_save_map(grain_id, f'{el} Kα', f'{el}_Ka', img, mask,
+                                 grain_px_um, MAD_K_LO, MAD_K_HI,
+                                 cbar_label=f'{el} Kα ({units[el]})')
 
         # Plot element ratios
         for num_el, den_el in RATIOS:
@@ -330,7 +371,8 @@ def main():
             label = f'{num_el}/{den_el}'
             filename_tag = f'{num_el}_{den_el}_ratio'
             render_and_save_map(grain_id, label, filename_tag, ratio_img, mask,
-                                 grain_px_um, RATIO_MAD_K_LO, RATIO_MAD_K_HI)
+                                 grain_px_um, RATIO_MAD_K_LO, RATIO_MAD_K_HI,
+                                 cbar_label=f'{num_el} Kα / {den_el} Kα')
 
 
 if __name__ == '__main__':
